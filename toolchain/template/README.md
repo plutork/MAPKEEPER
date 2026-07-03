@@ -1,8 +1,10 @@
 # GitHub world template
 
-**Author onboarding (chosen):** [GitHub Template repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template).
+**Author onboarding (interim):** [GitHub Template repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template).
 
 Authors click **Use this template** — no manual copy from `toolchain/cursor/`.
+
+Long-term primary UX for writers: **editor wizard «New world»** (same scaffold bundle).
 
 ## Author flow
 
@@ -11,37 +13,42 @@ Authors click **Use this template** — no manual copy from `toolchain/cursor/`.
 3. Clone or open in Cursor.
 4. **`/user`** is already installed; folders `map/`, `canon/`, `profiles/`, `data/`, `journal/` are ready.
 
-## Source of truth (maintainers)
+## Source of truth
 
-Canonical scaffold files live in **`world/`** in this directory.
+Canonical scaffold: **`world/`** in this directory.
 
-Publish to the public template repo:
+Published to: [github.com/plutork/mapkeeper-world-template](https://github.com/plutork/mapkeeper-world-template) (repo root).
 
-```
-MAPKEEPER/toolchain/template/world/  →  github.com/plutork/mapkeeper-world-template  (repo root)
-```
+## Sync (automated — do not hand-copy)
 
-After editing `world/` here:
+### CI (default)
 
-1. Copy contents of `world/` to the `mapkeeper-world-template` repo root.
-2. Commit and push.
-3. On GitHub: repo **Settings → General → Template repository** ✓
+On push to `main` when `toolchain/template/world/**` changes, GitHub Actions runs [`.github/workflows/sync-world-template.yml`](../../.github/workflows/sync-world-template.yml) and pushes to `mapkeeper-world-template`.
 
-PowerShell example (repos side by side):
+**One-time setup** (maintainer):
+
+1. Create public repo `plutork/mapkeeper-world-template`; enable **Template repository** in Settings.
+2. In **MAPKEEPER** repo → Settings → Secrets → Actions → add `MAPKEEPER_WORLD_TEMPLATE_PAT`  
+   Fine-grained PAT: **Contents: Read and write** on `mapkeeper-world-template` only.
+3. Push scaffold once (or run workflow manually: Actions → Sync world template → Run workflow).
+
+Agents edit **`world/` only** — CI publishes the template repo.
+
+### Local script (optional)
 
 ```powershell
-robocopy "c:\projects\MAPKEEPER\toolchain\template\world" "c:\projects\mapkeeper-world-template" /MIR /XD .git
-Set-Location "c:\projects\mapkeeper-world-template"
-git add -A
-git commit -m "Sync from MAPKEEPER toolchain template."
-git push
+Set-Location "c:\projects\MAPKEEPER"
+.\toolchain\template\sync-template.ps1 -Push
 ```
+
+Sibling clone default: `..\mapkeeper-world-template`. Override with `-TargetRepoPath`. Use `-DryRun` to preview.
 
 ## Legacy (dogfood only)
 
-Manual copy from [../cursor/user.md](../cursor/user.md) — not for end authors. See [../cursor/README.md](../cursor/README.md).
+Manual copy from [../cursor/user.md](../cursor/user.md) — not for end authors.
 
 ## Later
 
-- Genre templates (`world-lore/`, …) as separate GitHub template repos
+- Same `world/` bundle packaged in editor wizard (V0)
+- Genre templates as separate GitHub template repos
 - CLI `mapkeeper init` may wrap the same scaffold

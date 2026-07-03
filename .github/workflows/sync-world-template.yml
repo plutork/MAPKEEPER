@@ -1,0 +1,57 @@
+# Mirror toolchain/template/world/ → plutork/mapkeeper-world-template
+# Requires repo secret: MAPKEEPER_WORLD_TEMPLATE_PAT (contents:write on template repo)
+
+name: Sync world template
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "toolchain/template/world/**"
+      - "toolchain/template/sync-template.ps1"
+      - "LICENSE"
+      - ".github/workflows/sync-world-template.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout MAPKEEPER
+        uses: actions/checkout@v4
+
+      - name: Clone template repo
+        env:
+          TOKEN: ${{ secrets.MAPKEEPER_WORLD_TEMPLATE_PAT }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Missing secret MAPKEEPER_WORLD_TEMPLATE_PAT (fine-grained PAT with contents:write on plutork/mapkeeper-world-template)."
+            exit 1
+          fi
+          git clone "https://x-access-token:${TOKEN}@github.com/plutork/mapkeeper-world-template.git" template-repo
+
+      - name: Mirror scaffold
+        run: |
+          rsync -a --delete \
+            --exclude .git \
+            toolchain/template/world/ \
+            template-repo/
+          cp LICENSE template-repo/LICENSE
+
+      - name: Commit and push if changed
+        env:
+          TOKEN: ${{ secrets.MAPKEEPER_WORLD_TEMPLATE_PAT }}
+        run: |
+          cd template-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "Template repo already up to date."
+            exit 0
+          fi
+          git commit -m "Sync scaffold from MAPKEEPER@${GITHUB_SHA}"
+          git push "https://x-access-token:${TOKEN}@github.com/plutork/mapkeeper-world-template.git" HEAD:main
