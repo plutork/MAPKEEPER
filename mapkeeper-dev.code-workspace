@@ -1,0 +1,13 @@
+{
+  "folders": [
+    {
+      "path": ".",
+      "name": "mapkeeper"
+    },
+    {
+      "path": "../MAPKEEPER-OS",
+      "name": "maintainer-os"
+    }
+  ],
+  "settings": {}
+}

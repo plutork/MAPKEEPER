@@ -1,0 +1,5 @@
+# Maintainer paths — live in MAPKEEPER-OS (private), not this repo
+.cursor/commands/product.md
+.cursor/commands/reflect.md
+.cursor/rules/mapkeeper-core.md
+.cursor/agents/product/
