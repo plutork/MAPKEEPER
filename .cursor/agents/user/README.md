@@ -1,3 +1,3 @@
-# Author agent templates (shipped with mapkeeper)
+# Author agent templates
 
-Copy `toolchain/cursor/user.md` into your world repo. See README there.
+Shipped with mapkeeper for **world workspaces**. Copy [toolchain/cursor/user.md](../../toolchain/cursor/user.md) into your world repo as `.cursor/commands/user.md`.

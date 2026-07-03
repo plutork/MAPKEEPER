@@ -6,25 +6,22 @@ The map is not only a picture — it is the interface to a machine-readable worl
 
 ## Docs
 
-- **[STARTER_PACK.md](STARTER_PACK.md)** — product concept (Part A) and agent OS overview (Part B).
-- **[docs/ROADMAP-DECISIONS.md](docs/ROADMAP-DECISIONS.md)** — preliminary decision roadmap (Shape queue).
+- **[STARTER_PACK.md](STARTER_PACK.md)** — product pitch, invariants, milestones.
 
-## Development (maintainers)
+## Getting started
 
-Maintainer agent OS lives in a **separate private repo**: [MAPKEEPER-OS](https://github.com/plutork/MAPKEEPER-OS).
+Open this repo in Cursor when you work on mapkeeper itself or read the product concept.
 
-Clone both repos side by side, then open **`MAPKEEPER-OS/mapkeeper-dev.code-workspace`** in Cursor (multi-root). This public repo does not ship that workspace file.
-
-## Using this repo (authors / contributors)
-
-Open the **`MAPKEEPER`** folder in Cursor — no extra workspace file required.
+For a **world / lore project**, use a separate workspace (your world repo). Install the author command from [toolchain/cursor/](toolchain/cursor/).
 
 ## Author toolchain
 
-Templates for **world / author** workspaces (not installed here by default):
+Copy into your **world workspace** (not this repo):
 
-- [toolchain/cursor/user.md](toolchain/cursor/user.md) — copy to your world repo as `.cursor/commands/user.md`
+- [toolchain/cursor/user.md](toolchain/cursor/user.md) → `your-world/.cursor/commands/user.md`
+
+See [toolchain/cursor/README.md](toolchain/cursor/README.md).
 
 ## Status
 
-IDEA + Shape. Public repo = ready kit for users; maintainer memory is not committed here.
+IDEA + Shape — product kit and author templates. Editor and data contracts ship here as V0 progresses.

@@ -1,4 +1,4 @@
-# Maintainer paths — live in MAPKEEPER-OS (private), not this repo
+# Local Cursor paths not shipped in this repo
 .cursor/commands/product.md
 .cursor/commands/reflect.md
 .cursor/rules/mapkeeper-core.md

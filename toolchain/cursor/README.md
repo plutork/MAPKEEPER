@@ -6,4 +6,4 @@ Copy to your **world workspace** (not the mapkeeper product repo):
 world-repo/.cursor/commands/user.md
 ```
 
-See STARTER_PACK.md Part B §B4.
+Paste contents from [user.md](user.md). The `/user` command helps Cursor act as an **author** stress-testing mapkeeper — not as a builder of the editor.
