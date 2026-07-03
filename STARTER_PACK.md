@@ -2,7 +2,7 @@ Status: IDEA + agent OS (single file)
 
 Product concept pack for **mapkeeper** — standalone, no consumer vault assumed.
 
-**Maintainers:** agent commands and product memory live in private [MAPKEEPER-OS](https://github.com/plutork/MAPKEEPER-OS). Open `mapkeeper-dev.code-workspace` (multi-root). This public repo ships the product kit and author toolchain templates only.
+**Maintainers:** agent commands and product memory live in private [MAPKEEPER-OS](https://github.com/plutork/MAPKEEPER-OS). Open `MAPKEEPER-OS/mapkeeper-dev.code-workspace` (multi-root; maintainer-only). This public repo ships the product kit and author toolchain templates only.
 
 | Part | Contents |
 |------|----------|

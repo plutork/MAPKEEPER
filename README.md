@@ -13,7 +13,11 @@ The map is not only a picture — it is the interface to a machine-readable worl
 
 Maintainer agent OS lives in a **separate private repo**: [MAPKEEPER-OS](https://github.com/plutork/MAPKEEPER-OS).
 
-Open **`mapkeeper-dev.code-workspace`** in Cursor (multi-root: this repo + MAPKEEPER-OS).
+Clone both repos side by side, then open **`MAPKEEPER-OS/mapkeeper-dev.code-workspace`** in Cursor (multi-root). This public repo does not ship that workspace file.
+
+## Using this repo (authors / contributors)
+
+Open the **`MAPKEEPER`** folder in Cursor — no extra workspace file required.
 
 ## Author toolchain
 
