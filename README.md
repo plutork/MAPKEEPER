@@ -6,9 +6,11 @@ The map is not only a picture — it is the interface to a machine-readable worl
 
 ## Create your world
 
-**[Use this template on GitHub → mapkeeper-world-template](https://github.com/plutork/mapkeeper-world-template/generate)**
+**Now (early access):** [GitHub template](https://github.com/plutork/mapkeeper-world-template/generate) — for authors comfortable with git.
 
-New repo in one step: map, canon, profiles, data folders, `mapkeeper.toml`, and Cursor **`/user`** — open **that** folder in Cursor, not this product repo.
+**Target UX (V0):** open mapkeeper → **New world** — pre-configured agents and folders, no git required.
+
+Details: [toolchain/template/README.md](toolchain/template/README.md).
 
 ## Docs
 

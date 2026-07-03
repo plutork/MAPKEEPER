@@ -20,6 +20,8 @@ Default: **Shape** — questions and tradeoffs first; no file trees / schemas / 
 
 **mapkeeper** is a generic **local** world editor built for the age of AI agents.
 
+**Target author:** writer / game master — not a developer. Pre-configured agents and project layout help them build worlds without reading editor source or using git.
+
 Authors create or import a map, divide it into **addressable cells**, attach **structured canon** to places, **track how canon changes across time**, and expose the **same data** to Cursor agents through commands, schemas, validation, and **queryable profiles**.
 
 **The map is not only a picture. It is the interface to a machine-readable world.**
