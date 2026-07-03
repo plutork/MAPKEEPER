@@ -1,5 +1,2 @@
-# Local Cursor paths not shipped in this repo
-.cursor/commands/product.md
-.cursor/commands/reflect.md
-.cursor/rules/mapkeeper-core.md
-.cursor/agents/product/
+# Local Cursor config — install from toolchain/ into world repos, not here
+.cursor/

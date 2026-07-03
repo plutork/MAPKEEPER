@@ -12,15 +12,17 @@ The map is not only a picture — it is the interface to a machine-readable worl
 
 Open this repo in Cursor when you work on mapkeeper itself or read the product concept.
 
-For a **world / lore project**, use a separate workspace (your world repo). Install the author command from [toolchain/cursor/](toolchain/cursor/).
+For a **world / lore project**, use a separate workspace. Install author tooling from **[toolchain/](toolchain/)** (start with [toolchain/cursor/](toolchain/cursor/) for `/user`).
 
 ## Author toolchain
 
-Copy into your **world workspace** (not this repo):
+Shipped under [toolchain/](toolchain/) — copy into your **world repo**, not here:
 
-- [toolchain/cursor/user.md](toolchain/cursor/user.md) → `your-world/.cursor/commands/user.md`
+| Template | Install to |
+|----------|------------|
+| [toolchain/cursor/user.md](toolchain/cursor/user.md) | `your-world/.cursor/commands/user.md` |
 
-See [toolchain/cursor/README.md](toolchain/cursor/README.md).
+See [toolchain/README.md](toolchain/README.md).
 
 ## License
 
