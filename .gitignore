@@ -1,2 +1,2 @@
-# Local Cursor config — install from toolchain/ into world repos, not here
-.cursor/
+# Cursor config at product repo root only — world template ships .cursor/commands under toolchain/
+/.cursor/
