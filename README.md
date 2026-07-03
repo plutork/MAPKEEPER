@@ -22,6 +22,10 @@ Copy into your **world workspace** (not this repo):
 
 See [toolchain/cursor/README.md](toolchain/cursor/README.md).
 
+## License
+
+[Apache License 2.0](LICENSE).
+
 ## Status
 
 IDEA + Shape — product kit and author templates. Editor and data contracts ship here as V0 progresses.

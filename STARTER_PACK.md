@@ -59,7 +59,7 @@ Authors create or import a map, divide it into **addressable cells**, attach **s
 
 - Repository layout, CSV/JSON schemas, cell_id format, coordinate system
 - UI stack, renderer, brushes, temporal model, adapter contract
-- License, package name, demo world content
+- Package name, demo world content
 
 ---
 
