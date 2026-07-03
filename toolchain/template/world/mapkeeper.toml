@@ -1,0 +1,8 @@
+# mapkeeper world project (schema TBD at V0)
+
+[world]
+name = "my-world"
+version = "0.1.0"
+
+# [mapkeeper]
+# min_editor_version = "0.1.0"

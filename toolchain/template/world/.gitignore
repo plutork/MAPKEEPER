@@ -1,0 +1,7 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.local
+
+# DB local journals (keep structure, ignore heavy dumps if needed)
+# data/*.sqlite-journal

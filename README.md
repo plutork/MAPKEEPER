@@ -4,25 +4,21 @@ Generic **local** world editor built for the age of AI agents.
 
 The map is not only a picture — it is the interface to a machine-readable world.
 
+## Create your world
+
+**[Use this template on GitHub → mapkeeper-world-template](https://github.com/plutork/mapkeeper-world-template/generate)**
+
+New repo in one step: map, canon, profiles, data folders, `mapkeeper.toml`, and Cursor **`/user`** — open **that** folder in Cursor, not this product repo.
+
 ## Docs
 
 - **[STARTER_PACK.md](STARTER_PACK.md)** — product pitch, invariants, milestones.
 
-## Getting started
+## This repo (product)
 
-Open this repo in Cursor when you work on mapkeeper itself or read the product concept.
+Clone MAPKEEPER when you work on **mapkeeper itself** (editor, schemas, contracts) — not when you write lore.
 
-For a **world / lore project**, use a separate workspace. Install author tooling from **[toolchain/](toolchain/)** (start with [toolchain/cursor/](toolchain/cursor/) for `/user`).
-
-## Author toolchain
-
-Shipped under [toolchain/](toolchain/) — copy into your **world repo**, not here:
-
-| Template | Install to |
-|----------|------------|
-| [toolchain/cursor/user.md](toolchain/cursor/user.md) | `your-world/.cursor/commands/user.md` |
-
-See [toolchain/README.md](toolchain/README.md).
+Maintainers and contributors: see source and [toolchain/](toolchain/).
 
 ## License
 
@@ -30,4 +26,4 @@ See [toolchain/README.md](toolchain/README.md).
 
 ## Status
 
-IDEA + Shape — product kit and author templates. Editor and data contracts ship here as V0 progresses.
+IDEA + Shape — editor and data contracts ship here as V0 progresses. World projects use the GitHub template above.
