@@ -7,6 +7,7 @@ The map is not only a picture — it is the interface to a machine-readable worl
 ## Docs
 
 - **[STARTER_PACK.md](STARTER_PACK.md)** — product concept (Part A) and agent OS overview (Part B).
+- **[docs/ROADMAP-DECISIONS.md](docs/ROADMAP-DECISIONS.md)** — preliminary decision roadmap (Shape queue).
 
 ## Development (maintainers)
 
