@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/plutork/MAPKEEPER/schemas/cell-profile.schema.json",
+  "title": "mapkeeper cell profile (V0)",
+  "description": "Per-cell profile JSON — mirrors crates/core/src/profile.rs::CellProfile. Minimal writer/GM fields only (roadmap 3.2, decision D-22); no canon/tags/timestamps in V0.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cell_id", "display_name"],
+  "properties": {
+    "cell_id": {
+      "type": "string",
+      "description": "Canonical key: {world_id}.hex.q{q}.r{r} — must match the filename stem.",
+      "pattern": "^[a-z0-9_-]+\\.hex\\.q-?[0-9]+\\.r-?[0-9]+$"
+    },
+    "display_name": {
+      "type": "string",
+      "description": "Human-readable place name shown to the author."
+    },
+    "slug": {
+      "type": "string",
+      "description": "Optional short id for agents — not the primary key."
+    },
+    "notes": {
+      "type": "string",
+      "default": "",
+      "description": "Free text stub for V0 — real canon fields/format are Later."
+    }
+  }
+}
