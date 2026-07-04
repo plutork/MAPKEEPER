@@ -1,2 +1,4 @@
-# Cursor config at product repo root only — world template ships .cursor/commands under toolchain/
-/.cursor/
+# Cursor at repo root — ignore except tracked agent skills (D-18)
+/.cursor/*
+!/.cursor/skills/
+!/.cursor/skills/**
