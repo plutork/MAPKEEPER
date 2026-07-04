@@ -36,7 +36,8 @@ Until decided: prefer **warn on save, block on CI** for schema tests — propose
 
 ## Files
 
-- Schema: `schemas/` in this repo (layout TBD — agree in `/idea repo layout`).
+- Schema: `schemas/` in this repo (layout fixed — D-20 Cargo workspace).
+- Rust model: `crates/core/src/profile.rs` (`CellProfile`) — schema here is the source of truth; keep the Rust struct in sync.
 - World instances: author world repo `profiles/` — not in product repo.
 
 ## Gate

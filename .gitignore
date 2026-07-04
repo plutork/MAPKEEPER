@@ -2,3 +2,14 @@
 /.cursor/*
 !/.cursor/skills/
 !/.cursor/skills/**
+
+# Rust (D-20)
+/target/
+**/target/
+
+# WASM build output (crates/web)
+crates/web/pkg/
+crates/web/dist/
+
+# e2e/dev tooling (tests/) — Node dev-only, not product runtime
+tests/node_modules/

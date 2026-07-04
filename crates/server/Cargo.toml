@@ -1,0 +1,12 @@
+[package]
+name = "mapkeeper-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mapkeeper-server"
+path = "src/main.rs"
+
+[dependencies]
+mapkeeper-core = { path = "../core" }

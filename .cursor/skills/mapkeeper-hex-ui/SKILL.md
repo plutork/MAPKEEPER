@@ -4,7 +4,7 @@ description: >-
   Local web UI for mapkeeper hex map editor — writer/GM UX, intentional design,
   hex canvas patterns. Use when building or restyling src/ editor UI, map
   renderer, or wizard screens.
-paths: src/**
+paths: crates/web/**
 ---
 
 # Hex map UI (mapkeeper V0)
@@ -23,6 +23,12 @@ paths: src/**
 2. **Hex blank map** — manual paint cells.
 3. Per-cell profile edit → JSON under `profiles/`.
 4. No canon editor, no import, no git required.
+
+## Stack (D-20)
+
+`crates/web` — Rust → WASM (Leptos/Yew/Dioxus TBD); calls `mapkeeper-core`
+for hex/validation logic, calls `mapkeeper-server`/Tauri-adapter for
+filesystem. No direct FS access from this crate.
 
 ## Design discipline *(from frontend-design, compressed)*
 
