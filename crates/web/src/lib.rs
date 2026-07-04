@@ -3,9 +3,10 @@
 //! FS access. WASM framework choice: none — plain `wasm-bindgen` + `web-sys`
 //! canvas, deliberately minimal for the flow-first pass (roadmap D-21).
 //!
-//! Flow: render a blank hex grid -> click a cell -> edit a placeholder
-//! profile (title + notes) -> save -> cell is "painted". No real cell
-//! schema (roadmap 3.2) yet — that is the point of this pass.
+//! Flow: Home screen lists/creates worlds (roadmap D-12/5.7 launcher) ->
+//! open a world -> render a blank hex grid -> click a cell -> edit a
+//! placeholder profile (title + notes) -> save -> cell is "painted". No
+//! real cell schema (roadmap 3.2) yet — that is the point of this pass.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -16,7 +17,7 @@ use mapkeeper_core::profile::CellProfile;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, HtmlTextAreaElement};
+use web_sys::{CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlInputElement, HtmlTextAreaElement};
 
 const RADIUS: i32 = 6;
 const HEX_SIZE: f64 = 34.0;
@@ -41,6 +42,38 @@ struct ProfileInput {
     notes: String,
 }
 
+#[derive(Deserialize)]
+struct ProjectEntry {
+    #[allow(dead_code)]
+    id: String,
+    #[allow(dead_code)]
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct ProjectStatus {
+    id: String,
+    path: String,
+    valid: bool,
+}
+
+#[derive(Deserialize)]
+struct ProjectsResponse {
+    active: Option<ProjectEntry>,
+    projects: Vec<ProjectStatus>,
+}
+
+#[derive(Serialize)]
+struct CreateProjectInput<'a> {
+    id: &'a str,
+    path: &'a str,
+}
+
+#[derive(Serialize)]
+struct OpenProjectInput<'a> {
+    path: &'a str,
+}
+
 struct AppState {
     cells: HashMap<(i32, i32), String>,
     selected: Option<(i32, i32)>,
@@ -56,8 +89,11 @@ pub fn start() {
     attach_canvas_click(state.clone());
     attach_save_click(state.clone());
     attach_close_click(state.clone());
+    attach_switch_world_click(state.clone());
+    attach_create_click(state.clone());
+    attach_project_list_click(state.clone());
 
-    wasm_bindgen_futures::spawn_local(load_map(state));
+    wasm_bindgen_futures::spawn_local(refresh_projects(state));
 }
 
 fn window() -> web_sys::Window {
@@ -106,6 +142,19 @@ fn set_panel_open(open: bool) {
             let _ = panel.class_list().add_1("open");
         } else {
             let _ = panel.class_list().remove_1("open");
+        }
+    }
+}
+
+/// Toggle between the Home (project picker) and Editor (hex map) screens.
+fn show_view(name: &str) {
+    for id in ["home", "editor"] {
+        if let Some(el) = document().get_element_by_id(id) {
+            if id == name {
+                let _ = el.class_list().add_1("active");
+            } else {
+                let _ = el.class_list().remove_1("active");
+            }
         }
     }
 }
@@ -159,6 +208,59 @@ fn redraw(state: &AppState) {
             ctx.stroke();
         }
     }
+}
+
+/// Fetch `/api/projects`; show the Home list or jump straight into the
+/// editor if a world is already active (e.g. server started with `--world`).
+async fn refresh_projects(state: Rc<RefCell<AppState>>) {
+    let Ok(resp) = gloo_net::http::Request::get("/api/projects").send().await else {
+        set_text("home-status", "Could not reach mapkeeper-server.");
+        return;
+    };
+    let Ok(data) = resp.json::<ProjectsResponse>().await else { return };
+
+    render_project_list(&data.projects);
+
+    if let Some(active) = data.active {
+        let _ = active;
+        show_view("editor");
+        wasm_bindgen_futures::spawn_local(load_map(state));
+    } else {
+        show_view("home");
+    }
+}
+
+fn render_project_list(projects: &[ProjectStatus]) {
+    let document = document();
+    let Some(list) = document.get_element_by_id("project-list") else { return };
+    let empty = document.get_element_by_id("project-empty");
+
+    if projects.is_empty() {
+        list.set_inner_html("");
+        if let Some(empty) = empty {
+            let _ = empty.class_list().add_1("visible");
+        }
+        return;
+    }
+    if let Some(empty) = empty {
+        let _ = empty.class_list().remove_1("visible");
+    }
+
+    let mut html = String::new();
+    for p in projects {
+        let missing = if p.valid { "" } else { "<div class=\"missing\">folder not found</div>" };
+        html.push_str(&format!(
+            "<li data-path=\"{path}\"><div class=\"info\"><span class=\"id\">{id}</span><span class=\"path\">{path}</span>{missing}</div><button class=\"open-btn\" data-path=\"{path}\">Open</button></li>",
+            id = html_escape(&p.id),
+            path = html_escape(&p.path),
+            missing = missing,
+        ));
+    }
+    list.set_inner_html(&html);
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 async fn load_map(state: Rc<RefCell<AppState>>) {
@@ -256,5 +358,116 @@ fn attach_close_click(state: Rc<RefCell<AppState>>) {
         .expect("missing #close")
         .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
         .expect("attaching close handler");
+    closure.forget();
+}
+
+/// "&larr; Worlds" button in the editor: clears the server's active world
+/// and local UI state, then goes back to the Home screen.
+fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut()>::new(move || {
+        let state = state.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = gloo_net::http::Request::post("/api/projects/close").send().await;
+            let mut state_mut = state.borrow_mut();
+            state_mut.cells.clear();
+            state_mut.selected = None;
+            set_panel_open(false);
+            set_text("status", "");
+            drop(state_mut);
+            wasm_bindgen_futures::spawn_local(refresh_projects(state));
+        });
+    });
+    document()
+        .get_element_by_id("switch-world")
+        .expect("missing #switch-world")
+        .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+        .expect("attaching switch-world handler");
+    closure.forget();
+}
+
+/// "Create" button on the Home screen: scaffolds a new world via the server
+/// and opens it directly (roadmap 5.7 minimal wizard).
+fn attach_create_click(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut()>::new(move || {
+        let id = input("new-id").value();
+        let path = input("new-path").value();
+        if id.trim().is_empty() || path.trim().is_empty() {
+            set_text("home-status", "World id and folder are both required.");
+            return;
+        }
+        let state = state.clone();
+        set_text("home-status", "Creating…");
+        wasm_bindgen_futures::spawn_local(async move {
+            let body = CreateProjectInput { id: &id, path: &path };
+            let sent = gloo_net::http::Request::post("/api/projects").json(&body);
+            let sent = match sent {
+                Ok(req) => req.send().await,
+                Err(err) => {
+                    set_text("home-status", &format!("Error: {err}"));
+                    return;
+                }
+            };
+            match sent {
+                Ok(resp) if resp.ok() => {
+                    set_text("home-status", "");
+                    input("new-id").set_value("");
+                    input("new-path").set_value("");
+                    show_view("editor");
+                    wasm_bindgen_futures::spawn_local(load_map(state));
+                }
+                Ok(resp) => {
+                    let msg = resp.text().await.unwrap_or_else(|_| "create failed".to_string());
+                    set_text("home-status", &msg);
+                }
+                Err(err) => set_text("home-status", &format!("Error: {err}")),
+            }
+        });
+    });
+    document()
+        .get_element_by_id("create")
+        .expect("missing #create")
+        .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+        .expect("attaching create handler");
+    closure.forget();
+}
+
+/// Delegated click on the project list: any `.open-btn` opens that world.
+fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+        let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else { return };
+        let Ok(Some(button)) = target.closest(".open-btn") else { return };
+        let Some(path) = button.get_attribute("data-path") else { return };
+
+        let state = state.clone();
+        set_text("home-status", "Opening…");
+        wasm_bindgen_futures::spawn_local(async move {
+            let body = OpenProjectInput { path: &path };
+            let sent = gloo_net::http::Request::post("/api/projects/open").json(&body);
+            let sent = match sent {
+                Ok(req) => req.send().await,
+                Err(err) => {
+                    set_text("home-status", &format!("Error: {err}"));
+                    return;
+                }
+            };
+            match sent {
+                Ok(resp) if resp.ok() => {
+                    set_text("home-status", "");
+                    show_view("editor");
+                    wasm_bindgen_futures::spawn_local(load_map(state));
+                }
+                Ok(resp) => {
+                    let msg = resp.text().await.unwrap_or_else(|_| "open failed".to_string());
+                    set_text("home-status", &msg);
+                }
+                Err(err) => set_text("home-status", &format!("Error: {err}")),
+            }
+        });
+    });
+    document()
+        .get_element_by_id("project-list")
+        .expect("missing #project-list")
+        .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+        .expect("attaching project-list handler");
     closure.forget();
 }

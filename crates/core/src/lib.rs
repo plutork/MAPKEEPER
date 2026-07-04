@@ -4,4 +4,5 @@
 pub mod cell_id;
 pub mod hex;
 pub mod profile;
+pub mod projects;
 pub mod world;

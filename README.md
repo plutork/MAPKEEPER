@@ -41,12 +41,19 @@ Node in the product runtime:
 ### Run it locally (dev)
 
 ```powershell
-cargo run -p mapkeeper-cli -- init demo --path .tmp-world     # scaffold a world
-powershell -File crates/web/build.ps1                          # build the web UI (wasm-bindgen)
-cargo run -p mapkeeper-server -- --world .tmp-world --port 4000 --web-dist crates/web/dist
-# open http://127.0.0.1:4000 — click a hex, save a title/notes, then:
+powershell -File crates/web/build.ps1     # build the web UI (wasm-bindgen)
+cargo run -p mapkeeper-server -- --port 4000 --web-dist crates/web/dist
+# open http://127.0.0.1:4000 — Home screen: create a new world (id + folder) or
+# open an existing one, then click a hex, save a title/notes. Then:
 cargo run -p mapkeeper-cli -- profile get demo.hex.q0.r0 --world .tmp-world
 ```
+
+`mapkeeper-server` starts in **launcher mode** with no `--world` flag — the
+Home screen (backed by `/api/projects`) lists/creates worlds, mirroring the
+minimal editor wizard (roadmap 5.7). Pass `--world <path>` to skip the
+launcher and open one world directly (handy for scripting/CI). Worlds
+created either way are also scaffoldable from the CLI:
+`cargo run -p mapkeeper-cli -- init demo --path .tmp-world`.
 
 ## License
 
@@ -54,7 +61,9 @@ cargo run -p mapkeeper-cli -- profile get demo.hex.q0.r0 --world .tmp-world
 
 ## Status
 
-V0 in progress. Flow-first slice works end to end: scaffold a world, paint a
-hex cell in the local web UI, save a placeholder profile, query it back over
-the CLI. Real cell profile fields, renderer polish, and validation strictness
-are still open. World projects use the GitHub template above.
+V0 in progress. Flow-first slice works end to end: open the launcher Home
+screen, create or pick a world, paint a hex cell in the local web UI, save a
+profile (real V0 fields — `cell_id`/`display_name`/`slug`/`notes`), query it
+back over the CLI. Renderer polish and validation strictness are still open.
+World projects also work via the GitHub template above (interim, git-native
+authors).

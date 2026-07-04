@@ -5,10 +5,14 @@
 //! V0 flow-first slice (roadmap D-21): serves the WASM web UI as static
 //! files and a small JSON API so a browser can paint hex cells and save
 //! placeholder profiles into one world folder.
+//!
+//! Launcher slice (roadmap D-12/5.7): with no `--world` flag the server
+//! starts with no active world; the web UI shows a Home screen backed by
+//! `/api/projects` (list/create/open/close) instead of a hex map.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use axum::extract::{Path as AxPath, State};
@@ -19,15 +23,18 @@ use axum::{Json, Router};
 use clap::Parser;
 use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::profile::CellProfile;
+use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
+use mapkeeper_core::world;
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
 
 #[derive(Parser)]
 #[command(name = "mapkeeper-server", version, about)]
 struct Args {
-    /// World folder to serve — must contain `mapkeeper.toml` (see `mapkeeper init`).
-    #[arg(long, default_value = ".")]
-    world: PathBuf,
+    /// World folder to open immediately — must contain `mapkeeper.toml`.
+    /// Omit to start in launcher mode (Home screen picks/creates a world).
+    #[arg(long)]
+    world: Option<PathBuf>,
     #[arg(long, default_value_t = 4000)]
     port: u16,
     /// Built web UI (wasm-bindgen output) to serve as static files.
@@ -36,8 +43,12 @@ struct Args {
 }
 
 struct AppState {
-    world_path: PathBuf,
-    world_id: String,
+    active: Option<ActiveWorld>,
+}
+
+struct ActiveWorld {
+    path: PathBuf,
+    id: String,
 }
 
 #[derive(Deserialize)]
@@ -72,48 +83,197 @@ struct ProfileInput {
     notes: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
+#[derive(Serialize)]
+struct ProjectStatus {
+    id: String,
+    path: String,
+    /// `false` if the folder/`mapkeeper.toml` moved or was deleted since it was registered.
+    valid: bool,
+}
 
-    let manifest_path = args.world.join("mapkeeper.toml");
-    let manifest_raw = std::fs::read_to_string(&manifest_path).with_context(|| {
+#[derive(Serialize)]
+struct ProjectsResponse {
+    active: Option<ProjectEntry>,
+    projects: Vec<ProjectStatus>,
+}
+
+#[derive(Deserialize)]
+struct CreateProjectInput {
+    id: String,
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct OpenProjectInput {
+    path: String,
+}
+
+fn read_manifest_id(world_path: &Path) -> Result<String> {
+    let manifest_path = world_path.join("mapkeeper.toml");
+    let raw = std::fs::read_to_string(&manifest_path).with_context(|| {
         format!(
             "reading {} — is this a mapkeeper world? (see `mapkeeper init`)",
             manifest_path.display()
         )
     })?;
-    let manifest: Manifest = toml::from_str(&manifest_raw).context("parsing mapkeeper.toml")?;
+    let manifest: Manifest = toml::from_str(&raw).context("parsing mapkeeper.toml")?;
+    Ok(manifest.world.id)
+}
 
-    let state = Arc::new(AppState {
-        world_path: args.world.clone(),
-        world_id: manifest.world.id,
-    });
+fn projects_path() -> PathBuf {
+    let appdata = std::env::var("APPDATA").ok();
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok();
+    PathBuf::from(projects_file_path(appdata.as_deref(), home.as_deref()))
+}
+
+fn load_projects() -> ProjectsFile {
+    match std::fs::read_to_string(projects_path()) {
+        Ok(raw) => ProjectsFile::parse(&raw),
+        Err(_) => ProjectsFile::default(),
+    }
+}
+
+fn save_projects(file: &ProjectsFile) -> Result<()> {
+    let path = projects_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, file.to_json_pretty())?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    let active = match &args.world {
+        Some(world_path) => {
+            let id = read_manifest_id(world_path)?;
+            Some(ActiveWorld { path: world_path.clone(), id })
+        }
+        None => None,
+    };
+
+    let state = Arc::new(Mutex::new(AppState { active }));
 
     let app = Router::new()
+        .route("/api/projects", get(list_projects).post(create_project))
+        .route("/api/projects/open", axum::routing::post(open_project))
+        .route("/api/projects/close", axum::routing::post(close_project))
         .route("/api/map", get(get_map))
         .route("/api/cells/:q/:r/profile", get(get_profile).put(put_profile))
         .with_state(state)
         .fallback_service(ServeDir::new(&args.web_dist));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
-    println!("mapkeeper-server: world '{}' at http://{addr}", args.world.display());
+    match &args.world {
+        Some(world) => println!("mapkeeper-server: world '{}' at http://{addr}", world.display()),
+        None => println!("mapkeeper-server: launcher mode at http://{addr}"),
+    }
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
 
-fn profiles_dir(state: &AppState) -> PathBuf {
-    state.world_path.join("profiles")
+fn profiles_dir(world_path: &Path) -> PathBuf {
+    world_path.join("profiles")
 }
 
-fn profile_path(state: &AppState, q: i32, r: i32) -> PathBuf {
-    let id = CellId::new(&state.world_id, q, r);
-    profiles_dir(state).join(id.filename())
+fn profile_path(world_path: &Path, world_id: &str, q: i32, r: i32) -> PathBuf {
+    let id = CellId::new(world_id, q, r);
+    profiles_dir(world_path).join(id.filename())
 }
 
-async fn get_map(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let dir = profiles_dir(&state);
+async fn list_projects(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
+    let file = load_projects();
+    let projects = file
+        .projects
+        .into_iter()
+        .map(|p| {
+            let valid = Path::new(&p.path).join("mapkeeper.toml").exists();
+            ProjectStatus { id: p.id, path: p.path, valid }
+        })
+        .collect();
+    let active = state.lock().unwrap().active.as_ref().map(|a| ProjectEntry {
+        id: a.id.clone(),
+        path: a.path.display().to_string(),
+    });
+    Json(ProjectsResponse { active, projects }).into_response()
+}
+
+async fn create_project(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(input): Json<CreateProjectInput>,
+) -> impl IntoResponse {
+    if !world::is_valid_world_id(&input.id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid world id: use lowercase letters, digits, '-', '_' only",
+        )
+            .into_response();
+    }
+    let path = PathBuf::from(&input.path);
+    let manifest = path.join("mapkeeper.toml");
+    if manifest.exists() {
+        return (
+            StatusCode::CONFLICT,
+            format!("{} already has a mapkeeper.toml", path.display()),
+        )
+            .into_response();
+    }
+    if let Err(err) = std::fs::create_dir_all(&path) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+    for dir in world::SCAFFOLD_DIRS {
+        if let Err(err) = std::fs::create_dir_all(path.join(dir)) {
+            return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+        }
+    }
+    if let Err(err) = std::fs::write(&manifest, world::manifest_toml(&input.id)) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    let mut file = load_projects();
+    file.upsert(ProjectEntry { id: input.id.clone(), path: path.display().to_string() });
+    if let Err(err) = save_projects(&file) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    state.lock().unwrap().active = Some(ActiveWorld { path: path.clone(), id: input.id.clone() });
+    Json(ProjectEntry { id: input.id, path: path.display().to_string() }).into_response()
+}
+
+async fn open_project(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(input): Json<OpenProjectInput>,
+) -> impl IntoResponse {
+    let path = PathBuf::from(&input.path);
+    let id = match read_manifest_id(&path) {
+        Ok(id) => id,
+        Err(err) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
+    };
+
+    let mut file = load_projects();
+    file.upsert(ProjectEntry { id: id.clone(), path: path.display().to_string() });
+    if let Err(err) = save_projects(&file) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    state.lock().unwrap().active = Some(ActiveWorld { path: path.clone(), id: id.clone() });
+    Json(ProjectEntry { id, path: path.display().to_string() }).into_response()
+}
+
+async fn close_project(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
+    state.lock().unwrap().active = None;
+    StatusCode::NO_CONTENT
+}
+
+async fn get_map(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    let dir = profiles_dir(&active.path);
     let mut cells = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
@@ -132,15 +292,19 @@ async fn get_map(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             });
         }
     }
-    Json(MapResponse { world_id: state.world_id.clone(), cells })
+    Json(MapResponse { world_id: active.id.clone(), cells }).into_response()
 }
 
 async fn get_profile(
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<Mutex<AppState>>>,
     AxPath((q, r)): AxPath<(i32, i32)>,
 ) -> impl IntoResponse {
-    let id = CellId::new(&state.world_id, q, r);
-    let path = profile_path(&state, q, r);
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    let id = CellId::new(&active.id, q, r);
+    let path = profile_path(&active.path, &active.id, q, r);
     let profile = match std::fs::read_to_string(&path) {
         Ok(raw) => match serde_json::from_str(&raw) {
             Ok(profile) => profile,
@@ -154,11 +318,15 @@ async fn get_profile(
 }
 
 async fn put_profile(
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<Mutex<AppState>>>,
     AxPath((q, r)): AxPath<(i32, i32)>,
     Json(input): Json<ProfileInput>,
 ) -> impl IntoResponse {
-    let id = CellId::new(&state.world_id, q, r);
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    let id = CellId::new(&active.id, q, r);
     let mut profile = CellProfile::new(&id, input.display_name);
     profile.notes = input.notes;
 
@@ -167,11 +335,11 @@ async fn put_profile(
         return (StatusCode::BAD_REQUEST, format!("{issues:?}")).into_response();
     }
 
-    let dir = profiles_dir(&state);
+    let dir = profiles_dir(&active.path);
     if let Err(err) = std::fs::create_dir_all(&dir) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
-    let path = profile_path(&state, q, r);
+    let path = profile_path(&active.path, &active.id, q, r);
     let body = match serde_json::to_string_pretty(&profile) {
         Ok(body) => body,
         Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),

@@ -13,6 +13,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::profile::CellProfile;
+use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
 use mapkeeper_core::world;
 
 #[derive(Parser)]
@@ -104,6 +105,33 @@ fn cmd_init(args: InitArgs) -> Result<()> {
         args.world_id,
         args.path.display()
     );
+
+    // Best-effort: register in the shared projects list so the launcher/web
+    // wizard also sees worlds created from the CLI. Never fails `init`.
+    if let Err(err) = register_project(&args.world_id, &args.path) {
+        eprintln!("warn: could not register in projects list: {err}");
+    }
+    Ok(())
+}
+
+fn projects_path() -> PathBuf {
+    let appdata = std::env::var("APPDATA").ok();
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok();
+    PathBuf::from(projects_file_path(appdata.as_deref(), home.as_deref()))
+}
+
+fn register_project(world_id: &str, path: &Path) -> Result<()> {
+    let abs_path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let list_path = projects_path();
+    let mut file = match fs::read_to_string(&list_path) {
+        Ok(raw) => ProjectsFile::parse(&raw),
+        Err(_) => ProjectsFile::default(),
+    };
+    file.upsert(ProjectEntry { id: world_id.to_string(), path: abs_path.display().to_string() });
+    if let Some(parent) = list_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(list_path, file.to_json_pretty())?;
     Ok(())
 }
 
