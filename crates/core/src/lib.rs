@@ -4,3 +4,4 @@
 pub mod cell_id;
 pub mod hex;
 pub mod profile;
+pub mod world;

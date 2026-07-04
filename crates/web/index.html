@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>mapkeeper — V0 flow</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    display: flex;
+    height: 100vh;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #161a1d;
+    color: #eee;
+  }
+  #map { display: block; background: #0e1113; cursor: pointer; }
+  #panel {
+    width: 300px;
+    padding: 20px;
+    box-sizing: border-box;
+    border-left: 1px solid #2a2f36;
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+  }
+  #panel.open { display: flex; }
+  #panel h2 { margin: 0; font-size: 15px; color: #9fe3c4; font-weight: 600; }
+  #panel label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #8a8f98; }
+  #panel input, #panel textarea {
+    background: #20242a;
+    border: 1px solid #3a3f47;
+    color: #eee;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 14px;
+  }
+  #panel textarea { min-height: 140px; resize: vertical; }
+  .row { display: flex; gap: 8px; }
+  button {
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+  }
+  #save { background: #3ac886; color: #04140b; }
+  #close { background: #2a2f36; color: #eee; }
+  #status { font-size: 12px; color: #7fc99a; min-height: 16px; }
+  #hint { position: absolute; top: 16px; left: 16px; font-size: 12px; color: #666f7a; }
+</style>
+</head>
+<body>
+  <div style="position: relative;">
+    <canvas id="map" width="720" height="560"></canvas>
+    <div id="hint">mapkeeper V0 — click a hex to name it (placeholder profile, real schema is later)</div>
+  </div>
+  <div id="panel">
+    <h2 id="panel-cell">—</h2>
+    <label for="title">Title</label>
+    <input id="title" type="text" placeholder="Place name" autocomplete="off" />
+    <label for="notes">Notes</label>
+    <textarea id="notes" placeholder="Anything worth remembering"></textarea>
+    <div class="row">
+      <button id="save">Save</button>
+      <button id="close">Close</button>
+    </div>
+    <div id="status"></div>
+  </div>
+  <script type="module">
+    import init from "./mapkeeper_web.js";
+    init();
+  </script>
+</body>
+</html>

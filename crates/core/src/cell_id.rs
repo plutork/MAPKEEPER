@@ -16,6 +16,19 @@ impl CellId {
     pub fn filename(&self) -> String {
         format!("{self}.json")
     }
+
+    /// Parses the canonical form `{world_id}.hex.q{q}.r{r}` (e.g. from a
+    /// profile filename stem). Returns `None` on any malformed input.
+    pub fn parse(s: &str) -> Option<CellId> {
+        let (world_id, rest) = s.split_once(".hex.q")?;
+        let (q_str, r_str) = rest.split_once(".r")?;
+        if world_id.is_empty() {
+            return None;
+        }
+        let q = q_str.parse().ok()?;
+        let r = r_str.parse().ok()?;
+        Some(CellId::new(world_id, q, r))
+    }
 }
 
 impl fmt::Display for CellId {
@@ -33,5 +46,19 @@ mod tests {
         let id = CellId::new("main", 3, -1);
         assert_eq!(id.to_string(), "main.hex.q3.r-1");
         assert_eq!(id.filename(), "main.hex.q3.r-1.json");
+    }
+
+    #[test]
+    fn parses_canonical_id() {
+        let id = CellId::parse("main.hex.q3.r-1").unwrap();
+        assert_eq!(id.world_id, "main");
+        assert_eq!(id.q, 3);
+        assert_eq!(id.r, -1);
+    }
+
+    #[test]
+    fn parse_rejects_malformed() {
+        assert!(CellId::parse("not-a-cell-id").is_none());
+        assert!(CellId::parse(".hex.q1.r2").is_none());
     }
 }

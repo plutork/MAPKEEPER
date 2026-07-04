@@ -22,6 +22,21 @@ impl CellProfile {
             notes: String::new(),
         }
     }
+
+    /// Minimal placeholder rules (flow-first, D-21) — real strictness is 3.4.
+    pub fn validate(&self) -> Vec<ValidationIssue> {
+        let mut issues = Vec::new();
+        if self.display_name.trim().is_empty() {
+            issues.push(ValidationIssue::Warning("display_name is empty".into()));
+        }
+        if CellId::parse(&self.cell_id).is_none() {
+            issues.push(ValidationIssue::Error(format!(
+                "cell_id '{}' is not canonical ({{world_id}}.hex.q{{q}}.r{{r}})",
+                self.cell_id
+            )));
+        }
+        issues
+    }
 }
 
 /// Validation outcome — strictness (warn vs block) is open (roadmap 3.4).

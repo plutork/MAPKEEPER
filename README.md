@@ -38,10 +38,23 @@ Node in the product runtime:
 | `toolchain/` | Author scaffold source of truth (world template) |
 | `tests/` | End-to-end tests (Playwright — dev/CI only) |
 
+### Run it locally (dev)
+
+```powershell
+cargo run -p mapkeeper-cli -- init demo --path .tmp-world     # scaffold a world
+powershell -File crates/web/build.ps1                          # build the web UI (wasm-bindgen)
+cargo run -p mapkeeper-server -- --world .tmp-world --port 4000 --web-dist crates/web/dist
+# open http://127.0.0.1:4000 — click a hex, save a title/notes, then:
+cargo run -p mapkeeper-cli -- profile get demo.hex.q0.r0 --world .tmp-world
+```
+
 ## License
 
 [Apache License 2.0](LICENSE).
 
 ## Status
 
-IDEA + Shape — editor and data contracts ship here as V0 progresses. World projects use the GitHub template above.
+V0 in progress. Flow-first slice works end to end: scaffold a world, paint a
+hex cell in the local web UI, save a placeholder profile, query it back over
+the CLI. Real cell profile fields, renderer polish, and validation strictness
+are still open. World projects use the GitHub template above.

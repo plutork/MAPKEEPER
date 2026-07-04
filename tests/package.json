@@ -1,0 +1,12 @@
+{
+  "name": "mapkeeper-tests",
+  "private": true,
+  "description": "E2E smoke for the local web V0 author story (wizard -> paint hex -> save profile -> CLI query). Node is dev/CI-only (D-20).",
+  "type": "module",
+  "scripts": {
+    "smoke": "node smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}
