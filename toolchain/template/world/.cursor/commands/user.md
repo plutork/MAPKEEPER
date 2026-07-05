@@ -6,7 +6,7 @@ This workspace is for **worlds**, not mapkeeper source code.
 
 ## Context
 
-1. Read world data / mapkeeper **data contracts** and profiles — not editor implementation.
+1. Read world data / mapkeeper **data contracts** and profiles — not editor implementation. Profile fields: [`profiles/README.md`](../../profiles/README.md).
 2. Optional: [STARTER_PACK.md](https://github.com/plutork/MAPKEEPER/blob/main/STARTER_PACK.md) (product pitch) or local `AGENTS.md`.
 
 ## Rules

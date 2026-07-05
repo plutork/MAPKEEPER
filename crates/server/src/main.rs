@@ -229,6 +229,17 @@ async fn create_project(
             return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
         }
     }
+    for file in world::SCAFFOLD_FILES {
+        let file_path = path.join(file.rel_path);
+        if let Some(parent) = file_path.parent() {
+            if let Err(err) = std::fs::create_dir_all(parent) {
+                return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+            }
+        }
+        if let Err(err) = std::fs::write(&file_path, file.contents) {
+            return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+        }
+    }
     if let Err(err) = std::fs::write(&manifest, world::manifest_toml(&input.id)) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }

@@ -99,6 +99,7 @@ fn cmd_init(args: InitArgs) -> Result<()> {
     if manifest.exists() {
         bail!("{} already has a mapkeeper.toml — not overwriting", args.path.display());
     }
+    write_scaffold_files(&args.path)?;
     fs::write(&manifest, world::manifest_toml(&args.world_id))?;
     println!(
         "Scaffolded world '{}' at {}",
@@ -110,6 +111,20 @@ fn cmd_init(args: InitArgs) -> Result<()> {
     // wizard also sees worlds created from the CLI. Never fails `init`.
     if let Err(err) = register_project(&args.world_id, &args.path) {
         eprintln!("warn: could not register in projects list: {err}");
+    }
+    Ok(())
+}
+
+/// Write the static scaffold files (roadmap 5.2, single source of truth —
+/// same bundle the GitHub Template ships). `mapkeeper.toml` is separate,
+/// written by the caller with the actual world id.
+fn write_scaffold_files(root: &Path) -> Result<()> {
+    for file in world::SCAFFOLD_FILES {
+        let path = root.join(file.rel_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, file.contents)?;
     }
     Ok(())
 }

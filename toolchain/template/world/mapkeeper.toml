@@ -1,6 +1,7 @@
-# mapkeeper world project (schema TBD at V0)
+# mapkeeper world project
 
 [world]
+id = "my-world"
 name = "my-world"
 version = "0.1.0"
 
