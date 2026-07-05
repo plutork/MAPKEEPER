@@ -288,29 +288,45 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
         set_text("panel-cell", &cell_label(cell.q, cell.r));
         input("title").set_value("");
         textarea("notes").set_value("");
+        // Disabled while loading — otherwise a fast typist can fill the
+        // fields before the fetch below resolves, and the (still pending)
+        // response then silently overwrites what they just typed.
+        input("title").set_disabled(true);
+        textarea("notes").set_disabled(true);
         set_text("status", "Loading…");
 
-        wasm_bindgen_futures::spawn_local(load_profile_into_panel(cell.q, cell.r));
+        wasm_bindgen_futures::spawn_local(load_profile_into_panel(state.clone(), cell.q, cell.r));
     });
     canvas().set_onclick(Some(closure.as_ref().unchecked_ref()));
     closure.forget();
 }
 
-async fn load_profile_into_panel(q: i32, r: i32) {
+async fn load_profile_into_panel(state: Rc<RefCell<AppState>>, q: i32, r: i32) {
     let url = format!("/api/cells/{q}/{r}/profile");
     let profile = gloo_net::http::Request::get(&url)
         .send()
         .await
         .ok()
         .and_then(|resp| resp.ok().then_some(resp));
+    // The author may have clicked a different cell while this was in
+    // flight — don't clobber whatever panel is showing now.
+    if state.borrow().selected != Some((q, r)) {
+        return;
+    }
     let Some(resp) = profile else {
         set_text("status", "Could not load profile");
+        input("title").set_disabled(false);
+        textarea("notes").set_disabled(false);
         return;
     };
     if let Ok(profile) = resp.json::<CellProfile>().await {
-        input("title").set_value(&profile.display_name);
-        textarea("notes").set_value(&profile.notes);
+        if state.borrow().selected == Some((q, r)) {
+            input("title").set_value(&profile.display_name);
+            textarea("notes").set_value(&profile.notes);
+        }
     }
+    input("title").set_disabled(false);
+    textarea("notes").set_disabled(false);
     set_text("status", "");
 }
 
