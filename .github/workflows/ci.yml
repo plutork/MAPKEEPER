@@ -1,0 +1,28 @@
+# Schema/query CI (roadmap 1.2 V0-done criterion, D-12/D-22/D-23).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  schema-fixtures:
+    name: Schema fixtures (cell-profile.schema.json)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: pip install jsonschema
+      - run: python fixtures/validate_schema.py
+
+  rust-tests:
+    name: cargo test (workspace, incl. CLI query path)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace
