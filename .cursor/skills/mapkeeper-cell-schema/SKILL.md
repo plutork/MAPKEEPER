@@ -30,9 +30,16 @@ Example file: `profiles/{world_id}.hex.q3.r-1.json`
 
 Keep schema **minimal** — writer/GM persona; no dev jargon in author-facing descriptions.
 
-## Validation posture *(open 3.4)*
+## Validation posture *(D-23, final for V0)*
 
-Until decided: prefer **warn on save, block on CI** for schema tests — propose change via MAPKEEPER-OS `/idea` if stricter.
+**Save never blocks** — neither web UI nor CLI. Empty `display_name` is a
+**valid** state ("painted, unnamed yet"), not a warning. Malformed
+`cell_id` stays a defensive `Error` in `CellProfile::validate()` (for
+future hand-edited files / import) but is unreachable via real entry
+points today — that is expected, not a bug. No format rules for
+`slug`/`notes`. CI schema tests against this file — still open, Later,
+tracked separately (roadmap 1.2 V0-done criterion), not part of this
+decision.
 
 ## Files
 

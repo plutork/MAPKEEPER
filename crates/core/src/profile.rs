@@ -23,12 +23,14 @@ impl CellProfile {
         }
     }
 
-    /// Minimal placeholder rules (flow-first, D-21) — real strictness is 3.4.
+    /// Validation posture (D-23, final for V0): save never blocks. An empty
+    /// `display_name` is a valid state ("painted, unnamed yet"), not an
+    /// issue — do not warn on it. `cell_id` format stays defensive, ready
+    /// for hand-edited files / import (Later); unreachable via the real
+    /// entry points (server always builds a canonical id; CLI rejects bad
+    /// ids earlier, before this runs).
     pub fn validate(&self) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
-        if self.display_name.trim().is_empty() {
-            issues.push(ValidationIssue::Warning("display_name is empty".into()));
-        }
         if CellId::parse(&self.cell_id).is_none() {
             issues.push(ValidationIssue::Error(format!(
                 "cell_id '{}' is not canonical ({{world_id}}.hex.q{{q}}.r{{r}})",
