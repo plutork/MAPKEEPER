@@ -3,10 +3,21 @@
 //! temp world folder — not just the JSON Schema in isolation.
 
 use assert_cmd::Command;
-use tempfile::tempdir;
+use tempfile::{tempdir, TempDir};
 
+/// `init` best-effort registers the new world into the shared
+/// `%APPDATA%/mapkeeper/projects.json` — override `APPDATA`/`HOME` to a throwaway
+/// dir so running these tests never touches the real launcher's project list.
 fn mapkeeper() -> Command {
-    Command::cargo_bin("mapkeeper").unwrap()
+    let mut cmd = Command::cargo_bin("mapkeeper").unwrap();
+    cmd.env("APPDATA", fake_home().path()).env("HOME", fake_home().path());
+    cmd
+}
+
+fn fake_home() -> &'static TempDir {
+    use std::sync::OnceLock;
+    static HOME: OnceLock<TempDir> = OnceLock::new();
+    HOME.get_or_init(|| tempdir().unwrap())
 }
 
 #[test]
