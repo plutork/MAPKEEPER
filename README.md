@@ -8,7 +8,9 @@ The map is not only a picture — it is the interface to a machine-readable worl
 
 **Now (early access):** [GitHub template](https://github.com/plutork/mapkeeper-world-template/generate) — for authors comfortable with git.
 
-**Target UX (V0):** open mapkeeper → **New world** — pre-configured agents and folders, no git required.
+**Now (Windows installer, roadmap 5.9):** run the `mapkeeper` desktop app — a native window opens directly on the same Home screen (pick or create a world), no `cargo run`/browser/localhost step. Unsigned for now (Windows SmartScreen will warn — "More info" → "Run anyway"); build it yourself with `cargo tauri build` in `crates/desktop` until packaged releases are published.
+
+**Target UX (long-term):** open mapkeeper → **New world** — pre-configured agents and folders, no git required. The desktop app above is this UX for V0; the editor wizard is the same idea, longer-term.
 
 Details: [toolchain/template/README.md](toolchain/template/README.md).
 
@@ -33,6 +35,7 @@ Node in the product runtime:
 | `crates/cli` | `mapkeeper` binary — filesystem + commands |
 | `crates/server` | Local filesystem, world folder, HTTP API, projects list |
 | `crates/web` | Rust→WASM UI — calls `core` for logic, `server`/Tauri for filesystem |
+| `crates/desktop` | Windows installer shell (Tauri) — native window over the same `server`+`web`, no browser/localhost step |
 | `schemas/` | JSON Schema contracts |
 | `fixtures/` | Shared test worlds/profiles |
 | `toolchain/` | Author scaffold source of truth (world template) |
@@ -55,15 +58,35 @@ launcher and open one world directly (handy for scripting/CI). Worlds
 created either way are also scaffoldable from the CLI:
 `cargo run -p mapkeeper-cli -- init demo --path .tmp-world`.
 
+### Desktop shell (Windows installer)
+
+```powershell
+powershell -File crates/web/build.ps1     # same web UI build as above
+cargo tauri build --manifest-path crates/desktop/Cargo.toml
+# -> target/release/bundle/nsis/mapkeeper_<version>_x64-setup.exe
+```
+
+`crates/desktop` embeds the exact same `mapkeeper-server` router in-process
+(on an OS-assigned port, so it never clashes with a dev server) and opens it
+in a native window instead of printing `http://localhost` instructions — the
+"New world" folder field also gets a native **Browse…** button there
+(`window.__TAURI__` feature-detected in `crates/web`, invisible in a plain
+browser tab). Requires the Rust MSVC toolchain + WebView2 (both ship with
+modern Windows); `cargo install tauri-cli` once to get the `cargo tauri`
+subcommand. Windows only for V0 — code signing and auto-update are Later
+(`todo/tauri-after-web-v0.md`).
+
 ## License
 
 [Apache License 2.0](LICENSE).
 
 ## Status
 
-V0 in progress. Flow-first slice works end to end: open the launcher Home
-screen, create or pick a world, paint a hex cell in the local web UI, save a
-profile (real V0 fields — `cell_id`/`display_name`/`slug`/`notes`), query it
-back over the CLI. Renderer polish and validation strictness are still open.
-World projects also work via the GitHub template above (interim, git-native
-authors).
+**V0 done.** Full flow works end to end: open the launcher Home screen (web
+or desktop app), create or pick a world, paint a hex cell, save a profile
+(real V0 fields — `cell_id`/`display_name`/`slug`/`notes`), query it back
+over the CLI — CI-tested (schema fixtures + CLI round trip) and dogfooded on
+a real local world. Windows desktop installer (`crates/desktop`, Tauri)
+wraps the same web UI in a native window. Renderer polish (better than
+"guess the hex coordinates") is still open, Later. World projects also work
+via the GitHub template above (interim, git-native authors).

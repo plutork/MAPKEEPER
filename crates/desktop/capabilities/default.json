@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "enables the default permissions needed by the mapkeeper launcher (folder picker)",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default"]
+}

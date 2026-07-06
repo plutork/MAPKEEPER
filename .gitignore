@@ -11,5 +11,11 @@
 crates/web/pkg/
 crates/web/dist/
 
+# Tauri desktop shell build output (roadmap 5.9, D-29) — installers are built
+# artifacts, not source; `cargo tauri build` writes to target/, this is just
+# a convenience copy for local testing.
+/dist-installer/
+crates/desktop/gen/
+
 # e2e/dev tooling (tests/) — Node dev-only, not product runtime
 tests/node_modules/

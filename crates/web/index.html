@@ -93,6 +93,13 @@
   }
   #home label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #8a8f98; }
   #home-status { font-size: 12px; color: #d97757; min-height: 16px; margin-top: 8px; }
+  /* Shown only inside the Tauri desktop shell (feature-detected below) — a
+     plain browser tab has no native folder dialog to call, so the path
+     input stays freeform text there. */
+  .native-only { display: none; }
+  #path-row { display: flex; gap: 8px; align-items: flex-start; }
+  #path-row input { flex: 1; }
+  #browse-folder { flex-shrink: 0; margin: 4px 0 12px; }
 </style>
 </head>
 <body>
@@ -109,7 +116,10 @@
       <label for="new-id">World id</label>
       <input id="new-id" placeholder="my-world" autocomplete="off" />
       <label for="new-path">Folder</label>
-      <input id="new-path" placeholder="C:\path\to\my-world" autocomplete="off" />
+      <div id="path-row">
+        <input id="new-path" placeholder="C:\path\to\my-world" autocomplete="off" />
+        <button id="browse-folder" class="native-only" type="button">Browse&hellip;</button>
+      </div>
       <button id="create">Create</button>
       <div id="home-status"></div>
     </section>
@@ -135,6 +145,15 @@
     </div>
   </div>
 
+  <script>
+    // Desktop shell only (roadmap 5.9, D-29): `withGlobalTauri` exposes
+    // `window.__TAURI__`; a plain browser tab never has this, so the
+    // native-only button stays hidden and mapkeeper_web.js never calls it.
+    if (window.__TAURI__) {
+      document.querySelectorAll(".native-only").forEach((el) => { el.style.display = ""; });
+      window.mapkeeperPickFolder = () => window.__TAURI__.core.invoke("pick_folder");
+    }
+  </script>
   <script type="module">
     import init from "./mapkeeper_web.js";
     init();

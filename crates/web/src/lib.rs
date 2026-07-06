@@ -92,6 +92,7 @@ pub fn start() {
     attach_switch_world_click(state.clone());
     attach_create_click(state.clone());
     attach_project_list_click(state.clone());
+    attach_browse_folder_click();
 
     wasm_bindgen_futures::spawn_local(refresh_projects(state));
 }
@@ -445,6 +446,33 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
         .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
         .expect("attaching create handler");
     closure.forget();
+}
+
+/// "Browse…" button, desktop shell only (roadmap 5.9, D-29) — the button is
+/// `display:none` in a plain browser tab (see `index.html`), so attaching a
+/// listener here is harmless either way; it just never fires without Tauri.
+fn attach_browse_folder_click() {
+    let Some(button) = document().get_element_by_id("browse-folder") else { return };
+    let closure = Closure::<dyn FnMut()>::new(move || {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Some(path) = pick_folder_via_tauri().await {
+                input("new-path").set_value(&path);
+            }
+        });
+    });
+    let _ = button.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+    closure.forget();
+}
+
+/// Calls the `window.mapkeeperPickFolder()` bridge defined in `index.html`
+/// (only present inside the Tauri shell) via `js_sys`, so this crate has no
+/// direct Tauri dependency — it stays a plain WASM/web-sys build either way.
+async fn pick_folder_via_tauri() -> Option<String> {
+    let bridge = js_sys::Reflect::get(&window(), &JsValue::from_str("mapkeeperPickFolder")).ok()?;
+    let bridge: js_sys::Function = bridge.dyn_into().ok()?;
+    let promise: js_sys::Promise = bridge.call0(&window()).ok()?.dyn_into().ok()?;
+    let result = wasm_bindgen_futures::JsFuture::from(promise).await.ok()?;
+    result.as_string()
 }
 
 /// Delegated click on the project list: any `.open-btn` opens that world.
