@@ -15,7 +15,7 @@
     color: #eee;
   }
   #map { display: block; width: 100%; height: 100%; background: #0e1113; cursor: pointer; }
-  .map-wrap { position: relative; flex: 1; min-width: 0; height: 100vh; }
+  .map-wrap { position: relative; width: 100%; height: 100vh; }
   .row { display: flex; gap: 8px; }
   button {
     padding: 8px 14px;
@@ -28,14 +28,16 @@
   #save { background: #3ac886; color: #04140b; }
   #close, #switch-world { background: #2a2f36; color: #eee; }
   #status { font-size: 12px; color: #7fc99a; min-height: 16px; }
-  #hint { position: absolute; top: 16px; left: 16px; font-size: 12px; color: #666f7a; max-width: calc(100% - 32px); }
+  #hint { position: absolute; top: 16px; left: 16px; font-size: 12px; color: #666f7a; max-width: calc(100% - 80px); z-index: 1; }
 
   #tool-dock {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
     display: flex;
-    flex-shrink: 0;
-    height: 100vh;
-    border-left: 1px solid #2a2f36;
-    background: #161a1d;
+    z-index: 20;
+    pointer-events: none;
   }
   #dock-rail {
     width: 52px;
@@ -45,6 +47,9 @@
     padding: 10px 0;
     gap: 6px;
     box-sizing: border-box;
+    pointer-events: auto;
+    background: rgba(22, 26, 29, 0.94);
+    border-left: 1px solid #2a2f36;
   }
   .dock-btn {
     position: relative;
@@ -84,6 +89,9 @@
     gap: 12px;
     overflow-y: auto;
     border-left: 1px solid #2a2f36;
+    pointer-events: auto;
+    background: rgba(22, 26, 29, 0.96);
+    box-shadow: -10px 0 28px rgba(0, 0, 0, 0.35);
     transition: width 0.15s ease, min-width 0.15s ease, opacity 0.15s ease, padding 0.15s ease;
   }
   #dock-drawer.collapsed {
@@ -135,7 +143,7 @@
 
   .view { display: none; width: 100%; }
   .view.active { display: block; }
-  #editor.active { display: flex; height: 100vh; }
+  #editor.active { position: relative; height: 100vh; width: 100%; }
 
   #home { max-width: 1140px; margin: 34px auto; padding: 0 24px 28px; }
   .brand { text-align: center; margin-bottom: 24px; }

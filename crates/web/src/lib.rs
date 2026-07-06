@@ -140,7 +140,7 @@ pub fn start() {
     attach_create_click(state.clone());
     attach_project_list_click(state.clone());
     attach_dock_click(state.clone());
-    attach_escape_key(state.clone());
+    attach_escape_key();
     attach_window_resize(state.clone());
     attach_browse_folder_click();
     attach_new_id_input(state.clone());
@@ -287,13 +287,12 @@ fn sync_brush_swatch_active(brush: &Brush) {
     }
 }
 
-fn open_dock_tab(state: &AppState, tab: &str) {
+fn open_dock_tab(tab: &str) {
     set_dock_tab(tab);
     set_drawer_open(true);
-    redraw(state);
 }
 
-fn toggle_dock_tab(state: &AppState, tab: &str) {
+fn toggle_dock_tab(tab: &str) {
     if drawer_is_open() {
         let current = document()
             .get_element_by_id("dock-rail")
@@ -305,11 +304,10 @@ fn toggle_dock_tab(state: &AppState, tab: &str) {
             });
         if current.as_deref() == Some(tab) {
             set_drawer_open(false);
-            redraw(state);
             return;
         }
     }
-    open_dock_tab(state, tab);
+    open_dock_tab(tab);
 }
 
 fn clear_inspect_selection() {
@@ -633,7 +631,7 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
         }
 
         state.borrow_mut().selected = Some((cell.q, cell.r));
-        open_dock_tab(&state.borrow(), "inspect");
+        open_dock_tab("inspect");
         set_text("panel-cell", &cell_label(cell.q, cell.r));
         input("title").set_value("");
         textarea("notes").set_value("");
@@ -874,7 +872,7 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
 
         if let Ok(Some(button)) = target.closest("[data-dock]") {
             let Some(tab) = button.get_attribute("data-dock") else { return };
-            toggle_dock_tab(&state.borrow(), &tab);
+            toggle_dock_tab(&tab);
             if tab == "inspect" {
                 let brush = Brush::Inspect;
                 state.borrow_mut().brush = brush.clone();
@@ -896,7 +894,7 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
             },
         };
         state.borrow_mut().brush = brush.clone();
-        open_dock_tab(&state.borrow(), "terrain");
+        open_dock_tab("terrain");
         sync_dock_rail_for_brush(&brush);
         sync_brush_swatch_active(&brush);
     });
@@ -908,11 +906,10 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
     closure.forget();
 }
 
-fn attach_escape_key(state: Rc<RefCell<AppState>>) {
+fn attach_escape_key() {
     let closure = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |event: web_sys::KeyboardEvent| {
         if event.key() == "Escape" {
             set_drawer_open(false);
-            redraw(&state.borrow());
         }
     });
     let _ = document().add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
