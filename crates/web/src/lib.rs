@@ -22,7 +22,10 @@ use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlInputElement, HtmlTextAreaElement};
 
 const RADIUS: i32 = 6;
-const HEX_SIZE: f64 = 34.0;
+/// Fill inset so adjacent hex fills leave a thin grid gap.
+const HEX_GAP: f64 = 0.92;
+/// Breathing room (px) between the map and the canvas edge.
+const CANVAS_PAD: f64 = 20.0;
 
 #[derive(Deserialize)]
 struct MapResponse {
@@ -137,6 +140,7 @@ pub fn start() {
     attach_create_click(state.clone());
     attach_project_list_click(state.clone());
     attach_palette_click(state.clone());
+    attach_window_resize(state.clone());
     attach_browse_folder_click();
     attach_new_id_input(state.clone());
     attach_new_path_input(state.clone());
@@ -219,12 +223,70 @@ fn hex_corners(cx: f64, cy: f64, size: f64) -> [(f64, f64); 6] {
     })
 }
 
-fn redraw(state: &AppState) {
+/// Half-extent (in unit-size pixels) of the whole hex map, including the
+/// outer cells' corner reach. Pointy-top corners stick out `√3/2` sideways
+/// and `1.0` vertically. Used to fit the map into the current canvas.
+fn map_half_extent() -> (f64, f64) {
+    let mut mx = 0.0_f64;
+    let mut my = 0.0_f64;
+    for q in -RADIUS..=RADIUS {
+        for r in -RADIUS..=RADIUS {
+            if (q.abs() + r.abs() + (q + r).abs()) / 2 > RADIUS {
+                continue;
+            }
+            let (x, y) = Axial::new(q, r).to_pixel(1.0);
+            mx = mx.max(x.abs());
+            my = my.max(y.abs());
+        }
+    }
+    (mx + 3f64.sqrt() / 2.0, my + 1.0)
+}
+
+/// Fit-to-window layout: hex `size` and origin so the radial map fills the
+/// canvas with padding. The map is symmetric about the axial origin, so the
+/// pixel origin is just the canvas center.
+fn hex_layout(width: f64, height: f64) -> (f64, f64, f64) {
+    let (hx, hy) = map_half_extent();
+    let avail_w = (width - 2.0 * CANVAS_PAD).max(1.0);
+    let avail_h = (height - 2.0 * CANVAS_PAD).max(1.0);
+    let size = (avail_w / (2.0 * hx)).min(avail_h / (2.0 * hy)).max(1.0);
+    (size, width / 2.0, height / 2.0)
+}
+
+/// Match the canvas backing store to its CSS box so the map scales with the
+/// window (no browser upscaling blur). Returns the current pixel dimensions.
+fn sync_canvas_size() -> (f64, f64) {
     let canvas = canvas();
+    let rect = canvas.get_bounding_client_rect();
+    let w = rect.width().max(1.0);
+    let h = rect.height().max(1.0);
+    if (canvas.width() as f64 - w).abs() >= 1.0 {
+        canvas.set_width(w as u32);
+    }
+    if (canvas.height() as f64 - h).abs() >= 1.0 {
+        canvas.set_height(h as u32);
+    }
+    (canvas.width() as f64, canvas.height() as f64)
+}
+
+/// A muted "×" marking an *explicitly empty* cell (`none`), so it reads as a
+/// deliberate void rather than an undecided (`unknown`) one.
+fn draw_none_marker(ctx: &CanvasRenderingContext2d, cx: f64, cy: f64, size: f64) {
+    let d = size * 0.22;
+    ctx.set_line_width(1.5);
+    ctx.set_stroke_style_str("#525a64");
+    ctx.begin_path();
+    ctx.move_to(cx - d, cy - d);
+    ctx.line_to(cx + d, cy + d);
+    ctx.move_to(cx + d, cy - d);
+    ctx.line_to(cx - d, cy + d);
+    ctx.stroke();
+}
+
+fn redraw(state: &AppState) {
+    let (width, height) = sync_canvas_size();
     let ctx = context();
-    let width = canvas.width() as f64;
-    let height = canvas.height() as f64;
-    let (ox, oy) = (width / 2.0, height / 2.0);
+    let (size, ox, oy) = hex_layout(width, height);
 
     ctx.clear_rect(0.0, 0.0, width, height);
     ctx.set_fill_style_str("#0e1113");
@@ -236,9 +298,9 @@ fn redraw(state: &AppState) {
                 continue;
             }
             let cell = Axial::new(q, r);
-            let (x, y) = cell.to_pixel(HEX_SIZE);
+            let (x, y) = cell.to_pixel(size);
             let (cx, cy) = (ox + x, oy + y);
-            let corners = hex_corners(cx, cy, HEX_SIZE * 0.92);
+            let corners = hex_corners(cx, cy, size * HEX_GAP);
 
             ctx.begin_path();
             ctx.move_to(corners[0].0, corners[0].1);
@@ -248,18 +310,24 @@ fn redraw(state: &AppState) {
             ctx.close_path();
 
             let selected = state.selected == Some((q, r));
+            let terrain = state.terrain.get(&(q, r));
             // Fill = terrain layer projection (unknown/none/value).
-            ctx.set_fill_style_str(terrain_fill(state.terrain.get(&(q, r))));
+            ctx.set_fill_style_str(terrain_fill(terrain));
             ctx.fill();
             ctx.set_line_width(if selected { 3.0 } else { 1.0 });
-            ctx.set_stroke_style_str(if selected { "#9fe3c4" } else { "#333940" });
+            ctx.set_stroke_style_str(if selected { "#9fe3c4" } else { "#3a424b" });
             ctx.stroke();
+
+            if matches!(terrain, Some(TerrainCell::None)) {
+                draw_none_marker(&ctx, cx, cy, size);
+            }
 
             // Profile-presence marker — a separate layer from terrain, so both
             // are visible at once (a cell can have terrain, a profile, or both).
             if state.cells.contains_key(&(q, r)) {
                 ctx.begin_path();
-                let _ = ctx.arc(cx, cy, 4.0, 0.0, std::f64::consts::PI * 2.0);
+                let dot = (size * 0.13).clamp(2.5, 5.0);
+                let _ = ctx.arc(cx, cy, dot, 0.0, std::f64::consts::PI * 2.0);
                 ctx.set_fill_style_str("#e8d27a");
                 ctx.fill();
             }
@@ -268,10 +336,12 @@ fn redraw(state: &AppState) {
 }
 
 /// Terrain layer → cell fill color. `None` (the map key is absent) = unknown.
+/// Unknown sits clearly above the canvas background so undecided cells read as
+/// real (but empty) map cells, not holes.
 fn terrain_fill(cell: Option<&TerrainCell>) -> &'static str {
     match cell {
-        None => "#1c2126",                    // unknown — not decided
-        Some(TerrainCell::None) => "#0b0d10", // explicitly absent
+        None => "#252c34",                    // unknown — not decided (elevated)
+        Some(TerrainCell::None) => "#171b20", // explicitly absent (marked with ×)
         Some(TerrainCell::Value(v)) => match v.as_str() {
             "plains" => "#6a7b43",
             "forest" => "#2f6b4f",
@@ -411,9 +481,12 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
         let canvas = canvas();
         let rect = canvas.get_bounding_client_rect();
-        let mx = event.client_x() as f64 - rect.left() - canvas.width() as f64 / 2.0;
-        let my = event.client_y() as f64 - rect.top() - canvas.height() as f64 / 2.0;
-        let cell = Axial::from_pixel(mx, my, HEX_SIZE);
+        // Same fit-to-window layout the renderer uses, so hit-testing tracks
+        // whatever size the map is currently drawn at.
+        let (size, ox, oy) = hex_layout(rect.width(), rect.height());
+        let mx = event.client_x() as f64 - rect.left() - ox;
+        let my = event.client_y() as f64 - rect.top() - oy;
+        let cell = Axial::from_pixel(mx, my, size);
         if (cell.q.abs() + cell.r.abs() + (cell.q + cell.r).abs()) / 2 > RADIUS {
             return;
         }
@@ -432,8 +505,10 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
         }
 
         state.borrow_mut().selected = Some((cell.q, cell.r));
-        redraw(&state.borrow());
+        // Open the panel first, then redraw: the panel shrinks the canvas box,
+        // so the fit-to-window layout must recompute against the new width.
         set_panel_open(true);
+        redraw(&state.borrow());
         set_text("panel-cell", &cell_label(cell.q, cell.r));
         input("title").set_value("");
         textarea("notes").set_value("");
@@ -514,8 +589,9 @@ fn attach_save_click(state: Rc<RefCell<AppState>>) {
 fn attach_close_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
         state.borrow_mut().selected = None;
-        redraw(&state.borrow());
+        // Close first so the canvas reclaims the panel's width before redraw.
         set_panel_open(false);
+        redraw(&state.borrow());
         set_text("status", "");
     });
     document()
@@ -595,6 +671,16 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
         .expect("missing #create")
         .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
         .expect("attaching create handler");
+    closure.forget();
+}
+
+/// Redraw on window resize so the map keeps filling the viewport (4.2
+/// fit-to-window). Cheap — one redraw per resize event.
+fn attach_window_resize(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+        redraw(&state.borrow());
+    });
+    let _ = window().add_event_listener_with_callback("resize", closure.as_ref().unchecked_ref());
     closure.forget();
 }
 

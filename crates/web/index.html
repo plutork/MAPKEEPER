@@ -14,7 +14,8 @@
     background: #161a1d;
     color: #eee;
   }
-  #map { display: block; background: #0e1113; cursor: pointer; }
+  #map { display: block; width: 100%; height: 100%; background: #0e1113; cursor: pointer; }
+  .map-wrap { position: relative; flex: 1; min-width: 0; height: 100vh; }
   #panel {
     width: 300px;
     padding: 20px;
@@ -79,7 +80,7 @@
 
   .view { display: none; width: 100%; }
   .view.active { display: block; }
-  #editor.active { display: flex; }
+  #editor.active { display: flex; height: 100vh; }
 
   #home { max-width: 1140px; margin: 34px auto; padding: 0 24px 28px; }
   .brand { text-align: center; margin-bottom: 24px; }
@@ -258,7 +259,7 @@
   </div>
 
   <div id="editor" class="view">
-    <div style="position: relative;">
+    <div class="map-wrap">
       <canvas id="map" width="720" height="560"></canvas>
       <div id="hint">mapkeeper V0 — Inspect names a cell; terrain brushes paint the map-state layer</div>
       <button id="switch-world">&larr; Worlds</button>
