@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/plutork/MAPKEEPER/schemas/map-manifest.schema.json",
+  "title": "mapkeeper map manifest (V0)",
+  "description": "map/manifest.json — machine-readable index of a world's map state: bounds + declared layers. Mirrors crates/core/src/layer.rs::MapManifest (D-36). The renderer is a projection of this model, not the source of truth.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "bounds", "layers"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "bounds": {
+      "type": "object",
+      "description": "Spatial bounds. V0 only supports a radial hexagon centered at the origin.",
+      "additionalProperties": false,
+      "required": ["kind", "radius"],
+      "properties": {
+        "kind": { "const": "hex-radius" },
+        "radius": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "layers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["layer_id", "value_type", "file"],
+        "properties": {
+          "layer_id": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
+          "value_type": { "enum": ["categorical"] },
+          "file": { "type": "string" }
+        }
+      }
+    }
+  }
+}

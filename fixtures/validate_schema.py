@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""Validate fixtures/profiles/{valid,invalid}/*.json against
-schemas/cell-profile.schema.json (roadmap 1.2 V0-done criterion, D-22).
+"""Validate example fixtures against the mapkeeper JSON Schemas.
+
+Covers:
+- profiles  -> schemas/cell-profile.schema.json  (roadmap 1.2, D-22)
+- layers    -> schemas/map-layer.schema.json      (Hex Map Model Foundation, D-36)
+- manifests -> schemas/map-manifest.schema.json   (D-36)
+
+For each contract, `<dir>/valid/*.json` must pass its schema and
+`<dir>/invalid/*.json` must fail it.
 
 Usage: python fixtures/validate_schema.py
-Exit code 0 = all fixtures behaved as their folder name promises.
+Exit code 0 = every fixture behaved as its folder name promises.
 """
 import json
 import sys
@@ -16,17 +23,22 @@ except ImportError:
     sys.exit(2)
 
 ROOT = Path(__file__).resolve().parent.parent
-SCHEMA_PATH = ROOT / "schemas" / "cell-profile.schema.json"
-FIXTURES_DIR = Path(__file__).resolve().parent / "profiles"
+FIXTURES_DIR = Path(__file__).resolve().parent
+
+# (fixtures subdir, schema file) — one entry per data contract.
+CONTRACTS = [
+    ("profiles", "cell-profile.schema.json"),
+    ("layers", "map-layer.schema.json"),
+    ("manifests", "map-manifest.schema.json"),
+]
 
 
-def load_schema():
-    with open(SCHEMA_PATH, encoding="utf-8") as f:
+def load_schema(name):
+    with open(ROOT / "schemas" / name, encoding="utf-8") as f:
         return json.load(f)
 
 
-def check_dir(schema, dir_name, expect_valid):
-    dir_path = FIXTURES_DIR / dir_name
+def check_dir(schema, dir_path, expect_valid):
     files = sorted(dir_path.glob("*.json"))
     if not files:
         print(f"error: no fixture files in {dir_path}", file=sys.stderr)
@@ -49,10 +61,14 @@ def check_dir(schema, dir_name, expect_valid):
 
 
 def main():
-    schema = load_schema()
-    valid_ok = check_dir(schema, "valid", expect_valid=True)
-    invalid_ok = check_dir(schema, "invalid", expect_valid=False)
-    if valid_ok and invalid_ok:
+    all_ok = True
+    for subdir, schema_name in CONTRACTS:
+        schema = load_schema(schema_name)
+        base = FIXTURES_DIR / subdir
+        valid_ok = check_dir(schema, base / "valid", expect_valid=True)
+        invalid_ok = check_dir(schema, base / "invalid", expect_valid=False)
+        all_ok = all_ok and valid_ok and invalid_ok
+    if all_ok:
         print("All fixtures matched their expected schema outcome.")
         return 0
     return 1

@@ -32,7 +32,7 @@ Node in the product runtime:
 
 | Path | Owns |
 |------|------|
-| `crates/core` | Platform-neutral rules — cell_id, hex geometry, profile + validation model |
+| `crates/core` | Platform-neutral rules — cell_id, hex geometry + spatial contract, profile model, layer-first map-state model (`layer.rs`) |
 | `crates/cli` | `mapkeeper` binary — filesystem + commands |
 | `crates/server` | Local filesystem, world folder, HTTP API, projects list |
 | `crates/web` | Rust→WASM UI — calls `core` for logic, `server`/Tauri for filesystem |
@@ -48,8 +48,10 @@ Node in the product runtime:
 powershell -File crates/web/build.ps1     # build the web UI (wasm-bindgen)
 cargo run -p mapkeeper-server -- --port 4000 --web-dist crates/web/dist
 # open http://127.0.0.1:4000 — Home screen: create a new world (id + folder) or
-# open an existing one, then click a hex, save a title/notes. Then:
+# open an existing one, then click a hex: Inspect names it (profile), the
+# terrain brushes paint the map-state layer. Then query either back:
 cargo run -p mapkeeper-cli -- profile get demo.hex.q0.r0 --world .tmp-world
+cargo run -p mapkeeper-cli -- terrain get demo.hex.q0.r0 --world .tmp-world
 ```
 
 `mapkeeper-server` starts in **launcher mode** with no `--world` flag — the
@@ -93,11 +95,16 @@ subcommand. Windows only for V0 — code signing and auto-update are Later
 
 ## Status
 
-**V0 done.** Full flow works end to end: open the launcher Home screen (web
-or desktop app), create or pick a world, paint a hex cell, save a profile
-(real V0 fields — `cell_id`/`display_name`/`slug`/`notes`), query it back
-over the CLI — CI-tested (schema fixtures + CLI round trip) and dogfooded on
-a real local world. Windows desktop installer (`crates/desktop`, Tauri)
-wraps the same web UI in a native window. Renderer polish (better than
-"guess the hex coordinates") is still open, Later. World projects also work
-via the GitHub template above (interim, git-native authors).
+**V0 done**, plus the **Hex Map Model Foundation**. Full flow works end to
+end: open the launcher Home screen (web or desktop app), create or pick a
+world, click a hex to name it (profile — `cell_id`/`display_name`/`slug`/
+`notes`) or paint terrain, and query either back over the CLI — CI-tested
+(schema fixtures + CLI round trip) and dogfooded on a real local world.
+
+The map is a **layer-first world-state model**: machine-readable state lives
+under `map/manifest.json` + `map/layers/<id>.json` (sparse per layer — a cell
+is `unknown` / `none` / a concrete `value`), kept separate from author
+profiles. `terrain` is the first layer; the renderer projects it. Windows
+desktop installer (`crates/desktop`, Tauri) wraps the same web UI natively.
+Renderer polish, more layers, generators and validators are Later. World
+projects also work via the GitHub template above (interim, git-native authors).

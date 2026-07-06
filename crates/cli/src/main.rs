@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use mapkeeper_core::cell_id::CellId;
+use mapkeeper_core::layer::{CellState, Layer};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
 use mapkeeper_core::world;
@@ -31,6 +32,11 @@ enum Command {
     Profile {
         #[command(subcommand)]
         action: ProfileAction,
+    },
+    /// Query or edit the terrain map-state layer (Hex Map Model Foundation, D-36).
+    Terrain {
+        #[command(subcommand)]
+        action: TerrainAction,
     },
 }
 
@@ -69,6 +75,40 @@ enum ProfileAction {
     },
 }
 
+#[derive(Subcommand)]
+enum TerrainAction {
+    /// Print a cell's terrain state as JSON (unknown / none / value).
+    Get {
+        /// Canonical cell_id, e.g. `main.hex.q3.r-1`.
+        cell_id: String,
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+    },
+    /// List every cell with a stored terrain state (none or value).
+    List {
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+    },
+    /// Set a cell's terrain value, or mark it explicitly absent with `--none`.
+    Set {
+        cell_id: String,
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+        /// Terrain value (e.g. `forest`). Omit and pass `--none` for explicit absence.
+        #[arg(long, conflicts_with = "none")]
+        value: Option<String>,
+        /// Mark the cell as explicitly absent (`none`) rather than a value.
+        #[arg(long)]
+        none: bool,
+    },
+    /// Clear a cell back to `unknown` (removes it from the layer file).
+    Clear {
+        cell_id: String,
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -79,6 +119,14 @@ fn main() -> Result<()> {
             ProfileAction::Set { cell_id, world, title, notes } => {
                 cmd_profile_set(&world, &cell_id, &title, &notes)
             }
+        },
+        Command::Terrain { action } => match action {
+            TerrainAction::Get { cell_id, world } => cmd_terrain_get(&world, &cell_id),
+            TerrainAction::List { world } => cmd_terrain_list(&world),
+            TerrainAction::Set { cell_id, world, value, none } => {
+                cmd_terrain_set(&world, &cell_id, value, none)
+            }
+            TerrainAction::Clear { cell_id, world } => cmd_terrain_clear(&world, &cell_id),
         },
     }
 }
@@ -203,5 +251,74 @@ fn cmd_profile_set(world: &Path, cell_id: &str, title: &str, notes: &str) -> Res
     fs::create_dir_all(path.parent().unwrap())?;
     fs::write(&path, serde_json::to_string_pretty(&profile)?)?;
     println!("Saved {}", path.display());
+    Ok(())
+}
+
+fn terrain_layer_path(world: &Path) -> PathBuf {
+    world.join("map").join("layers").join("terrain.json")
+}
+
+/// Read the terrain layer, or a fresh empty one if the file is not there yet.
+fn read_terrain_layer(world: &Path) -> Result<Layer> {
+    let path = terrain_layer_path(world);
+    if path.exists() {
+        let raw = fs::read_to_string(&path)?;
+        Ok(Layer::from_json(&raw)?)
+    } else {
+        Ok(Layer::terrain())
+    }
+}
+
+fn write_terrain_layer(world: &Path, layer: &Layer) -> Result<()> {
+    let path = terrain_layer_path(world);
+    fs::create_dir_all(path.parent().unwrap())?;
+    fs::write(&path, layer.to_json_pretty()?)?;
+    Ok(())
+}
+
+fn cmd_terrain_get(world: &Path, cell_id: &str) -> Result<()> {
+    let id = CellId::parse(cell_id).with_context(|| format!("invalid cell_id '{cell_id}'"))?;
+    let layer = read_terrain_layer(world)?;
+    let state = layer.state(&id.to_string());
+    println!("{}", serde_json::to_string_pretty(&state)?);
+    Ok(())
+}
+
+fn cmd_terrain_list(world: &Path) -> Result<()> {
+    let layer = read_terrain_layer(world)?;
+    if layer.cells.is_empty() {
+        println!("(no terrain set — every cell is unknown)");
+        return Ok(());
+    }
+    for (cell_id, entry) in &layer.cells {
+        match entry {
+            mapkeeper_core::layer::Entry::None => println!("{cell_id}\tnone"),
+            mapkeeper_core::layer::Entry::Value { value } => println!("{cell_id}\t{value}"),
+        }
+    }
+    Ok(())
+}
+
+fn cmd_terrain_set(world: &Path, cell_id: &str, value: Option<String>, none: bool) -> Result<()> {
+    let id = CellId::parse(cell_id).with_context(|| format!("invalid cell_id '{cell_id}'"))?;
+    let state = match (value, none) {
+        (Some(v), false) => CellState::value(v),
+        (None, true) => CellState::None,
+        (None, false) => bail!("pass either --value <TERRAIN> or --none"),
+        (Some(_), true) => unreachable!("clap conflicts_with prevents --value + --none"),
+    };
+    let mut layer = read_terrain_layer(world)?;
+    layer.set(id.to_string(), state);
+    write_terrain_layer(world, &layer)?;
+    println!("Saved terrain for {id}");
+    Ok(())
+}
+
+fn cmd_terrain_clear(world: &Path, cell_id: &str) -> Result<()> {
+    let id = CellId::parse(cell_id).with_context(|| format!("invalid cell_id '{cell_id}'"))?;
+    let mut layer = read_terrain_layer(world)?;
+    layer.set(id.to_string(), CellState::Unknown);
+    write_terrain_layer(world, &layer)?;
+    println!("Cleared terrain for {id} (now unknown)");
     Ok(())
 }

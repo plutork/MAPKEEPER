@@ -26,6 +26,8 @@ Authors create or import a map, divide it into **addressable cells**, attach **s
 
 **The map is not only a picture. It is the interface to a machine-readable world.**
 
+Under the hood mapkeeper is a **world-state editor**: each hex cell is an addressable container for **partial** world state, split into **layers** (terrain today; elevation, water, regions, routes… later). A cell value can be *unknown* (not decided), *none* (explicitly absent), or a concrete *value* — you fill only what matters now. Brushes, and one day generators, edit these layers; the renderer just projects them. Human-facing place descriptions (**profiles**) stay separate from this machine-readable map state, both anchored by the same cell id.
+
 | Not | Yes |
 |-----|-----|
 | Azgaar + AI | Generic local world editor |

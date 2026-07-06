@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/plutork/MAPKEEPER/schemas/map-layer.schema.json",
+  "title": "mapkeeper map layer (V0)",
+  "description": "One map-state layer file (map/layers/<id>.json) — mirrors crates/core/src/layer.rs::Layer. Sparse cell_id -> entry; a missing key means the cell is 'unknown' for this layer (partial-state model, D-36). Layers are machine-readable world state, kept separate from author-facing profiles.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "layer_id", "value_type", "cells"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Layer file format version."
+    },
+    "layer_id": {
+      "type": "string",
+      "description": "Layer identifier, e.g. 'terrain'.",
+      "pattern": "^[a-z0-9_-]+$"
+    },
+    "value_type": {
+      "enum": ["categorical"],
+      "description": "Kind of value the layer stores. Only 'categorical' (string) in V0."
+    },
+    "cells": {
+      "type": "object",
+      "description": "Sparse map: cell_id -> entry. Absent cell_id = 'unknown' (not stored).",
+      "propertyNames": {
+        "pattern": "^[a-z0-9_-]+\\.hex\\.q-?[0-9]+\\.r-?[0-9]+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "required": ["state"],
+            "properties": {
+              "state": { "const": "none" }
+            }
+          },
+          {
+            "additionalProperties": false,
+            "required": ["state", "value"],
+            "properties": {
+              "state": { "const": "value" },
+              "value": { "type": "string" }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

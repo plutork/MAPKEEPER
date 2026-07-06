@@ -3,6 +3,7 @@
 
 pub mod cell_id;
 pub mod hex;
+pub mod layer;
 pub mod profile;
 pub mod projects;
 pub mod world;

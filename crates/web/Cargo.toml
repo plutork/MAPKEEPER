@@ -35,4 +35,6 @@ features = [
     "EventTarget",
     "DomRect",
     "DomTokenList",
+    "Node",
+    "NodeList",
 ]

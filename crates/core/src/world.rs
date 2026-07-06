@@ -10,9 +10,10 @@
 //! `manifest_toml()` because it needs the author's world id substituted in.
 
 /// Relative directories created for a new world project. `.cursor/commands`
-/// is included so `SCAFFOLD_FILES`' `user.md` has somewhere to land.
+/// is included so `SCAFFOLD_FILES`' `user.md` has somewhere to land;
+/// `map/layers` holds the machine-readable map-state layers (D-36).
 pub const SCAFFOLD_DIRS: &[&str] =
-    &["map", "canon", "profiles", "data", "journal", ".cursor/commands"];
+    &["map", "map/layers", "canon", "profiles", "data", "journal", ".cursor/commands"];
 
 /// A static scaffold file: relative path inside the world folder + contents.
 pub struct ScaffoldFile {
@@ -43,6 +44,14 @@ pub const SCAFFOLD_FILES: &[ScaffoldFile] = &[
     ScaffoldFile {
         rel_path: "map/README.md",
         contents: include_str!("../../../toolchain/template/world/map/README.md"),
+    },
+    ScaffoldFile {
+        rel_path: "map/manifest.json",
+        contents: include_str!("../../../toolchain/template/world/map/manifest.json"),
+    },
+    ScaffoldFile {
+        rel_path: "map/layers/terrain.json",
+        contents: include_str!("../../../toolchain/template/world/map/layers/terrain.json"),
     },
     ScaffoldFile {
         rel_path: "canon/README.md",

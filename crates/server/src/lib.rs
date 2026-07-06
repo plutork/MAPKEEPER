@@ -27,6 +27,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use mapkeeper_core::cell_id::CellId;
+use mapkeeper_core::layer::{CellState, Layer};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
 use mapkeeper_core::world;
@@ -161,7 +162,22 @@ fn normalize_world_path(path: &Path) -> PathBuf {
     } else {
         std::env::current_dir().map(|cwd| cwd.join(path)).unwrap_or_else(|_| path.to_path_buf())
     };
-    std::fs::canonicalize(&absolute).unwrap_or(absolute)
+    let normalized = std::fs::canonicalize(&absolute).unwrap_or(absolute);
+    strip_windows_verbatim_prefix(normalized)
+}
+
+fn strip_windows_verbatim_prefix(path: PathBuf) -> PathBuf {
+    if !cfg!(windows) {
+        return path;
+    }
+    let raw = path.to_string_lossy();
+    if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{}", rest));
+    }
+    if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest.to_string());
+    }
+    path
 }
 
 fn path_cmp_key(path: &Path) -> String {
@@ -217,6 +233,8 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         .route("/api/projects/close", axum::routing::post(close_project))
         .route("/api/map", get(get_map))
         .route("/api/cells/:q/:r/profile", get(get_profile).put(put_profile))
+        .route("/api/layers/terrain", get(get_terrain_layer))
+        .route("/api/cells/:q/:r/terrain", axum::routing::put(put_cell_terrain))
         .with_state(state)
         .fallback_service(ServeDir::new(&config.web_dist)))
 }
@@ -284,7 +302,7 @@ async fn create_project(
     if !world::is_valid_world_id(&input.id) {
         return (
             StatusCode::BAD_REQUEST,
-            "invalid world id: use lowercase letters, digits, '-', '_' only",
+            "invalid world name format: use lowercase letters, digits, '-', '_' only",
         )
             .into_response();
     }
@@ -495,4 +513,66 @@ async fn put_profile(
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
     Json(profile).into_response()
+}
+
+// --- Map state: terrain layer (Hex Map Model Foundation, D-36) ------------
+// Map state lives under `map/layers/`, separate from author `profiles/`.
+// The server is a filesystem adapter (D-20): it reads/writes the layer file
+// and delegates the unknown/none/value model to mapkeeper-core.
+
+fn terrain_layer_path(world_path: &Path) -> PathBuf {
+    world_path.join("map").join("layers").join("terrain.json")
+}
+
+/// Load the terrain layer from disk, or a fresh empty layer if the file does
+/// not exist yet (worlds scaffolded before D-36, or a never-painted world).
+fn read_terrain_layer(world_path: &Path) -> Result<Layer, String> {
+    let path = terrain_layer_path(world_path);
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => Layer::from_json(&raw).map_err(|e| e.to_string()),
+        Err(_) => Ok(Layer::terrain()),
+    }
+}
+
+fn write_terrain_layer(world_path: &Path, layer: &Layer) -> Result<(), String> {
+    let path = terrain_layer_path(world_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let body = layer.to_json_pretty().map_err(|e| e.to_string())?;
+    std::fs::write(&path, body).map_err(|e| e.to_string())
+}
+
+async fn get_terrain_layer(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    match read_terrain_layer(&active.path) {
+        Ok(layer) => Json(layer).into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+    }
+}
+
+async fn put_cell_terrain(
+    State(state): State<Arc<Mutex<AppState>>>,
+    AxPath((q, r)): AxPath<(i32, i32)>,
+    Json(new_state): Json<CellState>,
+) -> impl IntoResponse {
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    let cell_id = CellId::new(&active.id, q, r).to_string();
+
+    let mut layer = match read_terrain_layer(&active.path) {
+        Ok(layer) => layer,
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+    };
+    layer.set(cell_id.clone(), new_state);
+    if let Err(err) = write_terrain_layer(&active.path, &layer) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    // Echo back the resolved state for this cell.
+    Json(layer.state(&cell_id)).into_response()
 }

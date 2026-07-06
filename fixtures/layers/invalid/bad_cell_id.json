@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "layer_id": "terrain",
+  "value_type": "categorical",
+  "cells": {
+    "not-a-cell-id": { "state": "value", "value": "forest" }
+  }
+}

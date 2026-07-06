@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "bounds": { "kind": "square", "width": 10, "height": 10 },
+  "layers": []
+}

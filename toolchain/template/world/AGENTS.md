@@ -8,6 +8,11 @@ You are in an **author world repo**, not mapkeeper editor source.
 
 ## Data contract (V0)
 
-Cell profiles in `profiles/*.json` — one file per cell, fields `cell_id`/`display_name`/`slug`/`notes`. Full description: [`profiles/README.md`](profiles/README.md). The running editor validates on save; no separate schema file lives in this folder.
+Two anchored-by-`cell_id` stores, kept separate on purpose:
+
+- **Author profiles** — `profiles/*.json`, one file per cell, fields `cell_id`/`display_name`/`slug`/`notes` (human-facing description). Full description: [`profiles/README.md`](profiles/README.md).
+- **Map state** — `map/manifest.json` + `map/layers/<id>.json` (machine-readable world state; `profiles` is **not** a layer). Sparse per layer: a cell absent from a layer file is `unknown`; `{ "state": "none" }` is explicitly absent; `{ "state": "value", "value": … }` is a known value. V0 ships one layer, `terrain`. Full description: [`map/README.md`](map/README.md).
+
+The running editor validates on save; no separate schema file lives in this folder.
 
 Product pitch: [STARTER_PACK.md](https://github.com/plutork/MAPKEEPER/blob/main/STARTER_PACK.md)

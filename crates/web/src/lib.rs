@@ -12,7 +12,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::hex::Axial;
+use mapkeeper_core::layer::{CellState, Entry, Layer};
 use mapkeeper_core::profile::CellProfile;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -85,8 +87,30 @@ struct DeleteProjectInput<'a> {
     path: &'a str,
 }
 
+/// Local mirror of a cell's terrain state (map-state layer, D-36). `unknown`
+/// is represented by the cell being absent from the map.
+#[derive(Clone)]
+enum TerrainCell {
+    None,
+    Value(String),
+}
+
+/// Active editing tool. `Inspect` keeps the old click→profile behavior; the
+/// terrain brushes paint the terrain map-state layer instead.
+#[derive(Clone)]
+enum Brush {
+    Inspect,
+    SetValue(String),
+    SetNone,
+    Clear,
+}
+
 struct AppState {
+    /// Cells that have an author profile (used for the profile-presence marker).
     cells: HashMap<(i32, i32), String>,
+    /// Terrain layer mirror — only `none`/`value` cells; absent = unknown.
+    terrain: HashMap<(i32, i32), TerrainCell>,
+    brush: Brush,
     selected: Option<(i32, i32)>,
     default_worlds_root: Option<String>,
     path_touched: bool,
@@ -98,6 +122,8 @@ pub fn start() {
 
     let state = Rc::new(RefCell::new(AppState {
         cells: HashMap::new(),
+        terrain: HashMap::new(),
+        brush: Brush::Inspect,
         selected: None,
         default_worlds_root: None,
         path_touched: false,
@@ -110,6 +136,7 @@ pub fn start() {
     attach_switch_world_click(state.clone());
     attach_create_click(state.clone());
     attach_project_list_click(state.clone());
+    attach_palette_click(state.clone());
     attach_browse_folder_click();
     attach_new_id_input(state.clone());
     attach_new_path_input(state.clone());
@@ -220,14 +247,38 @@ fn redraw(state: &AppState) {
             }
             ctx.close_path();
 
-            let painted = state.cells.contains_key(&(q, r));
             let selected = state.selected == Some((q, r));
-            ctx.set_fill_style_str(if painted { "#2f6b4f" } else { "#1c2126" });
+            // Fill = terrain layer projection (unknown/none/value).
+            ctx.set_fill_style_str(terrain_fill(state.terrain.get(&(q, r))));
             ctx.fill();
             ctx.set_line_width(if selected { 3.0 } else { 1.0 });
             ctx.set_stroke_style_str(if selected { "#9fe3c4" } else { "#333940" });
             ctx.stroke();
+
+            // Profile-presence marker — a separate layer from terrain, so both
+            // are visible at once (a cell can have terrain, a profile, or both).
+            if state.cells.contains_key(&(q, r)) {
+                ctx.begin_path();
+                let _ = ctx.arc(cx, cy, 4.0, 0.0, std::f64::consts::PI * 2.0);
+                ctx.set_fill_style_str("#e8d27a");
+                ctx.fill();
+            }
         }
+    }
+}
+
+/// Terrain layer → cell fill color. `None` (the map key is absent) = unknown.
+fn terrain_fill(cell: Option<&TerrainCell>) -> &'static str {
+    match cell {
+        None => "#1c2126",                    // unknown — not decided
+        Some(TerrainCell::None) => "#0b0d10", // explicitly absent
+        Some(TerrainCell::Value(v)) => match v.as_str() {
+            "plains" => "#6a7b43",
+            "forest" => "#2f6b4f",
+            "water" => "#2e5f8a",
+            "mountain" => "#6d6f78",
+            _ => "#8a7f4f", // unknown proof value — still visibly "has a value"
+        },
     }
 }
 
@@ -329,11 +380,31 @@ fn refresh_suggested_path(state: &Rc<RefCell<AppState>>) {
 }
 
 async fn load_map(state: Rc<RefCell<AppState>>) {
-    let Ok(resp) = gloo_net::http::Request::get("/api/map").send().await else { return };
-    let Ok(map) = resp.json::<MapResponse>().await else { return };
+    if let Ok(resp) = gloo_net::http::Request::get("/api/map").send().await {
+        if let Ok(map) = resp.json::<MapResponse>().await {
+            let mut state_mut = state.borrow_mut();
+            state_mut.cells = map.cells.into_iter().map(|c| ((c.q, c.r), c.display_name)).collect();
+        }
+    }
+    load_terrain(&state).await;
+    redraw(&state.borrow());
+}
+
+/// Fetch the terrain map-state layer and mirror it locally. Unknown cells are
+/// simply not stored (absent = unknown, D-36).
+async fn load_terrain(state: &Rc<RefCell<AppState>>) {
+    let Ok(resp) = gloo_net::http::Request::get("/api/layers/terrain").send().await else { return };
+    let Ok(layer) = resp.json::<Layer>().await else { return };
     let mut state_mut = state.borrow_mut();
-    state_mut.cells = map.cells.into_iter().map(|c| ((c.q, c.r), c.display_name)).collect();
-    redraw(&state_mut);
+    state_mut.terrain.clear();
+    for (cell_id, entry) in layer.cells {
+        let Some(id) = CellId::parse(&cell_id) else { continue };
+        let value = match entry {
+            Entry::None => TerrainCell::None,
+            Entry::Value { value } => TerrainCell::Value(value),
+        };
+        state_mut.terrain.insert((id.q, id.r), value);
+    }
 }
 
 fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
@@ -344,6 +415,19 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
         let my = event.client_y() as f64 - rect.top() - canvas.height() as f64 / 2.0;
         let cell = Axial::from_pixel(mx, my, HEX_SIZE);
         if (cell.q.abs() + cell.r.abs() + (cell.q + cell.r).abs()) / 2 > RADIUS {
+            return;
+        }
+
+        // A terrain brush paints the map-state layer; Inspect opens the
+        // author profile panel (unchanged behavior).
+        let brush = state.borrow().brush.clone();
+        if let Some(new_state) = brush_cell_state(&brush) {
+            wasm_bindgen_futures::spawn_local(paint_terrain(
+                state.clone(),
+                cell.q,
+                cell.r,
+                new_state,
+            ));
             return;
         }
 
@@ -451,6 +535,7 @@ fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
             let _ = gloo_net::http::Request::post("/api/projects/close").send().await;
             let mut state_mut = state.borrow_mut();
             state_mut.cells.clear();
+            state_mut.terrain.clear();
             state_mut.selected = None;
             set_panel_open(false);
             set_text("status", "");
@@ -473,7 +558,7 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
         let id = input("new-id").value();
         let path = input("new-path").value();
         if id.trim().is_empty() || path.trim().is_empty() {
-            set_text("home-status", "World id and folder are both required.");
+            set_text("home-status", "World name and folder are both required.");
             return;
         }
         let state = state.clone();
@@ -526,6 +611,90 @@ fn attach_new_path_input(state: Rc<RefCell<AppState>>) {
         state.borrow_mut().path_touched = true;
     });
     let _ = input("new-path").add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
+    closure.forget();
+}
+
+/// Map a brush to the terrain `CellState` it writes. `Inspect` writes
+/// nothing (returns `None`) — it opens the profile panel instead.
+fn brush_cell_state(brush: &Brush) -> Option<CellState> {
+    match brush {
+        Brush::Inspect => None,
+        Brush::SetValue(v) => Some(CellState::value(v.clone())),
+        Brush::SetNone => Some(CellState::None),
+        Brush::Clear => Some(CellState::Unknown),
+    }
+}
+
+/// PUT the terrain state for a cell, then mirror it locally and redraw. The
+/// filesystem write happens server-side (D-20); the WASM UI never touches FS.
+async fn paint_terrain(state: Rc<RefCell<AppState>>, q: i32, r: i32, new_state: CellState) {
+    set_text("status", "Painting…");
+    let sent = gloo_net::http::Request::put(&format!("/api/cells/{q}/{r}/terrain"))
+        .json(&new_state)
+        .expect("serializing terrain body")
+        .send()
+        .await;
+    match sent {
+        Ok(resp) if resp.ok() => {
+            let mut state_mut = state.borrow_mut();
+            match new_state {
+                CellState::Unknown => {
+                    state_mut.terrain.remove(&(q, r));
+                }
+                CellState::None => {
+                    state_mut.terrain.insert((q, r), TerrainCell::None);
+                }
+                CellState::Value { value } => {
+                    state_mut.terrain.insert((q, r), TerrainCell::Value(value));
+                }
+            }
+            redraw(&state_mut);
+            drop(state_mut);
+            set_text("status", "");
+        }
+        _ => set_text("status", "Paint failed."),
+    }
+}
+
+/// Terrain palette: clicking a tool sets the active brush and highlights it.
+/// `data-brush` values: `inspect`, `none`, `clear`, or `value:<terrain>`.
+fn attach_palette_click(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+        let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else { return };
+        let Ok(Some(button)) = target.closest("[data-brush]") else { return };
+        let Some(kind) = button.get_attribute("data-brush") else { return };
+
+        let brush = match kind.as_str() {
+            "inspect" => Brush::Inspect,
+            "none" => Brush::SetNone,
+            "clear" => Brush::Clear,
+            other => match other.strip_prefix("value:") {
+                Some(v) => Brush::SetValue(v.to_string()),
+                None => return,
+            },
+        };
+        state.borrow_mut().brush = brush;
+
+        // Highlight the active tool.
+        if let Some(palette) = document().get_element_by_id("palette") {
+            let items = palette.query_selector_all("[data-brush]").ok();
+            if let Some(items) = items {
+                for i in 0..items.length() {
+                    if let Some(node) = items.item(i) {
+                        if let Ok(el) = node.dyn_into::<Element>() {
+                            let _ = el.class_list().remove_1("active");
+                        }
+                    }
+                }
+            }
+            let _ = button.class_list().add_1("active");
+        }
+    });
+    document()
+        .get_element_by_id("palette")
+        .expect("missing #palette")
+        .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+        .expect("attaching palette handler");
     closure.forget();
 }
 

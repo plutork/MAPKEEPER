@@ -87,6 +87,115 @@ fn get_missing_profile_returns_blank_placeholder() {
 }
 
 #[test]
+fn terrain_set_get_list_clear_round_trip() {
+    let dir = tempdir().unwrap();
+    let world = dir.path();
+
+    mapkeeper()
+        .arg("init")
+        .arg("terra")
+        .arg("--path")
+        .arg(world)
+        .assert()
+        .success();
+
+    // Unknown by default (nothing painted yet).
+    let get = mapkeeper()
+        .args(["terrain", "get", "terra.hex.q0.r0"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&get.get_output().stdout).to_string();
+    assert!(stdout.contains("\"state\": \"unknown\""));
+
+    // Set a value.
+    mapkeeper()
+        .args(["terrain", "set", "terra.hex.q0.r0", "--value", "forest"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+
+    // Set another cell explicitly to none.
+    mapkeeper()
+        .args(["terrain", "set", "terra.hex.q1.r0", "--none"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+
+    let get = mapkeeper()
+        .args(["terrain", "get", "terra.hex.q0.r0"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&get.get_output().stdout).to_string();
+    assert!(stdout.contains("\"state\": \"value\""));
+    assert!(stdout.contains("\"value\": \"forest\""));
+
+    let list = mapkeeper()
+        .args(["terrain", "list"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&list.get_output().stdout).to_string();
+    assert!(stdout.contains("terra.hex.q0.r0\tforest"));
+    assert!(stdout.contains("terra.hex.q1.r0\tnone"));
+
+    // Clear back to unknown.
+    mapkeeper()
+        .args(["terrain", "clear", "terra.hex.q0.r0"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let get = mapkeeper()
+        .args(["terrain", "get", "terra.hex.q0.r0"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&get.get_output().stdout).to_string();
+    assert!(stdout.contains("\"state\": \"unknown\""));
+}
+
+/// Terrain writes must never appear in profile JSON (D-36 boundary).
+#[test]
+fn terrain_edit_leaves_profile_untouched() {
+    let dir = tempdir().unwrap();
+    let world = dir.path();
+
+    mapkeeper().arg("init").arg("sep").arg("--path").arg(world).assert().success();
+
+    mapkeeper()
+        .args(["profile", "set", "sep.hex.q0.r0", "--title", "Old mill"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    mapkeeper()
+        .args(["terrain", "set", "sep.hex.q0.r0", "--value", "forest"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+
+    let get = mapkeeper()
+        .args(["profile", "get", "sep.hex.q0.r0"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let profile = String::from_utf8_lossy(&get.get_output().stdout).to_string();
+    assert!(profile.contains("\"display_name\": \"Old mill\""));
+    assert!(!profile.contains("forest"));
+    assert!(!profile.contains("terrain"));
+}
+
+#[test]
 fn get_rejects_malformed_cell_id() {
     let dir = tempdir().unwrap();
     let world = dir.path();

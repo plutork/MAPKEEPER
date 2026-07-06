@@ -7,9 +7,12 @@ Use this first, then open only the needed files.
 ## Task -> first path
 
 - Core rules, ids, geometry, profile model -> `crates/core/src/`
+- Spatial contract (distance/ring/range/bounds) -> `crates/core/src/hex.rs`
+- Map state model (layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
 - HTTP API, world file I/O, launcher endpoints -> `crates/server/src/`
-- CLI commands and query flow -> `crates/cli/src/`
-- Web UI (WASM canvas, Home/Editor flow) -> `crates/web/src/`
+- Terrain layer endpoints (`/api/layers/terrain`, `/api/cells/:q/:r/terrain`) -> `crates/server/src/lib.rs`
+- CLI commands and query flow (`profile`, `terrain`) -> `crates/cli/src/`
+- Web UI (WASM canvas, Home/Editor flow, terrain palette) -> `crates/web/src/`
 - Desktop shell (Tauri wrapper, native dialog bridge) -> `crates/desktop/src/`
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
 - World scaffold source -> `toolchain/template/world/`
@@ -31,3 +34,12 @@ Use this first, then open only the needed files.
 
 - New procedural/generative map logic goes to `crates/core`.
 - `web`, `server`, `desktop`, `cli` call into core and own adapter concerns only.
+
+## Model boundary (D-36)
+
+- **Map state = layers** under `map/layers/<id>.json` (machine-readable, sparse
+  `cell_id -> {state}`; missing key = `unknown`). Model in `core::layer`.
+- **Author profiles** (`profiles/*.json`) are human-facing and **not** a layer.
+- Renderer is a projection of the layer model, not the source of truth.
+- Future generators/validators are local tools over these layers (not built,
+  not AI runtime).
