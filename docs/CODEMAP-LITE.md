@@ -46,9 +46,10 @@ Use this first, then open only the needed files.
   `cell_id -> {state}`; missing key = `unknown`). Model in `core::layer`.
 - **Author profiles** (`profiles/*.json`) are human-facing and **not** a layer.
 - Renderer is a projection of the layer model, not the source of truth.
-- Renderer layout (4.2): fit-to-window canvas — `hex_layout`/`map_half_extent`
-  compute hex size + origin from the live canvas box (`sync_canvas_size` +
-  window `resize`); `unknown`/`none`/`value` fills are visually distinct
-  (`none` gets an × marker). All in `crates/web/src/lib.rs`.
+- Renderer layout (4.2): fit-to-window canvas + camera viewport — base
+  `hex_layout`/`map_half_extent` plus `zoom` (0.6x–2.5x), `pan` (LMB drag),
+  and visible draw culling (`visible_scan_bounds`) in `crates/web/src/lib.rs`;
+  `unknown`/`none`/`value` fills stay visually distinct (`none` gets an ×
+  marker).
 - Future generators/validators are local tools over these layers (not built,
   not AI runtime).

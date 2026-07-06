@@ -22,6 +22,9 @@ use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 
 const DEFAULT_MAP_RADIUS: i32 = 6;
+const MIN_ZOOM: f64 = 0.6;
+const MAX_ZOOM: f64 = 2.5;
+const PAN_DRAG_THRESHOLD: f64 = 3.0;
 /// Fill inset so adjacent hex fills leave a thin grid gap.
 const HEX_GAP: f64 = 0.92;
 /// Breathing room (px) between the map and the canvas edge.
@@ -29,7 +32,6 @@ const CANVAS_PAD: f64 = 20.0;
 
 #[derive(Deserialize)]
 struct MapBoundsResponse {
-    kind: String,
     radius: i32,
     cell_count: u32,
 }
@@ -130,6 +132,17 @@ struct AppState {
     selected: Option<(i32, i32)>,
     /// Hex bounds radius from `map/manifest.json` (via `/api/map`).
     map_radius: i32,
+    /// Camera zoom multiplier over fit-to-window base size.
+    zoom: f64,
+    /// Camera pan offset in screen pixels.
+    pan_x: f64,
+    pan_y: f64,
+    /// Drag-pan interaction state.
+    drag_active: bool,
+    drag_moved: bool,
+    drag_last_x: f64,
+    drag_last_y: f64,
+    suppress_next_click: bool,
     legacy_map: bool,
     default_worlds_root: Option<String>,
     path_touched: bool,
@@ -145,6 +158,14 @@ pub fn start() {
         brush: Brush::Inspect,
         selected: None,
         map_radius: DEFAULT_MAP_RADIUS,
+        zoom: 1.0,
+        pan_x: 0.0,
+        pan_y: 0.0,
+        drag_active: false,
+        drag_moved: false,
+        drag_last_x: 0.0,
+        drag_last_y: 0.0,
+        suppress_next_click: false,
         legacy_map: false,
         default_worlds_root: None,
         path_touched: false,
@@ -160,6 +181,8 @@ pub fn start() {
     attach_project_list_click(state.clone());
     attach_dock_click(state.clone());
     attach_escape_key();
+    attach_pan_drag(state.clone());
+    attach_wheel_zoom(state.clone());
     attach_window_resize(state.clone());
     attach_browse_folder_click();
     attach_new_id_input(state.clone());
@@ -406,6 +429,48 @@ fn hex_layout(width: f64, height: f64, radius: i32) -> (f64, f64, f64) {
     (size, width / 2.0, height / 2.0)
 }
 
+/// Full layout with camera applied on top of the fit-to-window base.
+fn map_layout(state: &AppState, width: f64, height: f64) -> (f64, f64, f64) {
+    let radius = state.map_radius.max(0);
+    let (base_size, base_ox, base_oy) = hex_layout(width, height, radius);
+    let size = base_size * state.zoom;
+    let ox = base_ox + state.pan_x;
+    let oy = base_oy + state.pan_y;
+    (size, ox, oy)
+}
+
+fn clamp_zoom(value: f64) -> f64 {
+    value.max(MIN_ZOOM).min(MAX_ZOOM)
+}
+
+fn total_cell_count(radius: i32) -> usize {
+    let r = radius.max(0) as i64;
+    (1 + 3 * r * (r + 1)) as usize
+}
+
+/// Approximate axial scan bounds for visible cells. Adds a small padding ring
+/// to avoid clipping border cells due to hex corner geometry.
+fn visible_scan_bounds(width: f64, height: f64, size: f64, ox: f64, oy: f64, radius: i32) -> (i32, i32, i32, i32) {
+    let mut min_q = i32::MAX;
+    let mut max_q = i32::MIN;
+    let mut min_r = i32::MAX;
+    let mut max_r = i32::MIN;
+    for (sx, sy) in [(0.0, 0.0), (width, 0.0), (0.0, height), (width, height)] {
+        let cell = Axial::from_pixel(sx - ox, sy - oy, size);
+        min_q = min_q.min(cell.q);
+        max_q = max_q.max(cell.q);
+        min_r = min_r.min(cell.r);
+        max_r = max_r.max(cell.r);
+    }
+    let pad = ((2.0 / size).ceil() as i32).max(2);
+    (
+        min_q.saturating_sub(pad).max(-radius),
+        max_q.saturating_add(pad).min(radius),
+        min_r.saturating_sub(pad).max(-radius),
+        max_r.saturating_add(pad).min(radius),
+    )
+}
+
 /// Match the canvas backing store to its CSS box so the map scales with the
 /// window (no browser upscaling blur). Returns the current pixel dimensions.
 fn sync_canvas_size() -> (f64, f64) {
@@ -440,14 +505,16 @@ fn redraw(state: &AppState) {
     let (width, height) = sync_canvas_size();
     let ctx = context();
     let radius = state.map_radius.max(0);
-    let (size, ox, oy) = hex_layout(width, height, radius);
+    let (size, ox, oy) = map_layout(state, width, height);
 
     ctx.clear_rect(0.0, 0.0, width, height);
     ctx.set_fill_style_str("#0e1113");
     ctx.fill_rect(0.0, 0.0, width, height);
 
-    for q in -radius..=radius {
-        for r in -radius..=radius {
+    let (q_min, q_max, r_min, r_max) = visible_scan_bounds(width, height, size, ox, oy, radius);
+    let mut drawn_cells = 0usize;
+    for q in q_min..=q_max {
+        for r in r_min..=r_max {
             if (q.abs() + r.abs() + (q + r).abs()) / 2 > radius {
                 continue;
             }
@@ -485,8 +552,18 @@ fn redraw(state: &AppState) {
                 ctx.set_fill_style_str("#e8d27a");
                 ctx.fill();
             }
+            drawn_cells += 1;
         }
     }
+    set_text(
+        "view-stats",
+        &format!(
+            "Zoom {:.2}x · Draw {} / {} cells",
+            state.zoom,
+            drawn_cells,
+            total_cell_count(radius)
+        ),
+    );
 }
 
 /// Terrain layer → cell fill color. `None` (the map key is absent) = unknown.
@@ -615,6 +692,9 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
             let mut state_mut = state.borrow_mut();
             state_mut.cells = map.cells.into_iter().map(|c| ((c.q, c.r), c.display_name)).collect();
             state_mut.map_radius = map.bounds.radius.max(0);
+            state_mut.zoom = 1.0;
+            state_mut.pan_x = 0.0;
+            state_mut.pan_y = 0.0;
             state_mut.legacy_map = map.legacy_map;
             set_world_label(&format!(
                 "{} · {} cells",
@@ -656,9 +736,12 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
         let canvas = canvas();
         let rect = canvas.get_bounding_client_rect();
         let radius = state.borrow().map_radius.max(0);
-        // Same fit-to-window layout the renderer uses, so hit-testing tracks
-        // whatever size the map is currently drawn at.
-        let (size, ox, oy) = hex_layout(rect.width(), rect.height(), radius);
+        if state.borrow().suppress_next_click {
+            state.borrow_mut().suppress_next_click = false;
+            return;
+        }
+        // Hit-testing uses the same camera-aware layout as redraw.
+        let (size, ox, oy) = map_layout(&state.borrow(), rect.width(), rect.height());
         let mx = event.client_x() as f64 - rect.left() - ox;
         let my = event.client_y() as f64 - rect.top() - oy;
         let cell = Axial::from_pixel(mx, my, size);
@@ -694,6 +777,119 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
         wasm_bindgen_futures::spawn_local(load_profile_into_panel(state.clone(), cell.q, cell.r));
     });
     canvas().set_onclick(Some(closure.as_ref().unchecked_ref()));
+    closure.forget();
+}
+
+/// Left-drag pan (author-selected): keeps click semantics for short taps,
+/// turns into viewport pan once movement exceeds a small threshold.
+fn attach_pan_drag(state: Rc<RefCell<AppState>>) {
+    let down_state = state.clone();
+    let on_down = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+        if event.button() != 0 {
+            return;
+        }
+        let mut s = down_state.borrow_mut();
+        s.drag_active = true;
+        s.drag_moved = false;
+        s.drag_last_x = event.client_x() as f64;
+        s.drag_last_y = event.client_y() as f64;
+    });
+    let _ = canvas().add_event_listener_with_callback("mousedown", on_down.as_ref().unchecked_ref());
+    on_down.forget();
+
+    let move_state = state.clone();
+    let on_move = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+        if !move_state.borrow().drag_active {
+            return;
+        }
+        let x = event.client_x() as f64;
+        let y = event.client_y() as f64;
+        let mut redraw_now = false;
+        {
+            let mut s = move_state.borrow_mut();
+            let dx = x - s.drag_last_x;
+            let dy = y - s.drag_last_y;
+            s.drag_last_x = x;
+            s.drag_last_y = y;
+            if !s.drag_moved && (dx * dx + dy * dy).sqrt() >= PAN_DRAG_THRESHOLD {
+                s.drag_moved = true;
+            }
+            if s.drag_moved {
+                s.pan_x += dx;
+                s.pan_y += dy;
+                redraw_now = true;
+            }
+        }
+        if redraw_now {
+            redraw(&move_state.borrow());
+        }
+    });
+    let _ = window().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
+    on_move.forget();
+
+    let up_state = state.clone();
+    let on_up = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+        if event.button() != 0 {
+            return;
+        }
+        let moved = up_state.borrow().drag_moved;
+        let was_active = up_state.borrow().drag_active;
+        if !was_active {
+            return;
+        }
+        {
+            let mut s = up_state.borrow_mut();
+            s.drag_active = false;
+            s.drag_moved = false;
+            if moved {
+                s.suppress_next_click = true;
+            }
+        }
+    });
+    let _ = window().add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
+    on_up.forget();
+}
+
+/// Wheel zoom with cursor anchor, clamped to the chosen 0.6x–2.5x range.
+fn attach_wheel_zoom(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+        event.prevent_default();
+        let client_x = js_sys::Reflect::get(event.as_ref(), &JsValue::from_str("clientX"))
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let client_y = js_sys::Reflect::get(event.as_ref(), &JsValue::from_str("clientY"))
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let delta_y = js_sys::Reflect::get(event.as_ref(), &JsValue::from_str("deltaY"))
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let canvas = canvas();
+        let rect = canvas.get_bounding_client_rect();
+        let mx = client_x - rect.left();
+        let my = client_y - rect.top();
+        let mut s = state.borrow_mut();
+        let radius = s.map_radius.max(0);
+        let (base_size, base_ox, base_oy) = hex_layout(rect.width(), rect.height(), radius);
+        let old_size = base_size * s.zoom;
+        let old_ox = base_ox + s.pan_x;
+        let old_oy = base_oy + s.pan_y;
+        let world_x = (mx - old_ox) / old_size;
+        let world_y = (my - old_oy) / old_size;
+        let factor = if delta_y < 0.0 { 1.1 } else { 0.9 };
+        let new_zoom = clamp_zoom(s.zoom * factor);
+        s.zoom = new_zoom;
+        let new_size = base_size * s.zoom;
+        let new_ox = mx - world_x * new_size;
+        let new_oy = my - world_y * new_size;
+        s.pan_x = new_ox - base_ox;
+        s.pan_y = new_oy - base_oy;
+        drop(s);
+        redraw(&state.borrow());
+    });
+    let _ = canvas().add_event_listener_with_callback("wheel", closure.as_ref().unchecked_ref());
     closure.forget();
 }
 
@@ -785,6 +981,9 @@ fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
             state_mut.terrain.clear();
             state_mut.selected = None;
             state_mut.map_radius = DEFAULT_MAP_RADIUS;
+            state_mut.zoom = 1.0;
+            state_mut.pan_x = 0.0;
+            state_mut.pan_y = 0.0;
             state_mut.legacy_map = false;
             set_drawer_open(false);
             clear_inspect_selection();

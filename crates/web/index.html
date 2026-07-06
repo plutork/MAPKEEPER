@@ -340,7 +340,7 @@
   <div id="editor" class="view">
     <div class="map-wrap">
       <canvas id="map" width="720" height="560"></canvas>
-      <div id="hint">mapkeeper — use the tool dock on the right (Inspect names cells; Terrain paints map state)</div>
+      <div id="hint">mapkeeper — LMB drag pan, wheel zoom, tool dock on the right (Inspect names cells; Terrain paints map state)</div>
     </div>
     <aside id="tool-dock">
       <nav id="dock-rail" aria-label="Tools">
@@ -380,8 +380,9 @@
         </div>
         <div class="drawer-pane" data-drawer="view">
           <p class="pane-label">View</p>
-          <p class="dock-note">Layer legend, coordinates, and visibility toggles — coming in a later release.</p>
-          <p class="dock-note">The map fills the window and rescales when you resize it.</p>
+          <p id="view-stats" class="dock-note">Zoom 1.00x · Draw 0 / 0 cells</p>
+          <p class="dock-note">LMB drag pans the camera. Mouse wheel zooms (0.6x–2.5x).</p>
+          <p class="dock-note">Layer legend and coordinate overlays — coming in a later release.</p>
         </div>
         <div class="drawer-pane" data-drawer="world">
           <p class="pane-label">World</p>
