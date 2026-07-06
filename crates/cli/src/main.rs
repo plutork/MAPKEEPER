@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use mapkeeper_core::cell_id::CellId;
-use mapkeeper_core::layer::{CellState, Layer};
+use mapkeeper_core::layer::{CellState, Layer, MapManifest};
+use mapkeeper_core::map_preset::{MapPreset, parse_map_preset};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
 use mapkeeper_core::world;
@@ -47,6 +48,9 @@ struct InitArgs {
     /// Target folder for the world project (created if missing).
     #[arg(long, default_value = ".")]
     path: PathBuf,
+    /// Map size preset: small (~127), medium (~1K), large (~8K cells).
+    #[arg(long)]
+    map_preset: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -148,6 +152,15 @@ fn cmd_init(args: InitArgs) -> Result<()> {
         bail!("{} already has a mapkeeper.toml — not overwriting", args.path.display());
     }
     write_scaffold_files(&args.path)?;
+    let preset = match args.map_preset.as_deref() {
+        None => MapPreset::Small,
+        Some(raw) => parse_map_preset(raw).ok_or_else(|| {
+            anyhow::anyhow!(
+                "invalid map preset '{raw}': use small, medium, or large"
+            )
+        })?,
+    };
+    write_map_manifest(&args.path, preset.radius())?;
     fs::write(&manifest, world::manifest_toml(&args.world_id))?;
     println!(
         "Scaffolded world '{}' at {}",
@@ -174,6 +187,16 @@ fn write_scaffold_files(root: &Path) -> Result<()> {
         }
         fs::write(&path, file.contents)?;
     }
+    Ok(())
+}
+
+fn write_map_manifest(world_path: &Path, radius: i32) -> Result<()> {
+    let manifest = MapManifest::default_v0(radius);
+    let path = world_path.join("map/manifest.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, manifest.to_json_pretty()?)?;
     Ok(())
 }
 

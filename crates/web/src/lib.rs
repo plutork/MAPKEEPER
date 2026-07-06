@@ -19,18 +19,27 @@ use mapkeeper_core::profile::CellProfile;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlInputElement, HtmlTextAreaElement};
+use web_sys::{CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 
-const RADIUS: i32 = 6;
+const DEFAULT_MAP_RADIUS: i32 = 6;
 /// Fill inset so adjacent hex fills leave a thin grid gap.
 const HEX_GAP: f64 = 0.92;
 /// Breathing room (px) between the map and the canvas edge.
 const CANVAS_PAD: f64 = 20.0;
 
 #[derive(Deserialize)]
+struct MapBoundsResponse {
+    kind: String,
+    radius: i32,
+    cell_count: u32,
+}
+
+#[derive(Deserialize)]
 struct MapResponse {
     #[allow(dead_code)]
     world_id: String,
+    bounds: MapBoundsResponse,
+    legacy_map: bool,
     cells: Vec<CellSummary>,
 }
 
@@ -57,9 +66,12 @@ struct ProjectEntry {
 
 #[derive(Deserialize)]
 struct ProjectStatus {
+    #[allow(dead_code)]
     id: String,
+    #[allow(dead_code)]
     path: String,
     valid: bool,
+    legacy_map: bool,
 }
 
 #[derive(Deserialize)]
@@ -73,6 +85,7 @@ struct ProjectsResponse {
 struct CreateProjectInput<'a> {
     id: &'a str,
     path: &'a str,
+    map_preset: &'a str,
 }
 
 #[derive(Serialize)]
@@ -115,6 +128,9 @@ struct AppState {
     terrain: HashMap<(i32, i32), TerrainCell>,
     brush: Brush,
     selected: Option<(i32, i32)>,
+    /// Hex bounds radius from `map/manifest.json` (via `/api/map`).
+    map_radius: i32,
+    legacy_map: bool,
     default_worlds_root: Option<String>,
     path_touched: bool,
 }
@@ -128,6 +144,8 @@ pub fn start() {
         terrain: HashMap::new(),
         brush: Brush::Inspect,
         selected: None,
+        map_radius: DEFAULT_MAP_RADIUS,
+        legacy_map: false,
         default_worlds_root: None,
         path_touched: false,
     }));
@@ -138,6 +156,7 @@ pub fn start() {
     attach_close_click(state.clone());
     attach_switch_world_click(state.clone());
     attach_create_click(state.clone());
+    attach_generate_click(state.clone());
     attach_project_list_click(state.clone());
     attach_dock_click(state.clone());
     attach_escape_key();
@@ -351,12 +370,21 @@ fn hex_corners(cx: f64, cy: f64, size: f64) -> [(f64, f64); 6] {
 /// Half-extent (in unit-size pixels) of the whole hex map, including the
 /// outer cells' corner reach. Pointy-top corners stick out `√3/2` sideways
 /// and `1.0` vertically. Used to fit the map into the current canvas.
-fn map_half_extent() -> (f64, f64) {
+fn select_value(id: &str) -> String {
+    document()
+        .get_element_by_id(id)
+        .expect("missing select")
+        .dyn_into::<HtmlSelectElement>()
+        .expect("not a select")
+        .value()
+}
+
+fn map_half_extent(radius: i32) -> (f64, f64) {
     let mut mx = 0.0_f64;
     let mut my = 0.0_f64;
-    for q in -RADIUS..=RADIUS {
-        for r in -RADIUS..=RADIUS {
-            if (q.abs() + r.abs() + (q + r).abs()) / 2 > RADIUS {
+    for q in -radius..=radius {
+        for r in -radius..=radius {
+            if (q.abs() + r.abs() + (q + r).abs()) / 2 > radius {
                 continue;
             }
             let (x, y) = Axial::new(q, r).to_pixel(1.0);
@@ -370,8 +398,8 @@ fn map_half_extent() -> (f64, f64) {
 /// Fit-to-window layout: hex `size` and origin so the radial map fills the
 /// canvas with padding. The map is symmetric about the axial origin, so the
 /// pixel origin is just the canvas center.
-fn hex_layout(width: f64, height: f64) -> (f64, f64, f64) {
-    let (hx, hy) = map_half_extent();
+fn hex_layout(width: f64, height: f64, radius: i32) -> (f64, f64, f64) {
+    let (hx, hy) = map_half_extent(radius);
     let avail_w = (width - 2.0 * CANVAS_PAD).max(1.0);
     let avail_h = (height - 2.0 * CANVAS_PAD).max(1.0);
     let size = (avail_w / (2.0 * hx)).min(avail_h / (2.0 * hy)).max(1.0);
@@ -411,15 +439,16 @@ fn draw_none_marker(ctx: &CanvasRenderingContext2d, cx: f64, cy: f64, size: f64)
 fn redraw(state: &AppState) {
     let (width, height) = sync_canvas_size();
     let ctx = context();
-    let (size, ox, oy) = hex_layout(width, height);
+    let radius = state.map_radius.max(0);
+    let (size, ox, oy) = hex_layout(width, height, radius);
 
     ctx.clear_rect(0.0, 0.0, width, height);
     ctx.set_fill_style_str("#0e1113");
     ctx.fill_rect(0.0, 0.0, width, height);
 
-    for q in -RADIUS..=RADIUS {
-        for r in -RADIUS..=RADIUS {
-            if (q.abs() + r.abs() + (q + r).abs()) / 2 > RADIUS {
+    for q in -radius..=radius {
+        for r in -radius..=radius {
+            if (q.abs() + r.abs() + (q + r).abs()) / 2 > radius {
                 continue;
             }
             let cell = Axial::new(q, r);
@@ -520,7 +549,13 @@ fn render_project_list(projects: &[ProjectStatus]) {
 
     let mut html = String::new();
     for p in projects {
-        let missing = if p.valid { "" } else { "<div class=\"missing\">folder not found</div>" };
+        let missing = if !p.valid {
+            "<div class=\"missing\">folder not found</div>"
+        } else if p.legacy_map {
+            "<div class=\"missing\">legacy map — no map/manifest.json</div>"
+        } else {
+            ""
+        };
         let actions = if p.valid {
             format!(
                 "<button class=\"open-btn\" data-path=\"{path}\" type=\"button\">Open</button><button class=\"manage-btn\" type=\"button\">Manage</button>",
@@ -579,7 +614,20 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
         if let Ok(map) = resp.json::<MapResponse>().await {
             let mut state_mut = state.borrow_mut();
             state_mut.cells = map.cells.into_iter().map(|c| ((c.q, c.r), c.display_name)).collect();
-            set_world_label(&map.world_id);
+            state_mut.map_radius = map.bounds.radius.max(0);
+            state_mut.legacy_map = map.legacy_map;
+            set_world_label(&format!(
+                "{} · {} cells",
+                map.world_id, map.bounds.cell_count
+            ));
+            if map.legacy_map {
+                set_text(
+                    "legacy-map-note",
+                    "Legacy folder — using default Small bounds until map/manifest.json exists.",
+                );
+            } else {
+                set_text("legacy-map-note", "");
+            }
         }
     }
     load_terrain(&state).await;
@@ -607,13 +655,14 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
         let canvas = canvas();
         let rect = canvas.get_bounding_client_rect();
+        let radius = state.borrow().map_radius.max(0);
         // Same fit-to-window layout the renderer uses, so hit-testing tracks
         // whatever size the map is currently drawn at.
-        let (size, ox, oy) = hex_layout(rect.width(), rect.height());
+        let (size, ox, oy) = hex_layout(rect.width(), rect.height(), radius);
         let mx = event.client_x() as f64 - rect.left() - ox;
         let my = event.client_y() as f64 - rect.top() - oy;
         let cell = Axial::from_pixel(mx, my, size);
-        if (cell.q.abs() + cell.r.abs() + (cell.q + cell.r).abs()) / 2 > RADIUS {
+        if (cell.q.abs() + cell.r.abs() + (cell.q + cell.r).abs()) / 2 > radius {
             return;
         }
 
@@ -735,9 +784,12 @@ fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
             state_mut.cells.clear();
             state_mut.terrain.clear();
             state_mut.selected = None;
+            state_mut.map_radius = DEFAULT_MAP_RADIUS;
+            state_mut.legacy_map = false;
             set_drawer_open(false);
             clear_inspect_selection();
             set_world_label("—");
+            set_text("legacy-map-note", "");
             drop(state_mut);
             wasm_bindgen_futures::spawn_local(refresh_projects(state));
         });
@@ -760,10 +812,11 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
             set_text("home-status", "World name and folder are both required.");
             return;
         }
+        let preset = select_value("new-preset");
         let state = state.clone();
         set_text("home-status", "Creating…");
         wasm_bindgen_futures::spawn_local(async move {
-            let body = CreateProjectInput { id: &id, path: &path };
+            let body = CreateProjectInput { id: &id, path: &path, map_preset: &preset };
             let sent = gloo_net::http::Request::post("/api/projects").json(&body);
             let sent = match sent {
                 Ok(req) => req.send().await,
@@ -794,6 +847,51 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
         .expect("missing #create")
         .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
         .expect("attaching create handler");
+    closure.forget();
+}
+
+/// "Generate" on Home — same scaffold API as Create; blank hex at chosen preset (D-40).
+fn attach_generate_click(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut()>::new(move || {
+        let id = input("generate-id").value();
+        let path = input("generate-path").value();
+        if id.trim().is_empty() || path.trim().is_empty() {
+            set_text("generate-status", "World name and folder are both required.");
+            return;
+        }
+        let preset = select_value("generate-preset");
+        let state = state.clone();
+        set_text("generate-status", "Generating…");
+        wasm_bindgen_futures::spawn_local(async move {
+            let body = CreateProjectInput { id: &id, path: &path, map_preset: &preset };
+            let sent = gloo_net::http::Request::post("/api/projects").json(&body);
+            let sent = match sent {
+                Ok(req) => req.send().await,
+                Err(err) => {
+                    set_text("generate-status", &format!("Error: {err}"));
+                    return;
+                }
+            };
+            match sent {
+                Ok(resp) if resp.ok() => {
+                    set_text("generate-status", "");
+                    input("generate-id").set_value("");
+                    show_view("editor");
+                    wasm_bindgen_futures::spawn_local(load_map(state));
+                }
+                Ok(resp) => {
+                    let msg = resp.text().await.unwrap_or_else(|_| "generate failed".to_string());
+                    set_text("generate-status", &msg);
+                }
+                Err(err) => set_text("generate-status", &format!("Error: {err}")),
+            }
+        });
+    });
+    document()
+        .get_element_by_id("generate")
+        .expect("missing #generate")
+        .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+        .expect("attaching generate handler");
     closure.forget();
 }
 

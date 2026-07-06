@@ -233,7 +233,7 @@
   #project-list li.manage-open .manage-row { display: flex; }
   #project-empty { color: #666f7a; font-size: 13px; display: none; }
   #project-empty.visible { display: block; }
-  #home input {
+  #home input, #home select {
     display: block;
     width: 100%;
     box-sizing: border-box;
@@ -278,13 +278,23 @@
     </header>
 
     <div class="cards-grid">
-      <article class="home-card emphasis disabled">
+      <article class="home-card emphasis">
         <div class="card-head">
           <h2>Generate Random World</h2>
-          <span class="badge">planned</span>
         </div>
-        <p class="card-sub">coming later</p>
-        <p class="card-note">Guided generation flow will land here after onboarding polish.</p>
+        <p class="card-sub">Blank hex map at the size you pick — no random terrain yet.</p>
+        <label for="generate-id">World name</label>
+        <input id="generate-id" placeholder="my-world" autocomplete="off" />
+        <label for="generate-path">Folder</label>
+        <input id="generate-path" placeholder="C:\path\to\my-world" autocomplete="off" />
+        <label for="generate-preset">Map size</label>
+        <select id="generate-preset">
+          <option value="small" selected>Small (~127 cells)</option>
+          <option value="medium">Medium (~1,027 cells)</option>
+          <option value="large">Large (~7,651 cells)</option>
+        </select>
+        <button id="generate" type="button">Generate</button>
+        <div id="generate-status"></div>
       </article>
 
       <article class="home-card active emphasis">
@@ -305,6 +315,12 @@
             <input id="new-path" placeholder="C:\path\to\my-world" autocomplete="off" />
             <button id="browse-folder" class="native-only" type="button">Browse&hellip;</button>
           </div>
+          <label for="new-preset">Map size</label>
+          <select id="new-preset">
+            <option value="small" selected>Small (~127 cells)</option>
+            <option value="medium">Medium (~1,027 cells)</option>
+            <option value="large">Large (~7,651 cells)</option>
+          </select>
           <button id="create">Create</button>
           <div id="home-status"></div>
         </div>
@@ -370,6 +386,7 @@
         <div class="drawer-pane" data-drawer="world">
           <p class="pane-label">World</p>
           <p id="world-name">—</p>
+          <p id="legacy-map-note" class="dock-note"></p>
           <p class="dock-note">World data stays local on disk.</p>
           <button id="switch-world" type="button">&larr; Worlds</button>
         </div>

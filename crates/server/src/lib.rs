@@ -27,7 +27,8 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use mapkeeper_core::cell_id::CellId;
-use mapkeeper_core::layer::{CellState, Layer};
+use mapkeeper_core::layer::{Bounds, CellState, Layer, MapManifest};
+use mapkeeper_core::map_preset::{MapPreset, LEGACY_DEFAULT_RADIUS, hex_cell_count, parse_map_preset};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
 use mapkeeper_core::world;
@@ -72,8 +73,18 @@ struct CellSummary {
 }
 
 #[derive(Serialize)]
+struct MapBoundsResponse {
+    kind: String,
+    radius: i32,
+    cell_count: u32,
+}
+
+#[derive(Serialize)]
 struct MapResponse {
     world_id: String,
+    bounds: MapBoundsResponse,
+    /// `true` when `map/manifest.json` is missing (pre-D-36 world) — not "outdated version".
+    legacy_map: bool,
     cells: Vec<CellSummary>,
 }
 
@@ -91,6 +102,8 @@ struct ProjectStatus {
     path: String,
     /// `false` if the folder/`mapkeeper.toml` moved or was deleted since it was registered.
     valid: bool,
+    /// `true` if `map/manifest.json` is missing — editor uses default Small bounds.
+    legacy_map: bool,
 }
 
 #[derive(Serialize)]
@@ -104,6 +117,9 @@ struct ProjectsResponse {
 struct CreateProjectInput {
     id: String,
     path: String,
+    /// `small` | `medium` | `large` — defaults to small.
+    #[serde(default)]
+    map_preset: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -131,6 +147,46 @@ fn read_manifest_id(world_path: &Path) -> Result<String> {
     })?;
     let manifest: Manifest = toml::from_str(&raw).context("parsing mapkeeper.toml")?;
     Ok(manifest.world.id)
+}
+
+fn map_manifest_path(world_path: &Path) -> PathBuf {
+    world_path.join("map/manifest.json")
+}
+
+fn legacy_map_folder(world_path: &Path) -> bool {
+    !map_manifest_path(world_path).exists()
+}
+
+fn write_map_manifest(world_path: &Path, radius: i32) -> Result<()> {
+    let manifest = MapManifest::default_v0(radius);
+    let path = map_manifest_path(world_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, manifest.to_json_pretty()?)?;
+    Ok(())
+}
+
+/// Read hex bounds from disk; missing manifest => legacy default (Small), not "outdated".
+fn read_map_bounds(world_path: &Path) -> (i32, bool) {
+    let path = map_manifest_path(world_path);
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return (LEGACY_DEFAULT_RADIUS, true);
+    };
+    let Ok(manifest) = MapManifest::from_json(&raw) else {
+        return (LEGACY_DEFAULT_RADIUS, true);
+    };
+    match manifest.bounds {
+        Bounds::HexRadius { radius } => (radius.max(0), false),
+    }
+}
+
+fn bounds_response(radius: i32) -> MapBoundsResponse {
+    MapBoundsResponse {
+        kind: "hex-radius".to_string(),
+        radius,
+        cell_count: hex_cell_count(radius),
+    }
 }
 
 fn projects_path() -> PathBuf {
@@ -279,8 +335,10 @@ async fn list_projects(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoRe
         .projects
         .into_iter()
         .map(|p| {
-            let valid = Path::new(&p.path).join("mapkeeper.toml").exists();
-            ProjectStatus { id: p.id, path: p.path, valid }
+            let world_path = Path::new(&p.path);
+            let valid = world_path.join("mapkeeper.toml").exists();
+            let legacy_map = valid && legacy_map_folder(world_path);
+            ProjectStatus { id: p.id, path: p.path, valid, legacy_map }
         })
         .collect();
     let active = state.lock().unwrap().active.as_ref().map(|a| ProjectEntry {
@@ -335,6 +393,15 @@ async fn create_project(
         }
     }
     if let Err(err) = std::fs::write(&manifest, world::manifest_toml(&input.id)) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    let preset = input
+        .map_preset
+        .as_deref()
+        .and_then(parse_map_preset)
+        .unwrap_or(MapPreset::Small);
+    if let Err(err) = write_map_manifest(&path, preset.radius()) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
@@ -457,7 +524,14 @@ async fn get_map(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse
             });
         }
     }
-    Json(MapResponse { world_id: active.id.clone(), cells }).into_response()
+    let (radius, legacy_map) = read_map_bounds(&active.path);
+    Json(MapResponse {
+        world_id: active.id.clone(),
+        bounds: bounds_response(radius),
+        legacy_map,
+        cells,
+    })
+    .into_response()
 }
 
 async fn get_profile(

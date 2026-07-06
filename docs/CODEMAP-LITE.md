@@ -8,6 +8,7 @@ Use this first, then open only the needed files.
 
 - Core rules, ids, geometry, profile model -> `crates/core/src/`
 - Spatial contract (distance/ring/range/bounds) -> `crates/core/src/hex.rs`
+- Map size presets (Small/Medium/Large -> hex-radius) -> `crates/core/src/map_preset.rs`
 - Map state model (layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
 - HTTP API, world file I/O, launcher endpoints -> `crates/server/src/`
 - Terrain layer endpoints (`/api/layers/terrain`, `/api/cells/:q/:r/terrain`) -> `crates/server/src/lib.rs`
@@ -28,6 +29,9 @@ Use this first, then open only the needed files.
 - Editor tool dock (rail + collapsible drawers: Inspect/profile, Terrain brushes, View stub, World): `crates/web/index.html`, `crates/web/src/lib.rs` — **overlays** the map (D-39); canvas stable on drawer toggle
 - Project list actions (`open` / `remove` / `delete`, with secondary manage flow): `crates/web/src/lib.rs`, `crates/server/src/lib.rs`
 - Default create path suggestion (`Documents/MAPKEEPER Worlds`): `crates/server/src/lib.rs`, `crates/web/src/lib.rs`
+- Map bounds at create (`map_preset`, `write_map_manifest`, `/api/map` bounds + `legacy_map`): `crates/server/src/lib.rs`, `crates/core/src/map_preset.rs`
+- Home Create/Generate preset selectors + bounds-driven redraw: `crates/web/index.html`, `crates/web/src/lib.rs`
+- CLI `init --map-preset`: `crates/cli/src/main.rs`
 - Desktop boundary entry: `crates/desktop/src/lib.rs`
 - CLI boundary entry: `crates/cli/src/main.rs`
 
