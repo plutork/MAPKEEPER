@@ -62,9 +62,19 @@ created either way are also scaffoldable from the CLI:
 
 ```powershell
 powershell -File crates/web/build.ps1     # same web UI build as above
-cargo tauri build --manifest-path crates/desktop/Cargo.toml
+
+# quickest — run the native app directly, no installer needed:
+cargo run -p mapkeeper-desktop
+
+# or build the real installer:
+cd crates/desktop
+cargo tauri build
 # -> target/release/bundle/nsis/mapkeeper_<version>_x64-setup.exe
 ```
+
+`cargo tauri build` (unlike plain `cargo build`) has no `--manifest-path` flag — it
+resolves `tauri.conf.json` relative to the current directory, so run it from
+`crates/desktop`, not the repo root.
 
 `crates/desktop` embeds the exact same `mapkeeper-server` router in-process
 (on an OS-assigned port, so it never clashes with a dev server) and opens it
