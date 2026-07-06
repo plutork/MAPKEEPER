@@ -96,6 +96,7 @@ struct ProjectStatus {
 struct ProjectsResponse {
     active: Option<ProjectEntry>,
     projects: Vec<ProjectStatus>,
+    default_worlds_root: String,
 }
 
 #[derive(Deserialize)]
@@ -106,6 +107,16 @@ struct CreateProjectInput {
 
 #[derive(Deserialize)]
 struct OpenProjectInput {
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct ForgetProjectInput {
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct DeleteProjectInput {
     path: String,
 }
 
@@ -128,10 +139,11 @@ fn projects_path() -> PathBuf {
 }
 
 fn load_projects() -> ProjectsFile {
-    match std::fs::read_to_string(projects_path()) {
+    let parsed = match std::fs::read_to_string(projects_path()) {
         Ok(raw) => ProjectsFile::parse(&raw),
         Err(_) => ProjectsFile::default(),
-    }
+    };
+    dedupe_projects(parsed)
 }
 
 fn save_projects(file: &ProjectsFile) -> Result<()> {
@@ -141,6 +153,47 @@ fn save_projects(file: &ProjectsFile) -> Result<()> {
     }
     std::fs::write(path, file.to_json_pretty())?;
     Ok(())
+}
+
+fn normalize_world_path(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().map(|cwd| cwd.join(path)).unwrap_or_else(|_| path.to_path_buf())
+    };
+    std::fs::canonicalize(&absolute).unwrap_or(absolute)
+}
+
+fn path_cmp_key(path: &Path) -> String {
+    let normalized = normalize_world_path(path);
+    let key = normalized.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) { key.to_lowercase() } else { key }
+}
+
+fn dedupe_projects(mut file: ProjectsFile) -> ProjectsFile {
+    let mut unique: Vec<ProjectEntry> = Vec::new();
+    for p in file.projects.drain(..) {
+        let normalized = normalize_world_path(Path::new(&p.path));
+        let normalized_path = normalized.display().to_string();
+        let key = path_cmp_key(&normalized);
+        if let Some(existing) = unique.iter_mut().find(|e| path_cmp_key(Path::new(&e.path)) == key) {
+            *existing = ProjectEntry { id: p.id, path: normalized_path };
+        } else {
+            unique.push(ProjectEntry { id: p.id, path: normalized_path });
+        }
+    }
+    file.projects = unique;
+    file
+}
+
+fn default_worlds_root_path() -> String {
+    if let Ok(userprofile) = std::env::var("USERPROFILE") {
+        return PathBuf::from(userprofile).join("Documents").join("MAPKEEPER Worlds").display().to_string();
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join("Documents").join("MAPKEEPER Worlds").display().to_string();
+    }
+    "MAPKEEPER Worlds".to_string()
 }
 
 /// Build the router + `AppState`, without binding a socket — split out so
@@ -159,6 +212,8 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
     Ok(Router::new()
         .route("/api/projects", get(list_projects).post(create_project))
         .route("/api/projects/open", axum::routing::post(open_project))
+        .route("/api/projects/forget", axum::routing::post(forget_project))
+        .route("/api/projects/delete", axum::routing::post(delete_project))
         .route("/api/projects/close", axum::routing::post(close_project))
         .route("/api/map", get(get_map))
         .route("/api/cells/:q/:r/profile", get(get_profile).put(put_profile))
@@ -214,7 +269,12 @@ async fn list_projects(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoRe
         id: a.id.clone(),
         path: a.path.display().to_string(),
     });
-    Json(ProjectsResponse { active, projects }).into_response()
+    Json(ProjectsResponse {
+        active,
+        projects,
+        default_worlds_root: default_worlds_root_path(),
+    })
+    .into_response()
 }
 
 async fn create_project(
@@ -228,7 +288,7 @@ async fn create_project(
         )
             .into_response();
     }
-    let path = PathBuf::from(&input.path);
+    let path = normalize_world_path(Path::new(&input.path));
     let manifest = path.join("mapkeeper.toml");
     if manifest.exists() {
         return (
@@ -274,7 +334,7 @@ async fn open_project(
     State(state): State<Arc<Mutex<AppState>>>,
     Json(input): Json<OpenProjectInput>,
 ) -> impl IntoResponse {
-    let path = PathBuf::from(&input.path);
+    let path = normalize_world_path(Path::new(&input.path));
     let id = match read_manifest_id(&path) {
         Ok(id) => id,
         Err(err) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
@@ -288,6 +348,66 @@ async fn open_project(
 
     state.lock().unwrap().active = Some(ActiveWorld { path: path.clone(), id: id.clone() });
     Json(ProjectEntry { id, path: path.display().to_string() }).into_response()
+}
+
+async fn forget_project(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(input): Json<ForgetProjectInput>,
+) -> impl IntoResponse {
+    let forget_key = path_cmp_key(Path::new(&input.path));
+
+    let mut file = load_projects();
+    let before = file.projects.len();
+    file.projects.retain(|p| path_cmp_key(Path::new(&p.path)) != forget_key);
+
+    if file.projects.len() == before {
+        return StatusCode::NO_CONTENT.into_response();
+    }
+    if let Err(err) = save_projects(&file) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    let mut app = state.lock().unwrap();
+    if let Some(active) = app.active.as_ref() {
+        if path_cmp_key(&active.path) == forget_key {
+            app.active = None;
+        }
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn delete_project(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(input): Json<DeleteProjectInput>,
+) -> impl IntoResponse {
+    let target = normalize_world_path(Path::new(&input.path));
+    let target_key = path_cmp_key(&target);
+    let manifest = target.join("mapkeeper.toml");
+    if !manifest.exists() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "target path has no mapkeeper.toml — use Forget to remove a stale entry",
+        )
+            .into_response();
+    }
+
+    if let Err(err) = std::fs::remove_dir_all(&target) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    let mut file = load_projects();
+    file.projects.retain(|p| path_cmp_key(Path::new(&p.path)) != target_key);
+    if let Err(err) = save_projects(&file) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    let mut app = state.lock().unwrap();
+    if let Some(active) = app.active.as_ref() {
+        if path_cmp_key(&active.path) == target_key {
+            app.active = None;
+        }
+    }
+    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn close_project(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {

@@ -22,6 +22,8 @@ Use this first, then open only the needed files.
 - Server boundary entry: `crates/server/src/lib.rs`
 - Web boundary entry: `crates/web/src/lib.rs`
 - Home screen layout entry: `crates/web/index.html`
+- Project list actions (`open` / `forget` / `delete`): `crates/web/src/lib.rs`, `crates/server/src/lib.rs`
+- Default create path suggestion (`Documents/MAPKEEPER Worlds`): `crates/server/src/lib.rs`, `crates/web/src/lib.rs`
 - Desktop boundary entry: `crates/desktop/src/lib.rs`
 - CLI boundary entry: `crates/cli/src/main.rs`
 

@@ -61,6 +61,7 @@ struct ProjectStatus {
 struct ProjectsResponse {
     active: Option<ProjectEntry>,
     projects: Vec<ProjectStatus>,
+    default_worlds_root: String,
 }
 
 #[derive(Serialize)]
@@ -74,16 +75,33 @@ struct OpenProjectInput<'a> {
     path: &'a str,
 }
 
+#[derive(Serialize)]
+struct ForgetProjectInput<'a> {
+    path: &'a str,
+}
+
+#[derive(Serialize)]
+struct DeleteProjectInput<'a> {
+    path: &'a str,
+}
+
 struct AppState {
     cells: HashMap<(i32, i32), String>,
     selected: Option<(i32, i32)>,
+    default_worlds_root: Option<String>,
+    path_touched: bool,
 }
 
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
 
-    let state = Rc::new(RefCell::new(AppState { cells: HashMap::new(), selected: None }));
+    let state = Rc::new(RefCell::new(AppState {
+        cells: HashMap::new(),
+        selected: None,
+        default_worlds_root: None,
+        path_touched: false,
+    }));
 
     redraw(&state.borrow());
     attach_canvas_click(state.clone());
@@ -93,6 +111,8 @@ pub fn start() {
     attach_create_click(state.clone());
     attach_project_list_click(state.clone());
     attach_browse_folder_click();
+    attach_new_id_input(state.clone());
+    attach_new_path_input(state.clone());
 
     wasm_bindgen_futures::spawn_local(refresh_projects(state));
 }
@@ -220,6 +240,11 @@ async fn refresh_projects(state: Rc<RefCell<AppState>>) {
     };
     let Ok(data) = resp.json::<ProjectsResponse>().await else { return };
 
+    {
+        let mut state_mut = state.borrow_mut();
+        state_mut.default_worlds_root = Some(data.default_worlds_root.clone());
+    }
+    refresh_suggested_path(&state);
     render_project_list(&data.projects);
 
     if let Some(active) = data.active {
@@ -250,11 +275,23 @@ fn render_project_list(projects: &[ProjectStatus]) {
     let mut html = String::new();
     for p in projects {
         let missing = if p.valid { "" } else { "<div class=\"missing\">folder not found</div>" };
+        let actions = if p.valid {
+            format!(
+                "<button class=\"open-btn\" data-path=\"{path}\">Open</button><button class=\"forget-btn\" data-path=\"{path}\">Forget</button><button class=\"delete-btn\" data-path=\"{path}\">Delete</button>",
+                path = html_escape(&p.path)
+            )
+        } else {
+            format!(
+                "<button class=\"forget-btn\" data-path=\"{path}\">Forget</button>",
+                path = html_escape(&p.path)
+            )
+        };
         html.push_str(&format!(
-            "<li data-path=\"{path}\"><div class=\"info\"><span class=\"id\">{id}</span><span class=\"path\">{path}</span>{missing}</div><button class=\"open-btn\" data-path=\"{path}\">Open</button></li>",
+            "<li data-path=\"{path}\"><div class=\"info\"><span class=\"id\">{id}</span><span class=\"path\">{path}</span>{missing}</div><div class=\"actions\">{actions}</div></li>",
             id = html_escape(&p.id),
             path = html_escape(&p.path),
             missing = missing,
+            actions = actions,
         ));
     }
     list.set_inner_html(&html);
@@ -262,6 +299,24 @@ fn render_project_list(projects: &[ProjectStatus]) {
 
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+fn suggested_world_path(state: &AppState, world_id: &str) -> Option<String> {
+    let root = state.default_worlds_root.as_ref()?;
+    let tail = if world_id.trim().is_empty() { "my-world" } else { world_id.trim() };
+    let sep = if root.ends_with('\\') || root.ends_with('/') { "" } else { "\\" };
+    Some(format!("{root}{sep}{tail}"))
+}
+
+fn refresh_suggested_path(state: &Rc<RefCell<AppState>>) {
+    let state_ref = state.borrow();
+    if state_ref.path_touched {
+        return;
+    }
+    let id = input("new-id").value();
+    if let Some(path) = suggested_world_path(&state_ref, &id) {
+        input("new-path").set_value(&path);
+    }
 }
 
 async fn load_map(state: Rc<RefCell<AppState>>) {
@@ -428,7 +483,8 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
                 Ok(resp) if resp.ok() => {
                     set_text("home-status", "");
                     input("new-id").set_value("");
-                    input("new-path").set_value("");
+                    state.borrow_mut().path_touched = false;
+                    refresh_suggested_path(&state);
                     show_view("editor");
                     wasm_bindgen_futures::spawn_local(load_map(state));
                 }
@@ -445,6 +501,22 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
         .expect("missing #create")
         .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
         .expect("attaching create handler");
+    closure.forget();
+}
+
+fn attach_new_id_input(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+        refresh_suggested_path(&state);
+    });
+    let _ = input("new-id").add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
+    closure.forget();
+}
+
+fn attach_new_path_input(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+        state.borrow_mut().path_touched = true;
+    });
+    let _ = input("new-path").add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
     closure.forget();
 }
 
@@ -479,6 +551,72 @@ async fn pick_folder_via_tauri() -> Option<String> {
 fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
         let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else { return };
+        if let Ok(Some(button)) = target.closest(".delete-btn") {
+            let Some(path) = button.get_attribute("data-path") else { return };
+            if !window()
+                .confirm_with_message(&format!(
+                    "Delete world folder from disk?\n\n{}\n\nThis cannot be undone.",
+                    path
+                ))
+                .unwrap_or(false)
+            {
+                return;
+            }
+            let state = state.clone();
+            set_text("home-status", "Deleting…");
+            wasm_bindgen_futures::spawn_local(async move {
+                let body = DeleteProjectInput { path: &path };
+                let sent = gloo_net::http::Request::post("/api/projects/delete").json(&body);
+                let sent = match sent {
+                    Ok(req) => req.send().await,
+                    Err(err) => {
+                        set_text("home-status", &format!("Error: {err}"));
+                        return;
+                    }
+                };
+                match sent {
+                    Ok(resp) if resp.ok() => {
+                        set_text("home-status", "");
+                        wasm_bindgen_futures::spawn_local(refresh_projects(state));
+                    }
+                    Ok(resp) => {
+                        let msg = resp.text().await.unwrap_or_else(|_| "delete failed".to_string());
+                        set_text("home-status", &msg);
+                    }
+                    Err(err) => set_text("home-status", &format!("Error: {err}")),
+                }
+            });
+            return;
+        }
+        if let Ok(Some(button)) = target.closest(".forget-btn") {
+            let Some(path) = button.get_attribute("data-path") else { return };
+            let state = state.clone();
+            set_text("home-status", "Forgetting…");
+            wasm_bindgen_futures::spawn_local(async move {
+                let body = ForgetProjectInput { path: &path };
+                let sent = gloo_net::http::Request::post("/api/projects/forget").json(&body);
+                let sent = match sent {
+                    Ok(req) => req.send().await,
+                    Err(err) => {
+                        set_text("home-status", &format!("Error: {err}"));
+                        return;
+                    }
+                };
+                match sent {
+                    Ok(resp) if resp.ok() => {
+                        set_text("home-status", "");
+                        wasm_bindgen_futures::spawn_local(refresh_projects(state));
+                    }
+                    Ok(resp) => {
+                        let msg = resp.text().await.unwrap_or_else(|_| "forget failed".to_string());
+                        set_text("home-status", &msg);
+                    }
+                    Err(err) => set_text("home-status", &format!("Error: {err}")),
+                }
+            });
+            return;
+        }
+
         let Ok(Some(button)) = target.closest(".open-btn") else { return };
         let Some(path) = button.get_attribute("data-path") else { return };
 

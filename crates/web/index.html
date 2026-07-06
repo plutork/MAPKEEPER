@@ -76,7 +76,16 @@
     min-height: 420px;
   }
   .home-card.active { border-color: #3a4a58; }
-  .home-card.disabled { opacity: 0.72; }
+  .home-card.emphasis {
+    background: #202a34;
+    border-color: #3f536a;
+    box-shadow: 0 0 0 1px rgba(114, 154, 202, 0.12) inset;
+  }
+  .home-card.disabled {
+    background: #1a1f24;
+    border-color: #2b3138;
+    opacity: 0.72;
+  }
   .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
   .card-head h2 {
     font-size: 14px;
@@ -118,6 +127,10 @@
     border: 1px solid #2a2f36;
     border-radius: 8px;
   }
+  #project-list .actions { display: flex; gap: 8px; }
+  #project-list .open-btn { background: #2f6b4f; color: #e9fff2; }
+  #project-list .forget-btn { background: #3d2a2a; color: #ffcfbf; }
+  #project-list .delete-btn { background: #742b2b; color: #ffd9cd; }
   #project-list .info { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
   #project-list .id { font-weight: 600; }
   #project-list .path { font-size: 11px; color: #666f7a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -169,16 +182,16 @@
     </header>
 
     <div class="cards-grid">
-      <article class="home-card disabled">
+      <article class="home-card emphasis">
         <div class="card-head">
-          <h2>Generate new world</h2>
+          <h2>Generate Random World</h2>
           <span class="badge">planned</span>
         </div>
         <p class="card-sub">coming later</p>
         <p class="card-note">Guided generation flow will land here after onboarding polish.</p>
       </article>
 
-      <article class="home-card active">
+      <article class="home-card active emphasis">
         <div class="card-head">
           <h2>Your worlds</h2>
         </div>
