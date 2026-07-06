@@ -29,7 +29,7 @@
         "required": ["layer_id", "value_type", "file"],
         "properties": {
           "layer_id": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
-          "value_type": { "enum": ["categorical"] },
+          "value_type": { "enum": ["categorical", "integer"] },
           "file": { "type": "string" }
         }
       }

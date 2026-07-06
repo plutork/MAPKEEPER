@@ -10,10 +10,12 @@ Use this first, then open only the needed files.
 - Spatial contract (distance/ring/range/bounds) -> `crates/core/src/hex.rs`
 - Map size presets (Small/Medium/Large -> hex-radius) -> `crates/core/src/map_preset.rs`
 - Map state model (layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
+- Elevation/hydro threshold model (`elevation <= 0 => water`) -> `crates/core/src/hydro.rs`
 - HTTP API, world file I/O, launcher endpoints -> `crates/server/src/`
 - Terrain layer endpoints (`/api/layers/terrain`, `/api/cells/:q/:r/terrain`) -> `crates/server/src/lib.rs`
-- CLI commands and query flow (`profile`, `terrain`) -> `crates/cli/src/`
-- Web UI (WASM canvas, Home/Editor flow, tool dock + terrain brushes) -> `crates/web/src/`
+- Elevation endpoints (`/api/layers/elevation`, `/api/cells/:q/:r/elevation`) -> `crates/server/src/lib.rs`
+- CLI commands and query flow (`profile`, `terrain`, `elevation`) -> `crates/cli/src/`
+- Web UI (WASM canvas, Home/Editor flow, tool dock + hydro brush) -> `crates/web/src/`
 - Desktop shell (Tauri wrapper, native dialog bridge) -> `crates/desktop/src/`
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
 - World scaffold source -> `toolchain/template/world/`
@@ -26,7 +28,7 @@ Use this first, then open only the needed files.
 - Server boundary entry: `crates/server/src/lib.rs`
 - Web boundary entry: `crates/web/src/lib.rs`
 - Home screen layout entry: `crates/web/index.html`
-- Editor tool dock (rail + collapsible drawers: Inspect/profile, Terrain brushes, View stub, World): `crates/web/index.html`, `crates/web/src/lib.rs` — **overlays** the map (D-39); canvas stable on drawer toggle
+- Editor tool dock (rail + collapsible drawers: Inspect/profile, Hydro brush, View stub, World): `crates/web/index.html`, `crates/web/src/lib.rs` — **overlays** the map (D-39); canvas stable on drawer toggle
 - Project list actions (`open` / `remove` / `delete`, with secondary manage flow): `crates/web/src/lib.rs`, `crates/server/src/lib.rs`
 - Default create path suggestion (`Documents/MAPKEEPER Worlds`): `crates/server/src/lib.rs`, `crates/web/src/lib.rs`
 - Map bounds at create (`map_preset`, `write_map_manifest`, `/api/map` bounds + `legacy_map`): `crates/server/src/lib.rs`, `crates/core/src/map_preset.rs`
@@ -44,12 +46,12 @@ Use this first, then open only the needed files.
 
 - **Map state = layers** under `map/layers/<id>.json` (machine-readable, sparse
   `cell_id -> {state}`; missing key = `unknown`). Model in `core::layer`.
+- **Hydro projection** now derives from sparse integer elevation (`core::hydro`):
+  `elevation <= 0` => water, `> 0` => land.
 - **Author profiles** (`profiles/*.json`) are human-facing and **not** a layer.
 - Renderer is a projection of the layer model, not the source of truth.
 - Renderer layout (4.2): fit-to-window canvas + camera viewport — base
   `hex_layout`/`map_half_extent` plus `zoom` (0.6x–2.5x), `pan` (LMB drag),
-  and visible draw culling (`visible_scan_bounds`) in `crates/web/src/lib.rs`;
-  `unknown`/`none`/`value` fills stay visually distinct (`none` gets an ×
-  marker).
+  and visible draw culling (`visible_scan_bounds`) in `crates/web/src/lib.rs`.
 - Future generators/validators are local tools over these layers (not built,
   not AI runtime).

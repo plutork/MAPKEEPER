@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use mapkeeper_core::cell_id::CellId;
+use mapkeeper_core::hydro::ElevationLayer;
 use mapkeeper_core::layer::{CellState, Layer, MapManifest};
 use mapkeeper_core::map_preset::{MapPreset, parse_map_preset};
 use mapkeeper_core::profile::CellProfile;
@@ -38,6 +39,11 @@ enum Command {
     Terrain {
         #[command(subcommand)]
         action: TerrainAction,
+    },
+    /// Query or edit elevation (hydro derives from threshold in runtime).
+    Elevation {
+        #[command(subcommand)]
+        action: ElevationAction,
     },
 }
 
@@ -113,6 +119,35 @@ enum TerrainAction {
     },
 }
 
+#[derive(Subcommand)]
+enum ElevationAction {
+    /// Print a cell elevation and derived hydro state as JSON.
+    Get {
+        cell_id: String,
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+    },
+    /// List every stored elevation override (sparse file).
+    List {
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+    },
+    /// Set cell elevation value (integer).
+    Set {
+        cell_id: String,
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+        #[arg(long)]
+        value: i16,
+    },
+    /// Reset cell to default land elevation (sparse clear).
+    Clear {
+        cell_id: String,
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -131,6 +166,14 @@ fn main() -> Result<()> {
                 cmd_terrain_set(&world, &cell_id, value, none)
             }
             TerrainAction::Clear { cell_id, world } => cmd_terrain_clear(&world, &cell_id),
+        },
+        Command::Elevation { action } => match action {
+            ElevationAction::Get { cell_id, world } => cmd_elevation_get(&world, &cell_id),
+            ElevationAction::List { world } => cmd_elevation_list(&world),
+            ElevationAction::Set { cell_id, world, value } => {
+                cmd_elevation_set(&world, &cell_id, value)
+            }
+            ElevationAction::Clear { cell_id, world } => cmd_elevation_clear(&world, &cell_id),
         },
     }
 }
@@ -343,5 +386,68 @@ fn cmd_terrain_clear(world: &Path, cell_id: &str) -> Result<()> {
     layer.set(id.to_string(), CellState::Unknown);
     write_terrain_layer(world, &layer)?;
     println!("Cleared terrain for {id} (now unknown)");
+    Ok(())
+}
+
+fn elevation_layer_path(world: &Path) -> PathBuf {
+    world.join("map").join("layers").join("elevation.json")
+}
+
+fn read_elevation_layer(world: &Path) -> Result<ElevationLayer> {
+    let path = elevation_layer_path(world);
+    if path.exists() {
+        let raw = fs::read_to_string(&path)?;
+        Ok(ElevationLayer::from_json(&raw)?)
+    } else {
+        Ok(ElevationLayer::new())
+    }
+}
+
+fn write_elevation_layer(world: &Path, layer: &ElevationLayer) -> Result<()> {
+    let path = elevation_layer_path(world);
+    fs::create_dir_all(path.parent().unwrap())?;
+    fs::write(&path, layer.to_json_pretty()?)?;
+    Ok(())
+}
+
+fn cmd_elevation_get(world: &Path, cell_id: &str) -> Result<()> {
+    let id = CellId::parse(cell_id).with_context(|| format!("invalid cell_id '{cell_id}'"))?;
+    let layer = read_elevation_layer(world)?;
+    let payload = serde_json::json!({
+        "cell_id": id.to_string(),
+        "elevation": layer.elevation(&id.to_string()),
+        "hydro": layer.hydro(&id.to_string()),
+    });
+    println!("{}", serde_json::to_string_pretty(&payload)?);
+    Ok(())
+}
+
+fn cmd_elevation_list(world: &Path) -> Result<()> {
+    let layer = read_elevation_layer(world)?;
+    if layer.cells.is_empty() {
+        println!("(no elevation overrides — default land everywhere)");
+        return Ok(());
+    }
+    for (cell_id, value) in &layer.cells {
+        println!("{cell_id}\t{value}");
+    }
+    Ok(())
+}
+
+fn cmd_elevation_set(world: &Path, cell_id: &str, value: i16) -> Result<()> {
+    let id = CellId::parse(cell_id).with_context(|| format!("invalid cell_id '{cell_id}'"))?;
+    let mut layer = read_elevation_layer(world)?;
+    layer.set(id.to_string(), value);
+    write_elevation_layer(world, &layer)?;
+    println!("Saved elevation for {id} = {value}");
+    Ok(())
+}
+
+fn cmd_elevation_clear(world: &Path, cell_id: &str) -> Result<()> {
+    let id = CellId::parse(cell_id).with_context(|| format!("invalid cell_id '{cell_id}'"))?;
+    let mut layer = read_elevation_layer(world)?;
+    layer.set(id.to_string(), mapkeeper_core::hydro::DEFAULT_LAND_ELEVATION);
+    write_elevation_layer(world, &layer)?;
+    println!("Cleared elevation override for {id}");
     Ok(())
 }

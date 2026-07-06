@@ -15,9 +15,12 @@ live in `profiles/` (which is *not* a layer). Both are anchored by the same
 
 ## Layers (V0)
 
-- `layers/terrain.json` — `categorical` terrain per cell.
+- `layers/terrain.json` — `categorical` terrain per cell (legacy proof layer).
+- `layers/elevation.json` — sparse integer elevation per cell.
+- Hydro (`land`/`water`) is derived from elevation threshold:
+  `elevation <= 0` => water, `elevation > 0` => land.
 
-More layers (elevation, water, rivers, regions, routes, settlements) come
+More layers (rivers, regions, routes, settlements) come
 later; each is additive and anchored by `cell_id`.
 
 ## Partial state (`unknown` / `none` / `value`)

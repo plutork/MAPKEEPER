@@ -27,6 +27,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use mapkeeper_core::cell_id::CellId;
+use mapkeeper_core::hydro::{ElevationLayer, HydroKind};
 use mapkeeper_core::layer::{Bounds, CellState, Layer, MapManifest};
 use mapkeeper_core::map_preset::{MapPreset, LEGACY_DEFAULT_RADIUS, hex_cell_count, parse_map_preset};
 use mapkeeper_core::profile::CellProfile;
@@ -86,6 +87,12 @@ struct MapResponse {
     /// `true` when `map/manifest.json` is missing (pre-D-36 world) — not "outdated version".
     legacy_map: bool,
     cells: Vec<CellSummary>,
+}
+
+#[derive(Serialize)]
+struct ElevationCellState {
+    elevation: i16,
+    hydro: HydroKind,
 }
 
 #[derive(Deserialize)]
@@ -291,6 +298,8 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         .route("/api/cells/:q/:r/profile", get(get_profile).put(put_profile))
         .route("/api/layers/terrain", get(get_terrain_layer))
         .route("/api/cells/:q/:r/terrain", axum::routing::put(put_cell_terrain))
+        .route("/api/layers/elevation", get(get_elevation_layer))
+        .route("/api/cells/:q/:r/elevation", axum::routing::put(put_cell_elevation))
         .with_state(state)
         .fallback_service(ServeDir::new(&config.web_dist)))
 }
@@ -649,4 +658,64 @@ async fn put_cell_terrain(
     }
     // Echo back the resolved state for this cell.
     Json(layer.state(&cell_id)).into_response()
+}
+
+// --- Elevation layer: hydro derives from threshold (before rivers) ---------
+
+fn elevation_layer_path(world_path: &Path) -> PathBuf {
+    world_path.join("map").join("layers").join("elevation.json")
+}
+
+fn read_elevation_layer(world_path: &Path) -> Result<ElevationLayer, String> {
+    let path = elevation_layer_path(world_path);
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => ElevationLayer::from_json(&raw).map_err(|e| e.to_string()),
+        Err(_) => Ok(ElevationLayer::new()),
+    }
+}
+
+fn write_elevation_layer(world_path: &Path, layer: &ElevationLayer) -> Result<(), String> {
+    let path = elevation_layer_path(world_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let body = layer.to_json_pretty().map_err(|e| e.to_string())?;
+    std::fs::write(&path, body).map_err(|e| e.to_string())
+}
+
+async fn get_elevation_layer(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    match read_elevation_layer(&active.path) {
+        Ok(layer) => Json(layer).into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+    }
+}
+
+async fn put_cell_elevation(
+    State(state): State<Arc<Mutex<AppState>>>,
+    AxPath((q, r)): AxPath<(i32, i32)>,
+    Json(new_elevation): Json<i16>,
+) -> impl IntoResponse {
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    let cell_id = CellId::new(&active.id, q, r).to_string();
+
+    let mut layer = match read_elevation_layer(&active.path) {
+        Ok(layer) => layer,
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+    };
+    layer.set(cell_id.clone(), new_elevation);
+    if let Err(err) = write_elevation_layer(&active.path, &layer) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    Json(ElevationCellState {
+        elevation: layer.elevation(&cell_id),
+        hydro: layer.hydro(&cell_id),
+    })
+    .into_response()
 }

@@ -340,12 +340,12 @@
   <div id="editor" class="view">
     <div class="map-wrap">
       <canvas id="map" width="720" height="560"></canvas>
-      <div id="hint">mapkeeper — LMB drag pan, wheel zoom, tool dock on the right (Inspect names cells; Terrain paints map state)</div>
+      <div id="hint">mapkeeper — LMB drag pan, wheel zoom, tool dock on the right (Inspect names cells; Hydro paints land/water)</div>
     </div>
     <aside id="tool-dock">
       <nav id="dock-rail" aria-label="Tools">
         <button class="dock-btn active tool-active" data-dock="inspect" type="button" title="Inspect">&#128269;</button>
-        <button class="dock-btn" data-dock="terrain" type="button" title="Terrain">&#9998;</button>
+        <button class="dock-btn" data-dock="terrain" type="button" title="Hydro">&#9998;</button>
         <button class="dock-btn" data-dock="view" type="button" title="View">&#128065;</button>
         <button class="dock-btn" data-dock="world" type="button" title="World">&#127968;</button>
       </nav>
@@ -365,17 +365,11 @@
           <div id="status"></div>
         </div>
         <div class="drawer-pane" data-drawer="terrain">
-          <p class="pane-label">Terrain</p>
-          <p class="dock-note">Paint the terrain map-state layer. Values are proof placeholders, not final taxonomy.</p>
-          <div class="swatch-grid">
-            <button class="swatch" data-brush="value:plains" type="button"><span class="dot" style="background:#6a7b43"></span>Plains</button>
-            <button class="swatch" data-brush="value:forest" type="button"><span class="dot" style="background:#2f6b4f"></span>Forest</button>
-            <button class="swatch" data-brush="value:water" type="button"><span class="dot" style="background:#2e5f8a"></span>Water</button>
-            <button class="swatch" data-brush="value:mountain" type="button"><span class="dot" style="background:#6d6f78"></span>Mountain</button>
-          </div>
+          <p class="pane-label">Hydro</p>
+          <p class="dock-note">Physics-first step: paint Land/Water. Land-type controls are temporarily hidden.</p>
           <div class="swatch-row">
-            <button class="swatch" data-brush="none" type="button">None</button>
-            <button class="swatch" data-brush="clear" type="button">Clear</button>
+            <button class="swatch" data-brush="land" type="button"><span class="dot" style="background:#6a7b43"></span>Land</button>
+            <button class="swatch" data-brush="water" type="button"><span class="dot" style="background:#2e5f8a"></span>Water</button>
           </div>
         </div>
         <div class="drawer-pane" data-drawer="view">

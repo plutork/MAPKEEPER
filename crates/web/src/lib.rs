@@ -14,7 +14,7 @@ use std::rc::Rc;
 
 use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::hex::Axial;
-use mapkeeper_core::layer::{CellState, Entry, Layer};
+use mapkeeper_core::hydro::{hydro_from_elevation, ElevationLayer, HydroKind};
 use mapkeeper_core::profile::CellProfile;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -105,29 +105,20 @@ struct DeleteProjectInput<'a> {
     path: &'a str,
 }
 
-/// Local mirror of a cell's terrain state (map-state layer, D-36). `unknown`
-/// is represented by the cell being absent from the map.
-#[derive(Clone)]
-enum TerrainCell {
-    None,
-    Value(String),
-}
-
 /// Active editing tool. `Inspect` keeps the old click→profile behavior; the
-/// terrain brushes paint the terrain map-state layer instead.
+/// hydro brushes paint elevation-driven hydro (`land`/`water`) instead.
 #[derive(Clone)]
 enum Brush {
     Inspect,
-    SetValue(String),
-    SetNone,
-    Clear,
+    SetLand,
+    SetWater,
 }
 
 struct AppState {
     /// Cells that have an author profile (used for the profile-presence marker).
     cells: HashMap<(i32, i32), String>,
-    /// Terrain layer mirror — only `none`/`value` cells; absent = unknown.
-    terrain: HashMap<(i32, i32), TerrainCell>,
+    /// Sparse elevation overrides (missing => default land elevation).
+    elevation: HashMap<(i32, i32), i16>,
     brush: Brush,
     selected: Option<(i32, i32)>,
     /// Hex bounds radius from `map/manifest.json` (via `/api/map`).
@@ -154,7 +145,7 @@ pub fn start() {
 
     let state = Rc::new(RefCell::new(AppState {
         cells: HashMap::new(),
-        terrain: HashMap::new(),
+        elevation: HashMap::new(),
         brush: Brush::Inspect,
         selected: None,
         map_radius: DEFAULT_MAP_RADIUS,
@@ -318,9 +309,8 @@ fn sync_brush_swatch_active(brush: &Brush) {
     }
     let kind = match brush {
         Brush::Inspect => return,
-        Brush::SetNone => "none".to_string(),
-        Brush::Clear => "clear".to_string(),
-        Brush::SetValue(v) => format!("value:{v}"),
+        Brush::SetLand => "land".to_string(),
+        Brush::SetWater => "water".to_string(),
     };
     if let Some(drawer) = document().get_element_by_id("dock-drawer") {
         if let Ok(Some(button)) = drawer.query_selector(&format!("[data-brush=\"{kind}\"]")) {
@@ -487,20 +477,6 @@ fn sync_canvas_size() -> (f64, f64) {
     (canvas.width() as f64, canvas.height() as f64)
 }
 
-/// A muted "×" marking an *explicitly empty* cell (`none`), so it reads as a
-/// deliberate void rather than an undecided (`unknown`) one.
-fn draw_none_marker(ctx: &CanvasRenderingContext2d, cx: f64, cy: f64, size: f64) {
-    let d = size * 0.22;
-    ctx.set_line_width(1.5);
-    ctx.set_stroke_style_str("#525a64");
-    ctx.begin_path();
-    ctx.move_to(cx - d, cy - d);
-    ctx.line_to(cx + d, cy + d);
-    ctx.move_to(cx + d, cy - d);
-    ctx.line_to(cx - d, cy + d);
-    ctx.stroke();
-}
-
 fn redraw(state: &AppState) {
     let (width, height) = sync_canvas_size();
     let ctx = context();
@@ -531,17 +507,13 @@ fn redraw(state: &AppState) {
             ctx.close_path();
 
             let selected = state.selected == Some((q, r));
-            let terrain = state.terrain.get(&(q, r));
-            // Fill = terrain layer projection (unknown/none/value).
-            ctx.set_fill_style_str(terrain_fill(terrain));
+            let elevation = state.elevation.get(&(q, r)).copied().unwrap_or(1);
+            // Fill = hydro projection derived from elevation threshold.
+            ctx.set_fill_style_str(hydro_fill(elevation));
             ctx.fill();
             ctx.set_line_width(if selected { 3.0 } else { 1.0 });
             ctx.set_stroke_style_str(if selected { "#9fe3c4" } else { "#3a424b" });
             ctx.stroke();
-
-            if matches!(terrain, Some(TerrainCell::None)) {
-                draw_none_marker(&ctx, cx, cy, size);
-            }
 
             // Profile-presence marker — a separate layer from terrain, so both
             // are visible at once (a cell can have terrain, a profile, or both).
@@ -566,20 +538,10 @@ fn redraw(state: &AppState) {
     );
 }
 
-/// Terrain layer → cell fill color. `None` (the map key is absent) = unknown.
-/// Unknown sits clearly above the canvas background so undecided cells read as
-/// real (but empty) map cells, not holes.
-fn terrain_fill(cell: Option<&TerrainCell>) -> &'static str {
-    match cell {
-        None => "#252c34",                    // unknown — not decided (elevated)
-        Some(TerrainCell::None) => "#171b20", // explicitly absent (marked with ×)
-        Some(TerrainCell::Value(v)) => match v.as_str() {
-            "plains" => "#6a7b43",
-            "forest" => "#2f6b4f",
-            "water" => "#2e5f8a",
-            "mountain" => "#6d6f78",
-            _ => "#8a7f4f", // unknown proof value — still visibly "has a value"
-        },
+fn hydro_fill(elevation: i16) -> &'static str {
+    match hydro_from_elevation(elevation) {
+        HydroKind::Land => "#6a7b43",
+        HydroKind::Water => "#2e5f8a",
     }
 }
 
@@ -710,24 +672,19 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
             }
         }
     }
-    load_terrain(&state).await;
+    load_elevation(&state).await;
     redraw(&state.borrow());
 }
 
-/// Fetch the terrain map-state layer and mirror it locally. Unknown cells are
-/// simply not stored (absent = unknown, D-36).
-async fn load_terrain(state: &Rc<RefCell<AppState>>) {
-    let Ok(resp) = gloo_net::http::Request::get("/api/layers/terrain").send().await else { return };
-    let Ok(layer) = resp.json::<Layer>().await else { return };
+/// Fetch sparse elevation overrides; missing keys remain default land.
+async fn load_elevation(state: &Rc<RefCell<AppState>>) {
+    let Ok(resp) = gloo_net::http::Request::get("/api/layers/elevation").send().await else { return };
+    let Ok(layer) = resp.json::<ElevationLayer>().await else { return };
     let mut state_mut = state.borrow_mut();
-    state_mut.terrain.clear();
-    for (cell_id, entry) in layer.cells {
+    state_mut.elevation.clear();
+    for (cell_id, value) in layer.cells {
         let Some(id) = CellId::parse(&cell_id) else { continue };
-        let value = match entry {
-            Entry::None => TerrainCell::None,
-            Entry::Value { value } => TerrainCell::Value(value),
-        };
-        state_mut.terrain.insert((id.q, id.r), value);
+        state_mut.elevation.insert((id.q, id.r), value);
     }
 }
 
@@ -749,15 +706,15 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
             return;
         }
 
-        // A terrain brush paints the map-state layer; Inspect opens the
+        // Hydro brush paints elevation-driven hydro; Inspect opens the
         // author profile panel (unchanged behavior).
         let brush = state.borrow().brush.clone();
-        if let Some(new_state) = brush_cell_state(&brush) {
-            wasm_bindgen_futures::spawn_local(paint_terrain(
+        if let Some(new_elevation) = brush_elevation(&brush) {
+            wasm_bindgen_futures::spawn_local(paint_elevation(
                 state.clone(),
                 cell.q,
                 cell.r,
-                new_state,
+                new_elevation,
             ));
             return;
         }
@@ -978,7 +935,7 @@ fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
             let _ = gloo_net::http::Request::post("/api/projects/close").send().await;
             let mut state_mut = state.borrow_mut();
             state_mut.cells.clear();
-            state_mut.terrain.clear();
+            state_mut.elevation.clear();
             state_mut.selected = None;
             state_mut.map_radius = DEFAULT_MAP_RADIUS;
             state_mut.zoom = 1.0;
@@ -1120,40 +1077,28 @@ fn attach_new_path_input(state: Rc<RefCell<AppState>>) {
     closure.forget();
 }
 
-/// Map a brush to the terrain `CellState` it writes. `Inspect` writes
-/// nothing (returns `None`) — it opens the profile panel instead.
-fn brush_cell_state(brush: &Brush) -> Option<CellState> {
+/// Map a brush to target elevation. `Inspect` writes nothing.
+fn brush_elevation(brush: &Brush) -> Option<i16> {
     match brush {
         Brush::Inspect => None,
-        Brush::SetValue(v) => Some(CellState::value(v.clone())),
-        Brush::SetNone => Some(CellState::None),
-        Brush::Clear => Some(CellState::Unknown),
+        Brush::SetLand => Some(1),
+        Brush::SetWater => Some(0),
     }
 }
 
-/// PUT the terrain state for a cell, then mirror it locally and redraw. The
+/// PUT elevation for a cell, then mirror locally and redraw. The
 /// filesystem write happens server-side (D-20); the WASM UI never touches FS.
-async fn paint_terrain(state: Rc<RefCell<AppState>>, q: i32, r: i32, new_state: CellState) {
+async fn paint_elevation(state: Rc<RefCell<AppState>>, q: i32, r: i32, new_elevation: i16) {
     set_text("status", "Painting…");
-    let sent = gloo_net::http::Request::put(&format!("/api/cells/{q}/{r}/terrain"))
-        .json(&new_state)
-        .expect("serializing terrain body")
+    let sent = gloo_net::http::Request::put(&format!("/api/cells/{q}/{r}/elevation"))
+        .json(&new_elevation)
+        .expect("serializing elevation body")
         .send()
         .await;
     match sent {
         Ok(resp) if resp.ok() => {
             let mut state_mut = state.borrow_mut();
-            match new_state {
-                CellState::Unknown => {
-                    state_mut.terrain.remove(&(q, r));
-                }
-                CellState::None => {
-                    state_mut.terrain.insert((q, r), TerrainCell::None);
-                }
-                CellState::Value { value } => {
-                    state_mut.terrain.insert((q, r), TerrainCell::Value(value));
-                }
-            }
+            state_mut.elevation.insert((q, r), new_elevation);
             redraw(&state_mut);
             drop(state_mut);
             set_text("status", "");
@@ -1162,7 +1107,7 @@ async fn paint_terrain(state: Rc<RefCell<AppState>>, q: i32, r: i32, new_state: 
     }
 }
 
-/// Tool dock: rail tabs toggle drawers; terrain swatches set the active brush.
+/// Tool dock: rail tabs toggle drawers; hydro swatches set the active brush.
 fn attach_dock_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
         let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else { return };
@@ -1183,12 +1128,9 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
         let Some(kind) = button.get_attribute("data-brush") else { return };
 
         let brush = match kind.as_str() {
-            "none" => Brush::SetNone,
-            "clear" => Brush::Clear,
-            other => match other.strip_prefix("value:") {
-                Some(v) => Brush::SetValue(v.to_string()),
-                None => return,
-            },
+            "land" => Brush::SetLand,
+            "water" => Brush::SetWater,
+            _ => return,
         };
         state.borrow_mut().brush = brush.clone();
         open_dock_tab("terrain");

@@ -54,6 +54,10 @@ pub const SCAFFOLD_FILES: &[ScaffoldFile] = &[
         contents: include_str!("../../../toolchain/template/world/map/layers/terrain.json"),
     },
     ScaffoldFile {
+        rel_path: "map/layers/elevation.json",
+        contents: include_str!("../../../toolchain/template/world/map/layers/elevation.json"),
+    },
+    ScaffoldFile {
         rel_path: "canon/README.md",
         contents: include_str!("../../../toolchain/template/world/canon/README.md"),
     },

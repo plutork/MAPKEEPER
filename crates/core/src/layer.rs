@@ -39,6 +39,7 @@ use serde::{Deserialize, Serialize};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 pub const TERRAIN_LAYER_ID: &str = "terrain";
+pub const ELEVATION_LAYER_ID: &str = "elevation";
 
 /// Kind of value a layer stores. Only `categorical` (string) exists in the V0
 /// proof slice; numeric/enum kinds (elevation, …) are future additions.
@@ -46,6 +47,7 @@ pub const TERRAIN_LAYER_ID: &str = "terrain";
 #[serde(rename_all = "lowercase")]
 pub enum ValueType {
     Categorical,
+    Integer,
 }
 
 /// A stored cell entry — only the two *stored* partial states (`none` /
@@ -167,17 +169,23 @@ pub struct MapManifest {
 }
 
 impl MapManifest {
-    /// The V0 scaffold manifest: radius-`radius` hex bounds + the single
-    /// `terrain` proof layer.
+    /// The V0 scaffold manifest: radius-`radius` bounds + typed layers.
     pub fn default_v0(radius: i32) -> Self {
         Self {
             schema_version: CURRENT_SCHEMA_VERSION,
             bounds: Bounds::HexRadius { radius },
-            layers: vec![LayerRef {
-                layer_id: TERRAIN_LAYER_ID.to_string(),
-                value_type: ValueType::Categorical,
-                file: format!("layers/{TERRAIN_LAYER_ID}.json"),
-            }],
+            layers: vec![
+                LayerRef {
+                    layer_id: TERRAIN_LAYER_ID.to_string(),
+                    value_type: ValueType::Categorical,
+                    file: format!("layers/{TERRAIN_LAYER_ID}.json"),
+                },
+                LayerRef {
+                    layer_id: ELEVATION_LAYER_ID.to_string(),
+                    value_type: ValueType::Integer,
+                    file: format!("layers/{ELEVATION_LAYER_ID}.json"),
+                },
+            ],
         }
     }
 
@@ -255,9 +263,12 @@ mod tests {
     fn manifest_declares_terrain_layer() {
         let manifest = MapManifest::default_v0(6);
         assert_eq!(manifest.bounds, Bounds::HexRadius { radius: 6 });
-        assert_eq!(manifest.layers.len(), 1);
+        assert_eq!(manifest.layers.len(), 2);
         assert_eq!(manifest.layers[0].layer_id, TERRAIN_LAYER_ID);
         assert_eq!(manifest.layers[0].file, "layers/terrain.json");
+        assert_eq!(manifest.layers[1].layer_id, ELEVATION_LAYER_ID);
+        assert_eq!(manifest.layers[1].value_type, ValueType::Integer);
+        assert_eq!(manifest.layers[1].file, "layers/elevation.json");
 
         let json = manifest.to_json_pretty().unwrap();
         assert_eq!(MapManifest::from_json(&json).unwrap(), manifest);
