@@ -56,11 +56,57 @@
   .view.active { display: block; }
   #editor.active { display: flex; }
 
-  #home { max-width: 560px; margin: 48px auto; padding: 0 24px; }
-  #home h1 { font-size: 20px; margin: 0 0 4px; }
-  #home .sub { color: #8a8f98; font-size: 13px; margin: 0 0 28px; }
-  #home section { margin-bottom: 28px; }
-  #home h2 { font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: #8a8f98; margin: 0 0 12px; }
+  #home { max-width: 1140px; margin: 34px auto; padding: 0 24px 28px; }
+  .brand { text-align: center; margin-bottom: 24px; }
+  .brand h1 { font-size: 24px; margin: 0; letter-spacing: 0.02em; }
+  .brand .sub { color: #8a8f98; font-size: 12px; margin: 6px 0 0; }
+  .cards-grid {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) minmax(460px, 1.3fr) minmax(220px, 1fr);
+    gap: 14px;
+    align-items: stretch;
+  }
+  .home-card {
+    background: #1c2126;
+    border: 1px solid #2a2f36;
+    border-radius: 12px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    min-height: 420px;
+  }
+  .home-card.active { border-color: #3a4a58; }
+  .home-card.disabled { opacity: 0.72; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .card-head h2 {
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #cbd3dd;
+    margin: 0;
+  }
+  .badge {
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    padding: 3px 8px;
+    background: #2e3540;
+    color: #c7d4e7;
+    border: 1px solid #424c5e;
+    white-space: nowrap;
+  }
+  .card-sub {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: #8a8f98;
+  }
+  .card-note {
+    margin: 2px 0 0;
+    color: #8a8f98;
+    font-size: 12px;
+    line-height: 1.4;
+  }
   #project-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   #project-list li {
     display: flex;
@@ -93,6 +139,19 @@
   }
   #home label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #8a8f98; }
   #home-status { font-size: 12px; color: #d97757; min-height: 16px; margin-top: 8px; }
+  .create-wrap { margin-top: 14px; padding-top: 12px; border-top: 1px solid #2a2f36; }
+  .create-wrap h3 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8a8f98;
+  }
+  @media (max-width: 980px) {
+    .cards-grid { grid-template-columns: 1fr; }
+    .home-card { min-height: auto; }
+    .home-card.active { order: -1; }
+  }
   /* Shown only inside the Tauri desktop shell (feature-detected below) — a
      plain browser tab has no native folder dialog to call, so the path
      input stays freeform text there. */
@@ -104,25 +163,52 @@
 </head>
 <body>
   <div id="home" class="view active">
-    <h1>mapkeeper</h1>
-    <p class="sub">Pick a world or create a new one.</p>
-    <section>
-      <h2>Your worlds</h2>
-      <ul id="project-list"></ul>
-      <p id="project-empty">No worlds yet — create one below.</p>
-    </section>
-    <section>
-      <h2>Create a new world</h2>
-      <label for="new-id">World id</label>
-      <input id="new-id" placeholder="my-world" autocomplete="off" />
-      <label for="new-path">Folder</label>
-      <div id="path-row">
-        <input id="new-path" placeholder="C:\path\to\my-world" autocomplete="off" />
-        <button id="browse-folder" class="native-only" type="button">Browse&hellip;</button>
-      </div>
-      <button id="create">Create</button>
-      <div id="home-status"></div>
-    </section>
+    <header class="brand">
+      <h1>mapkeeper</h1>
+      <p class="sub">logo coming later</p>
+    </header>
+
+    <div class="cards-grid">
+      <article class="home-card disabled">
+        <div class="card-head">
+          <h2>Generate new world</h2>
+          <span class="badge">planned</span>
+        </div>
+        <p class="card-sub">coming later</p>
+        <p class="card-note">Guided generation flow will land here after onboarding polish.</p>
+      </article>
+
+      <article class="home-card active">
+        <div class="card-head">
+          <h2>Your worlds</h2>
+        </div>
+        <p class="card-sub">Pick an existing world or create one below.</p>
+        <ul id="project-list"></ul>
+        <p id="project-empty">No worlds yet — create one below.</p>
+
+        <div class="create-wrap">
+          <h3>Create a new world</h3>
+          <label for="new-id">World id</label>
+          <input id="new-id" placeholder="my-world" autocomplete="off" />
+          <label for="new-path">Folder</label>
+          <div id="path-row">
+            <input id="new-path" placeholder="C:\path\to\my-world" autocomplete="off" />
+            <button id="browse-folder" class="native-only" type="button">Browse&hellip;</button>
+          </div>
+          <button id="create">Create</button>
+          <div id="home-status"></div>
+        </div>
+      </article>
+
+      <article class="home-card disabled">
+        <div class="card-head">
+          <h2>Community worlds</h2>
+          <span class="badge">planned</span>
+        </div>
+        <p class="card-sub">coming later</p>
+        <p class="card-note">Shared worlds catalog will be available in a later release.</p>
+      </article>
+    </div>
   </div>
 
   <div id="editor" class="view">
