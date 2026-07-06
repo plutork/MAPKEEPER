@@ -139,7 +139,8 @@ pub fn start() {
     attach_switch_world_click(state.clone());
     attach_create_click(state.clone());
     attach_project_list_click(state.clone());
-    attach_palette_click(state.clone());
+    attach_dock_click(state.clone());
+    attach_escape_key(state.clone());
     attach_window_resize(state.clone());
     attach_browse_folder_click();
     attach_new_id_input(state.clone());
@@ -188,14 +189,140 @@ fn set_text(id: &str, text: &str) {
     }
 }
 
-fn set_panel_open(open: bool) {
-    if let Some(panel) = document().get_element_by_id("panel") {
+fn set_drawer_open(open: bool) {
+    if let Some(drawer) = document().get_element_by_id("dock-drawer") {
         if open {
-            let _ = panel.class_list().add_1("open");
+            let _ = drawer.class_list().remove_1("collapsed");
         } else {
-            let _ = panel.class_list().remove_1("open");
+            let _ = drawer.class_list().add_1("collapsed");
         }
     }
+}
+
+fn drawer_is_open() -> bool {
+    document()
+        .get_element_by_id("dock-drawer")
+        .is_some_and(|drawer| !drawer.class_list().contains("collapsed"))
+}
+
+fn set_dock_tab(tab: &str) {
+    if let Some(drawer) = document().get_element_by_id("dock-drawer") {
+        if let Ok(panes) = drawer.query_selector_all("[data-drawer]") {
+            for i in 0..panes.length() {
+                if let Some(node) = panes.item(i) {
+                    if let Ok(el) = node.dyn_into::<Element>() {
+                        let active = el.get_attribute("data-drawer").as_deref() == Some(tab);
+                        if active {
+                            let _ = el.class_list().add_1("active");
+                        } else {
+                            let _ = el.class_list().remove_1("active");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(rail) = document().get_element_by_id("dock-rail") {
+        if let Ok(items) = rail.query_selector_all("[data-dock]") {
+            for i in 0..items.length() {
+                if let Some(node) = items.item(i) {
+                    if let Ok(el) = node.dyn_into::<Element>() {
+                        let active = el.get_attribute("data-dock").as_deref() == Some(tab);
+                        if active {
+                            let _ = el.class_list().add_1("active");
+                        } else {
+                            let _ = el.class_list().remove_1("active");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn sync_dock_rail_for_brush(brush: &Brush) {
+    let terrain_active = !matches!(brush, Brush::Inspect);
+    if let Some(rail) = document().get_element_by_id("dock-rail") {
+        if let Ok(items) = rail.query_selector_all("[data-dock]") {
+            for i in 0..items.length() {
+                if let Some(node) = items.item(i) {
+                    if let Ok(el) = node.dyn_into::<Element>() {
+                        let dock = el.get_attribute("data-dock").unwrap_or_default();
+                        let tool_active = (dock == "inspect" && !terrain_active)
+                            || (dock == "terrain" && terrain_active);
+                        if tool_active {
+                            let _ = el.class_list().add_1("tool-active");
+                        } else {
+                            let _ = el.class_list().remove_1("tool-active");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn sync_brush_swatch_active(brush: &Brush) {
+    if let Some(drawer) = document().get_element_by_id("dock-drawer") {
+        if let Ok(items) = drawer.query_selector_all("[data-brush]") {
+            for i in 0..items.length() {
+                if let Some(node) = items.item(i) {
+                    if let Ok(el) = node.dyn_into::<Element>() {
+                        let _ = el.class_list().remove_1("active");
+                    }
+                }
+            }
+        }
+    }
+    let kind = match brush {
+        Brush::Inspect => return,
+        Brush::SetNone => "none".to_string(),
+        Brush::Clear => "clear".to_string(),
+        Brush::SetValue(v) => format!("value:{v}"),
+    };
+    if let Some(drawer) = document().get_element_by_id("dock-drawer") {
+        if let Ok(Some(button)) = drawer.query_selector(&format!("[data-brush=\"{kind}\"]")) {
+            let _ = button.class_list().add_1("active");
+        }
+    }
+}
+
+fn open_dock_tab(state: &AppState, tab: &str) {
+    set_dock_tab(tab);
+    set_drawer_open(true);
+    redraw(state);
+}
+
+fn toggle_dock_tab(state: &AppState, tab: &str) {
+    if drawer_is_open() {
+        let current = document()
+            .get_element_by_id("dock-rail")
+            .and_then(|rail| {
+                rail.query_selector("[data-dock].active")
+                    .ok()
+                    .flatten()
+                    .and_then(|el| el.get_attribute("data-dock"))
+            });
+        if current.as_deref() == Some(tab) {
+            set_drawer_open(false);
+            redraw(state);
+            return;
+        }
+    }
+    open_dock_tab(state, tab);
+}
+
+fn clear_inspect_selection() {
+    set_text("panel-cell", "—");
+    input("title").set_value("");
+    textarea("notes").set_value("");
+    input("title").set_disabled(true);
+    textarea("notes").set_disabled(true);
+    set_text("status", "");
+}
+
+fn set_world_label(world_id: &str) {
+    set_text("world-name", world_id);
 }
 
 /// Toggle between the Home (project picker) and Editor (hex map) screens.
@@ -454,6 +581,7 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
         if let Ok(map) = resp.json::<MapResponse>().await {
             let mut state_mut = state.borrow_mut();
             state_mut.cells = map.cells.into_iter().map(|c| ((c.q, c.r), c.display_name)).collect();
+            set_world_label(&map.world_id);
         }
     }
     load_terrain(&state).await;
@@ -505,10 +633,7 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
         }
 
         state.borrow_mut().selected = Some((cell.q, cell.r));
-        // Open the panel first, then redraw: the panel shrinks the canvas box,
-        // so the fit-to-window layout must recompute against the new width.
-        set_panel_open(true);
-        redraw(&state.borrow());
+        open_dock_tab(&state.borrow(), "inspect");
         set_text("panel-cell", &cell_label(cell.q, cell.r));
         input("title").set_value("");
         textarea("notes").set_value("");
@@ -589,10 +714,9 @@ fn attach_save_click(state: Rc<RefCell<AppState>>) {
 fn attach_close_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
         state.borrow_mut().selected = None;
-        // Close first so the canvas reclaims the panel's width before redraw.
-        set_panel_open(false);
+        set_drawer_open(false);
+        clear_inspect_selection();
         redraw(&state.borrow());
-        set_text("status", "");
     });
     document()
         .get_element_by_id("close")
@@ -613,8 +737,9 @@ fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
             state_mut.cells.clear();
             state_mut.terrain.clear();
             state_mut.selected = None;
-            set_panel_open(false);
-            set_text("status", "");
+            set_drawer_open(false);
+            clear_inspect_selection();
+            set_world_label("—");
             drop(state_mut);
             wasm_bindgen_futures::spawn_local(refresh_projects(state));
         });
@@ -742,16 +867,27 @@ async fn paint_terrain(state: Rc<RefCell<AppState>>, q: i32, r: i32, new_state: 
     }
 }
 
-/// Terrain palette: clicking a tool sets the active brush and highlights it.
-/// `data-brush` values: `inspect`, `none`, `clear`, or `value:<terrain>`.
-fn attach_palette_click(state: Rc<RefCell<AppState>>) {
+/// Tool dock: rail tabs toggle drawers; terrain swatches set the active brush.
+fn attach_dock_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
         let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else { return };
+
+        if let Ok(Some(button)) = target.closest("[data-dock]") {
+            let Some(tab) = button.get_attribute("data-dock") else { return };
+            toggle_dock_tab(&state.borrow(), &tab);
+            if tab == "inspect" {
+                let brush = Brush::Inspect;
+                state.borrow_mut().brush = brush.clone();
+                sync_dock_rail_for_brush(&brush);
+                sync_brush_swatch_active(&brush);
+            }
+            return;
+        }
+
         let Ok(Some(button)) = target.closest("[data-brush]") else { return };
         let Some(kind) = button.get_attribute("data-brush") else { return };
 
         let brush = match kind.as_str() {
-            "inspect" => Brush::Inspect,
             "none" => Brush::SetNone,
             "clear" => Brush::Clear,
             other => match other.strip_prefix("value:") {
@@ -759,28 +895,27 @@ fn attach_palette_click(state: Rc<RefCell<AppState>>) {
                 None => return,
             },
         };
-        state.borrow_mut().brush = brush;
-
-        // Highlight the active tool.
-        if let Some(palette) = document().get_element_by_id("palette") {
-            let items = palette.query_selector_all("[data-brush]").ok();
-            if let Some(items) = items {
-                for i in 0..items.length() {
-                    if let Some(node) = items.item(i) {
-                        if let Ok(el) = node.dyn_into::<Element>() {
-                            let _ = el.class_list().remove_1("active");
-                        }
-                    }
-                }
-            }
-            let _ = button.class_list().add_1("active");
-        }
+        state.borrow_mut().brush = brush.clone();
+        open_dock_tab(&state.borrow(), "terrain");
+        sync_dock_rail_for_brush(&brush);
+        sync_brush_swatch_active(&brush);
     });
     document()
-        .get_element_by_id("palette")
-        .expect("missing #palette")
+        .get_element_by_id("tool-dock")
+        .expect("missing #tool-dock")
         .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
-        .expect("attaching palette handler");
+        .expect("attaching dock handler");
+    closure.forget();
+}
+
+fn attach_escape_key(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |event: web_sys::KeyboardEvent| {
+        if event.key() == "Escape" {
+            set_drawer_open(false);
+            redraw(&state.borrow());
+        }
+    });
+    let _ = document().add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
     closure.forget();
 }
 

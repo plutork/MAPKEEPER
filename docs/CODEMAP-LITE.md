@@ -12,7 +12,7 @@ Use this first, then open only the needed files.
 - HTTP API, world file I/O, launcher endpoints -> `crates/server/src/`
 - Terrain layer endpoints (`/api/layers/terrain`, `/api/cells/:q/:r/terrain`) -> `crates/server/src/lib.rs`
 - CLI commands and query flow (`profile`, `terrain`) -> `crates/cli/src/`
-- Web UI (WASM canvas, Home/Editor flow, terrain palette) -> `crates/web/src/`
+- Web UI (WASM canvas, Home/Editor flow, tool dock + terrain brushes) -> `crates/web/src/`
 - Desktop shell (Tauri wrapper, native dialog bridge) -> `crates/desktop/src/`
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
 - World scaffold source -> `toolchain/template/world/`
@@ -25,6 +25,7 @@ Use this first, then open only the needed files.
 - Server boundary entry: `crates/server/src/lib.rs`
 - Web boundary entry: `crates/web/src/lib.rs`
 - Home screen layout entry: `crates/web/index.html`
+- Editor tool dock (rail + collapsible drawers: Inspect/profile, Terrain brushes, View stub, World): `crates/web/index.html`, `crates/web/src/lib.rs`
 - Project list actions (`open` / `remove` / `delete`, with secondary manage flow): `crates/web/src/lib.rs`, `crates/server/src/lib.rs`
 - Default create path suggestion (`Documents/MAPKEEPER Worlds`): `crates/server/src/lib.rs`, `crates/web/src/lib.rs`
 - Desktop boundary entry: `crates/desktop/src/lib.rs`

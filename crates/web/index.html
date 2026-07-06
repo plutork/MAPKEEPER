@@ -16,28 +16,6 @@
   }
   #map { display: block; width: 100%; height: 100%; background: #0e1113; cursor: pointer; }
   .map-wrap { position: relative; flex: 1; min-width: 0; height: 100vh; }
-  #panel {
-    width: 300px;
-    padding: 20px;
-    box-sizing: border-box;
-    border-left: 1px solid #2a2f36;
-    display: none;
-    flex-direction: column;
-    gap: 12px;
-  }
-  #panel.open { display: flex; }
-  #panel h2 { margin: 0; font-size: 15px; color: #9fe3c4; font-weight: 600; }
-  #panel label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #8a8f98; }
-  #panel input, #panel textarea {
-    background: #20242a;
-    border: 1px solid #3a3f47;
-    color: #eee;
-    padding: 8px 10px;
-    border-radius: 6px;
-    font: inherit;
-    font-size: 14px;
-  }
-  #panel textarea { min-height: 140px; resize: vertical; }
   .row { display: flex; gap: 8px; }
   button {
     padding: 8px 14px;
@@ -50,33 +28,110 @@
   #save { background: #3ac886; color: #04140b; }
   #close, #switch-world { background: #2a2f36; color: #eee; }
   #status { font-size: 12px; color: #7fc99a; min-height: 16px; }
-  #hint { position: absolute; top: 16px; left: 16px; font-size: 12px; color: #666f7a; }
-  #switch-world { position: absolute; top: 12px; right: 16px; }
+  #hint { position: absolute; top: 16px; left: 16px; font-size: 12px; color: #666f7a; max-width: calc(100% - 32px); }
 
-  #palette {
+  #tool-dock {
+    display: flex;
+    flex-shrink: 0;
+    height: 100vh;
+    border-left: 1px solid #2a2f36;
+    background: #161a1d;
+  }
+  #dock-rail {
+    width: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 0;
+    gap: 6px;
+    box-sizing: border-box;
+  }
+  .dock-btn {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 8px;
+    background: #20242a;
+    color: #cbd3dd;
+    border: 1px solid transparent;
+    font-size: 18px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .dock-btn:hover { background: #262b32; color: #eee; }
+  .dock-btn.active { border-color: #9fe3c4; color: #eafff5; box-shadow: 0 0 0 1px rgba(159, 227, 196, 0.15) inset; }
+  .dock-btn.tool-active::after {
+    content: "";
     position: absolute;
-    bottom: 14px;
+    bottom: 4px;
     left: 50%;
     transform: translateX(-50%);
-    display: flex;
-    gap: 6px;
-    padding: 8px 10px;
-    background: rgba(18, 22, 26, 0.92);
-    border: 1px solid #2a2f36;
-    border-radius: 10px;
-    align-items: center;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #9fe3c4;
   }
-  #palette .swatch {
-    padding: 6px 10px;
+  #dock-drawer {
+    width: min(280px, 22vw);
+    min-width: 240px;
+    box-sizing: border-box;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    border-left: 1px solid #2a2f36;
+    transition: width 0.15s ease, min-width 0.15s ease, opacity 0.15s ease, padding 0.15s ease;
+  }
+  #dock-drawer.collapsed {
+    width: 0;
+    min-width: 0;
+    padding: 0;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+    border-left-color: transparent;
+  }
+  .drawer-pane { display: none; flex-direction: column; gap: 12px; }
+  .drawer-pane.active { display: flex; }
+  .drawer-pane h2 { margin: 0; font-size: 15px; color: #9fe3c4; font-weight: 600; }
+  .drawer-pane .pane-label {
+    margin: 0;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8a8f98;
+  }
+  .drawer-pane label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #8a8f98; }
+  .drawer-pane input, .drawer-pane textarea {
+    background: #20242a;
+    border: 1px solid #3a3f47;
+    color: #eee;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 14px;
+  }
+  .drawer-pane textarea { min-height: 120px; resize: vertical; }
+  .dock-empty { margin: 0; font-size: 13px; color: #666f7a; line-height: 1.45; }
+  .dock-note { margin: 0; font-size: 12px; color: #666f7a; line-height: 1.45; }
+  #world-name { margin: 0; font-size: 14px; font-weight: 600; word-break: break-word; }
+  .swatch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .swatch {
+    padding: 8px 10px;
     font-size: 12px;
     background: #20242a;
     color: #cbd3dd;
     border: 1px solid transparent;
+    text-align: left;
   }
-  #palette .swatch.active { border-color: #9fe3c4; color: #eafff5; }
-  #palette .swatch .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
-  #palette .sep { width: 1px; align-self: stretch; background: #2a2f36; margin: 0 2px; }
-  #palette .label { font-size: 11px; color: #8a8f98; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 2px; }
+  .swatch.active { border-color: #9fe3c4; color: #eafff5; }
+  .swatch .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .swatch-row { display: flex; gap: 6px; margin-top: 4px; }
+  .swatch-row .swatch { flex: 1; text-align: center; }
 
   .view { display: none; width: 100%; }
   .view.active { display: block; }
@@ -261,34 +316,57 @@
   <div id="editor" class="view">
     <div class="map-wrap">
       <canvas id="map" width="720" height="560"></canvas>
-      <div id="hint">mapkeeper V0 — Inspect names a cell; terrain brushes paint the map-state layer</div>
-      <button id="switch-world">&larr; Worlds</button>
-      <div id="palette">
-        <span class="label">Tool</span>
-        <button class="swatch active" data-brush="inspect" type="button">Inspect</button>
-        <span class="sep"></span>
-        <span class="label">Terrain</span>
-        <button class="swatch" data-brush="value:plains" type="button"><span class="dot" style="background:#6a7b43"></span>Plains</button>
-        <button class="swatch" data-brush="value:forest" type="button"><span class="dot" style="background:#2f6b4f"></span>Forest</button>
-        <button class="swatch" data-brush="value:water" type="button"><span class="dot" style="background:#2e5f8a"></span>Water</button>
-        <button class="swatch" data-brush="value:mountain" type="button"><span class="dot" style="background:#6d6f78"></span>Mountain</button>
-        <span class="sep"></span>
-        <button class="swatch" data-brush="none" type="button">None</button>
-        <button class="swatch" data-brush="clear" type="button">Clear</button>
-      </div>
+      <div id="hint">mapkeeper — use the tool dock on the right (Inspect names cells; Terrain paints map state)</div>
     </div>
-    <div id="panel">
-      <h2 id="panel-cell">—</h2>
-      <label for="title">Title</label>
-      <input id="title" type="text" placeholder="Place name" autocomplete="off" />
-      <label for="notes">Notes</label>
-      <textarea id="notes" placeholder="Anything worth remembering"></textarea>
-      <div class="row">
-        <button id="save">Save</button>
-        <button id="close">Close</button>
+    <aside id="tool-dock">
+      <nav id="dock-rail" aria-label="Tools">
+        <button class="dock-btn active tool-active" data-dock="inspect" type="button" title="Inspect">&#128269;</button>
+        <button class="dock-btn" data-dock="terrain" type="button" title="Terrain">&#9998;</button>
+        <button class="dock-btn" data-dock="view" type="button" title="View">&#128065;</button>
+        <button class="dock-btn" data-dock="world" type="button" title="World">&#127968;</button>
+      </nav>
+      <div id="dock-drawer" class="collapsed">
+        <div class="drawer-pane active" data-drawer="inspect">
+          <p class="pane-label">Inspect</p>
+          <h2 id="panel-cell">—</h2>
+          <p id="inspect-empty" class="dock-empty">Click a cell on the map to name it.</p>
+          <label for="title">Title</label>
+          <input id="title" type="text" placeholder="Place name" autocomplete="off" disabled />
+          <label for="notes">Notes</label>
+          <textarea id="notes" placeholder="Anything worth remembering" disabled></textarea>
+          <div class="row">
+            <button id="save" type="button">Save</button>
+            <button id="close" type="button">Close</button>
+          </div>
+          <div id="status"></div>
+        </div>
+        <div class="drawer-pane" data-drawer="terrain">
+          <p class="pane-label">Terrain</p>
+          <p class="dock-note">Paint the terrain map-state layer. Values are proof placeholders, not final taxonomy.</p>
+          <div class="swatch-grid">
+            <button class="swatch" data-brush="value:plains" type="button"><span class="dot" style="background:#6a7b43"></span>Plains</button>
+            <button class="swatch" data-brush="value:forest" type="button"><span class="dot" style="background:#2f6b4f"></span>Forest</button>
+            <button class="swatch" data-brush="value:water" type="button"><span class="dot" style="background:#2e5f8a"></span>Water</button>
+            <button class="swatch" data-brush="value:mountain" type="button"><span class="dot" style="background:#6d6f78"></span>Mountain</button>
+          </div>
+          <div class="swatch-row">
+            <button class="swatch" data-brush="none" type="button">None</button>
+            <button class="swatch" data-brush="clear" type="button">Clear</button>
+          </div>
+        </div>
+        <div class="drawer-pane" data-drawer="view">
+          <p class="pane-label">View</p>
+          <p class="dock-note">Layer legend, coordinates, and visibility toggles — coming in a later release.</p>
+          <p class="dock-note">The map fills the window and rescales when you resize it.</p>
+        </div>
+        <div class="drawer-pane" data-drawer="world">
+          <p class="pane-label">World</p>
+          <p id="world-name">—</p>
+          <p class="dock-note">World data stays local on disk.</p>
+          <button id="switch-world" type="button">&larr; Worlds</button>
+        </div>
       </div>
-      <div id="status"></div>
-    </div>
+    </aside>
   </div>
 
   <script>

@@ -37,13 +37,16 @@ await page.waitForSelector("#map", { state: "visible", timeout: 2000 });
 const canvas = page.locator("#map");
 await canvas.click({ position: { x: 360, y: 280 } }); // center hex q0,r0
 
-await page.waitForSelector("#panel.open", { timeout: 2000 });
+await page.waitForSelector("#dock-drawer:not(.collapsed)", { timeout: 2000 });
+await page.waitForFunction(() => !document.getElementById("title")?.disabled, { timeout: 3000 });
 await page.fill("#title", "Old mill");
 await page.fill("#notes", "Grinds grain for the village");
 await page.click("#save");
 await page.waitForFunction(() => document.getElementById("status")?.textContent === "Saved.", { timeout: 3000 });
 
 if (homeActive) {
+  await page.click('[data-dock="world"]');
+  await page.waitForSelector("#dock-drawer:not(.collapsed)", { timeout: 2000 });
   await page.click("#switch-world");
   await page.waitForSelector("#home.active", { timeout: 3000 });
   await page.locator("#project-list .id", { hasText: worldId }).waitFor({ timeout: 3000 });
