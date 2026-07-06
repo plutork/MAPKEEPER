@@ -17,6 +17,7 @@ Details: [toolchain/template/README.md](toolchain/template/README.md).
 ## Docs
 
 - **[STARTER_PACK.md](STARTER_PACK.md)** — product pitch, invariants, milestones.
+- **[docs/CODEMAP-LITE.md](docs/CODEMAP-LITE.md)** — quick task-to-path routing for contributors and agents.
 
 ## This repo (product)
 
