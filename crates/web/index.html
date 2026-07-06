@@ -62,7 +62,7 @@
   .brand .sub { color: #8a8f98; font-size: 12px; margin: 6px 0 0; }
   .cards-grid {
     display: grid;
-    grid-template-columns: minmax(220px, 1fr) minmax(460px, 1.3fr) minmax(220px, 1fr);
+    grid-template-columns: minmax(180px, 0.82fr) minmax(520px, 1.7fr) minmax(180px, 0.82fr);
     gap: 14px;
     align-items: stretch;
   }
@@ -73,9 +73,12 @@
     padding: 14px;
     display: flex;
     flex-direction: column;
-    min-height: 420px;
+    min-height: 380px;
   }
-  .home-card.active { border-color: #3a4a58; }
+  .home-card.active {
+    border-color: #3a4a58;
+    min-height: 470px;
+  }
   .home-card.emphasis {
     background: #202a34;
     border-color: #3f536a;
@@ -119,22 +122,26 @@
   #project-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   #project-list li {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    flex-direction: column;
+    gap: 8px;
     padding: 10px 12px;
     background: #1c2126;
     border: 1px solid #2a2f36;
     border-radius: 8px;
   }
-  #project-list .actions { display: flex; gap: 8px; }
+  #project-list .main-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+  #project-list .actions { display: flex; gap: 8px; flex-shrink: 0; }
   #project-list .open-btn { background: #2f6b4f; color: #e9fff2; }
-  #project-list .forget-btn { background: #3d2a2a; color: #ffcfbf; }
-  #project-list .delete-btn { background: #742b2b; color: #ffd9cd; }
+  #project-list .manage-btn { background: #2a2f36; color: #d2d7de; }
+  #project-list .remove-btn { background: #313840; color: #dce4f2; }
+  #project-list .delete-btn { background: #5c2a2a; color: #ffd9cd; }
+  #project-list .delete-btn.armed { background: #8a2727; color: #fff0ea; }
   #project-list .info { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
   #project-list .id { font-weight: 600; }
   #project-list .path { font-size: 11px; color: #666f7a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #project-list .missing { color: #d97757; font-size: 11px; }
+  #project-list .manage-row { display: none; width: 100%; gap: 8px; border-top: 1px solid #2a2f36; padding-top: 8px; }
+  #project-list li.manage-open .manage-row { display: flex; }
   #project-empty { color: #666f7a; font-size: 13px; display: none; }
   #project-empty.visible { display: block; }
   #home input {
@@ -178,11 +185,11 @@
   <div id="home" class="view active">
     <header class="brand">
       <h1>mapkeeper</h1>
-      <p class="sub">logo coming later</p>
+      <p class="sub">Local worlds for author + agents</p>
     </header>
 
     <div class="cards-grid">
-      <article class="home-card emphasis">
+      <article class="home-card emphasis disabled">
         <div class="card-head">
           <h2>Generate Random World</h2>
           <span class="badge">planned</span>
@@ -196,6 +203,7 @@
           <h2>Your worlds</h2>
         </div>
         <p class="card-sub">Pick an existing world or create one below.</p>
+        <p class="card-note">World data stays local. Agents read your world folder (`mapkeeper.toml` + `profiles/`).</p>
         <ul id="project-list"></ul>
         <p id="project-empty">No worlds yet — create one below.</p>
 

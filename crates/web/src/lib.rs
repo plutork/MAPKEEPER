@@ -277,21 +277,30 @@ fn render_project_list(projects: &[ProjectStatus]) {
         let missing = if p.valid { "" } else { "<div class=\"missing\">folder not found</div>" };
         let actions = if p.valid {
             format!(
-                "<button class=\"open-btn\" data-path=\"{path}\">Open</button><button class=\"forget-btn\" data-path=\"{path}\">Forget</button><button class=\"delete-btn\" data-path=\"{path}\">Delete</button>",
+                "<button class=\"open-btn\" data-path=\"{path}\" type=\"button\">Open</button><button class=\"manage-btn\" type=\"button\">Manage</button>",
                 path = html_escape(&p.path)
             )
         } else {
             format!(
-                "<button class=\"forget-btn\" data-path=\"{path}\">Forget</button>",
+                "<button class=\"remove-btn\" data-path=\"{path}\" type=\"button\">Remove</button>",
                 path = html_escape(&p.path)
             )
         };
+        let manage_row = if p.valid {
+            format!(
+                "<div class=\"manage-row\"><button class=\"remove-btn\" data-path=\"{path}\" type=\"button\">Remove</button><button class=\"delete-btn\" data-path=\"{path}\" type=\"button\">Delete…</button></div>",
+                path = html_escape(&p.path)
+            )
+        } else {
+            String::new()
+        };
         html.push_str(&format!(
-            "<li data-path=\"{path}\"><div class=\"info\"><span class=\"id\">{id}</span><span class=\"path\">{path}</span>{missing}</div><div class=\"actions\">{actions}</div></li>",
+            "<li data-path=\"{path}\"><div class=\"main-row\"><div class=\"info\"><span class=\"id\">{id}</span><span class=\"path\">{path}</span>{missing}</div><div class=\"actions\">{actions}</div></div>{manage_row}</li>",
             id = html_escape(&p.id),
             path = html_escape(&p.path),
             missing = missing,
             actions = actions,
+            manage_row = manage_row,
         ));
     }
     list.set_inner_html(&html);
@@ -551,15 +560,21 @@ async fn pick_folder_via_tauri() -> Option<String> {
 fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
         let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else { return };
+        if let Ok(Some(button)) = target.closest(".manage-btn") {
+            let Some(row) = button.closest("li").ok().flatten() else { return };
+            if row.class_list().contains("manage-open") {
+                let _ = row.class_list().remove_1("manage-open");
+            } else {
+                let _ = row.class_list().add_1("manage-open");
+            }
+            return;
+        }
         if let Ok(Some(button)) = target.closest(".delete-btn") {
             let Some(path) = button.get_attribute("data-path") else { return };
-            if !window()
-                .confirm_with_message(&format!(
-                    "Delete world folder from disk?\n\n{}\n\nThis cannot be undone.",
-                    path
-                ))
-                .unwrap_or(false)
-            {
+            if !button.class_list().contains("armed") {
+                let _ = button.class_list().add_1("armed");
+                button.set_text_content(Some("Delete now"));
+                set_text("home-status", "Click \"Delete now\" again to permanently remove this world from disk.");
                 return;
             }
             let state = state.clone();
@@ -588,10 +603,10 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
             });
             return;
         }
-        if let Ok(Some(button)) = target.closest(".forget-btn") {
+        if let Ok(Some(button)) = target.closest(".remove-btn") {
             let Some(path) = button.get_attribute("data-path") else { return };
             let state = state.clone();
-            set_text("home-status", "Forgetting…");
+            set_text("home-status", "Removing from launcher…");
             wasm_bindgen_futures::spawn_local(async move {
                 let body = ForgetProjectInput { path: &path };
                 let sent = gloo_net::http::Request::post("/api/projects/forget").json(&body);
@@ -608,7 +623,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                         wasm_bindgen_futures::spawn_local(refresh_projects(state));
                     }
                     Ok(resp) => {
-                        let msg = resp.text().await.unwrap_or_else(|_| "forget failed".to_string());
+                        let msg = resp.text().await.unwrap_or_else(|_| "remove failed".to_string());
                         set_text("home-status", &msg);
                     }
                     Err(err) => set_text("home-status", &format!("Error: {err}")),
