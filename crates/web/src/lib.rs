@@ -133,6 +133,12 @@ struct AppState {
     drag_moved: bool,
     drag_last_x: f64,
     drag_last_y: f64,
+    /// Drag-paint interaction state (Land/Water brush).
+    paint_active: bool,
+    paint_moved: bool,
+    paint_last_cell: Option<(i32, i32)>,
+    /// Draw hex-cell borders over fills.
+    show_grid: bool,
     suppress_next_click: bool,
     legacy_map: bool,
     default_worlds_root: Option<String>,
@@ -156,6 +162,10 @@ pub fn start() {
         drag_moved: false,
         drag_last_x: 0.0,
         drag_last_y: 0.0,
+        paint_active: false,
+        paint_moved: false,
+        paint_last_cell: None,
+        show_grid: true,
         suppress_next_click: false,
         legacy_map: false,
         default_worlds_root: None,
@@ -173,6 +183,7 @@ pub fn start() {
     attach_dock_click(state.clone());
     attach_escape_key();
     attach_pan_drag(state.clone());
+    attach_paint_drag(state.clone());
     attach_wheel_zoom(state.clone());
     attach_window_resize(state.clone());
     attach_browse_folder_click();
@@ -511,9 +522,11 @@ fn redraw(state: &AppState) {
             // Fill = hydro projection derived from elevation threshold.
             ctx.set_fill_style_str(hydro_fill(elevation));
             ctx.fill();
-            ctx.set_line_width(if selected { 3.0 } else { 1.0 });
-            ctx.set_stroke_style_str(if selected { "#9fe3c4" } else { "#3a424b" });
-            ctx.stroke();
+            if selected || state.show_grid {
+                ctx.set_line_width(if selected { 3.0 } else { 1.0 });
+                ctx.set_stroke_style_str(if selected { "#9fe3c4" } else { "#3a424b" });
+                ctx.stroke();
+            }
 
             // Profile-presence marker — a separate layer from terrain, so both
             // are visible at once (a cell can have terrain, a profile, or both).
@@ -530,12 +543,14 @@ fn redraw(state: &AppState) {
     set_text(
         "view-stats",
         &format!(
-            "Zoom {:.2}x · Draw {} / {} cells",
+            "Zoom {:.2}x · Draw {} / {} cells · Grid {}",
             state.zoom,
             drawn_cells,
-            total_cell_count(radius)
+            total_cell_count(radius),
+            if state.show_grid { "On" } else { "Off" }
         ),
     );
+    set_text("toggle-grid", if state.show_grid { "Cells: On" } else { "Cells: Off" });
 }
 
 fn hydro_fill(elevation: i16) -> &'static str {
@@ -688,23 +703,71 @@ async fn load_elevation(state: &Rc<RefCell<AppState>>) {
     }
 }
 
+fn cell_from_mouse_event(state: &Rc<RefCell<AppState>>, event: &web_sys::MouseEvent) -> Option<(i32, i32)> {
+    let canvas = canvas();
+    let rect = canvas.get_bounding_client_rect();
+    let radius = state.borrow().map_radius.max(0);
+    let (size, ox, oy) = map_layout(&state.borrow(), rect.width(), rect.height());
+    let mx = event.client_x() as f64 - rect.left() - ox;
+    let my = event.client_y() as f64 - rect.top() - oy;
+    let cell = Axial::from_pixel(mx, my, size);
+    if (cell.q.abs() + cell.r.abs() + (cell.q + cell.r).abs()) / 2 > radius {
+        return None;
+    }
+    Some((cell.q, cell.r))
+}
+
+fn in_map_radius(q: i32, r: i32, radius: i32) -> bool {
+    (q.abs() + r.abs() + (q + r).abs()) / 2 <= radius
+}
+
+fn round_axial_float(q: f64, r: f64) -> (i32, i32) {
+    let x = q;
+    let z = r;
+    let y = -x - z;
+
+    let mut rx = x.round();
+    let ry = y.round();
+    let mut rz = z.round();
+
+    let x_diff = (rx - x).abs();
+    let y_diff = (ry - y).abs();
+    let z_diff = (rz - z).abs();
+
+    if x_diff > y_diff && x_diff > z_diff {
+        rx = -ry - rz;
+    } else if y_diff <= z_diff {
+        rz = -rx - ry;
+    }
+
+    (rx as i32, rz as i32)
+}
+
+/// Discrete hex-line interpolation between two cells (inclusive).
+fn axial_line_cells(from: (i32, i32), to: (i32, i32)) -> Vec<(i32, i32)> {
+    let a = Axial::new(from.0, from.1);
+    let b = Axial::new(to.0, to.1);
+    let n = a.distance(b);
+    if n <= 0 {
+        return vec![from];
+    }
+    let mut out = Vec::with_capacity((n + 1) as usize);
+    for i in 0..=n {
+        let t = i as f64 / n as f64;
+        let q = from.0 as f64 + (to.0 - from.0) as f64 * t;
+        let r = from.1 as f64 + (to.1 - from.1) as f64 * t;
+        out.push(round_axial_float(q, r));
+    }
+    out
+}
+
 fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        let canvas = canvas();
-        let rect = canvas.get_bounding_client_rect();
-        let radius = state.borrow().map_radius.max(0);
         if state.borrow().suppress_next_click {
             state.borrow_mut().suppress_next_click = false;
             return;
         }
-        // Hit-testing uses the same camera-aware layout as redraw.
-        let (size, ox, oy) = map_layout(&state.borrow(), rect.width(), rect.height());
-        let mx = event.client_x() as f64 - rect.left() - ox;
-        let my = event.client_y() as f64 - rect.top() - oy;
-        let cell = Axial::from_pixel(mx, my, size);
-        if (cell.q.abs() + cell.r.abs() + (cell.q + cell.r).abs()) / 2 > radius {
-            return;
-        }
+        let Some((q, r)) = cell_from_mouse_event(&state, &event) else { return };
 
         // Hydro brush paints elevation-driven hydro; Inspect opens the
         // author profile panel (unchanged behavior).
@@ -712,16 +775,16 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
         if let Some(new_elevation) = brush_elevation(&brush) {
             wasm_bindgen_futures::spawn_local(paint_elevation(
                 state.clone(),
-                cell.q,
-                cell.r,
+                q,
+                r,
                 new_elevation,
             ));
             return;
         }
 
-        state.borrow_mut().selected = Some((cell.q, cell.r));
+        state.borrow_mut().selected = Some((q, r));
         open_dock_tab("inspect");
-        set_text("panel-cell", &cell_label(cell.q, cell.r));
+        set_text("panel-cell", &cell_label(q, r));
         input("title").set_value("");
         textarea("notes").set_value("");
         // Disabled while loading — otherwise a fast typist can fill the
@@ -731,7 +794,7 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
         textarea("notes").set_disabled(true);
         set_text("status", "Loading…");
 
-        wasm_bindgen_futures::spawn_local(load_profile_into_panel(state.clone(), cell.q, cell.r));
+        wasm_bindgen_futures::spawn_local(load_profile_into_panel(state.clone(), q, r));
     });
     canvas().set_onclick(Some(closure.as_ref().unchecked_ref()));
     closure.forget();
@@ -743,6 +806,10 @@ fn attach_pan_drag(state: Rc<RefCell<AppState>>) {
     let down_state = state.clone();
     let on_down = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
         if event.button() != 0 {
+            return;
+        }
+        // Keep painting clicks reliable: pan starts only in Inspect mode.
+        if !matches!(down_state.borrow().brush, Brush::Inspect) {
             return;
         }
         let mut s = down_state.borrow_mut();
@@ -798,6 +865,98 @@ fn attach_pan_drag(state: Rc<RefCell<AppState>>) {
             let mut s = up_state.borrow_mut();
             s.drag_active = false;
             s.drag_moved = false;
+            if moved {
+                s.suppress_next_click = true;
+            }
+        }
+    });
+    let _ = window().add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
+    on_up.forget();
+}
+
+/// Drag painting for Land/Water brushes: hold LMB and move across cells.
+fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
+    let down_state = state.clone();
+    let on_down = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+        if event.button() != 0 {
+            return;
+        }
+        let brush = down_state.borrow().brush.clone();
+        let Some(elevation) = brush_elevation(&brush) else { return };
+        let Some((q, r)) = cell_from_mouse_event(&down_state, &event) else { return };
+        {
+            let mut s = down_state.borrow_mut();
+            s.paint_active = true;
+            s.paint_moved = false;
+            s.paint_last_cell = Some((q, r));
+        }
+        wasm_bindgen_futures::spawn_local(paint_elevation(
+            down_state.clone(),
+            q,
+            r,
+            elevation,
+        ));
+    });
+    let _ = canvas().add_event_listener_with_callback("mousedown", on_down.as_ref().unchecked_ref());
+    on_down.forget();
+
+    let move_state = state.clone();
+    let on_move = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+        if !move_state.borrow().paint_active {
+            return;
+        }
+        let brush = move_state.borrow().brush.clone();
+        let Some(elevation) = brush_elevation(&brush) else { return };
+        let Some((q, r)) = cell_from_mouse_event(&move_state, &event) else { return };
+        let should_paint = {
+            let mut s = move_state.borrow_mut();
+            if s.paint_last_cell == Some((q, r)) {
+                false
+            } else {
+                s.paint_moved = true;
+                true
+            }
+        };
+        if should_paint {
+            let radius = move_state.borrow().map_radius.max(0);
+            let from = move_state.borrow().paint_last_cell.unwrap_or((q, r));
+            for (idx, (lq, lr)) in axial_line_cells(from, (q, r)).into_iter().enumerate() {
+                if idx == 0 {
+                    continue;
+                }
+                if !in_map_radius(lq, lr, radius) {
+                    continue;
+                }
+                wasm_bindgen_futures::spawn_local(paint_elevation(
+                    move_state.clone(),
+                    lq,
+                    lr,
+                    elevation,
+                ));
+            }
+            move_state.borrow_mut().paint_last_cell = Some((q, r));
+        }
+    });
+    let _ = window().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
+    on_move.forget();
+
+    let up_state = state.clone();
+    let on_up = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+        if event.button() != 0 {
+            return;
+        }
+        let (was_active, moved) = {
+            let s = up_state.borrow();
+            (s.paint_active, s.paint_moved)
+        };
+        if !was_active {
+            return;
+        }
+        {
+            let mut s = up_state.borrow_mut();
+            s.paint_active = false;
+            s.paint_moved = false;
+            s.paint_last_cell = None;
             if moved {
                 s.suppress_next_click = true;
             }
@@ -884,6 +1043,12 @@ fn attach_save_click(state: Rc<RefCell<AppState>>) {
         let Some((q, r)) = state.borrow().selected else { return };
         let display_name = input("title").value();
         let notes = textarea("notes").value();
+        let has_payload = !display_name.trim().is_empty() || !notes.trim().is_empty();
+        let had_existing_profile = state.borrow().cells.contains_key(&(q, r));
+        if !has_payload && !had_existing_profile {
+            set_text("status", "Nothing to save.");
+            return;
+        }
         let state = state.clone();
         set_text("status", "Saving…");
         wasm_bindgen_futures::spawn_local(async move {
@@ -941,6 +1106,10 @@ fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
             state_mut.zoom = 1.0;
             state_mut.pan_x = 0.0;
             state_mut.pan_y = 0.0;
+            state_mut.paint_active = false;
+            state_mut.paint_moved = false;
+            state_mut.paint_last_cell = None;
+            state_mut.show_grid = true;
             state_mut.legacy_map = false;
             set_drawer_open(false);
             clear_inspect_selection();
@@ -1112,12 +1281,33 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
         let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else { return };
 
+        if let Ok(Some(button)) = target.closest("[data-view-toggle]") {
+            let Some(kind) = button.get_attribute("data-view-toggle") else { return };
+            if kind == "grid" {
+                let show_grid = {
+                    let mut s = state.borrow_mut();
+                    s.show_grid = !s.show_grid;
+                    s.show_grid
+                };
+                button.set_text_content(Some(if show_grid { "Cells: On" } else { "Cells: Off" }));
+                redraw(&state.borrow());
+            }
+            return;
+        }
+
         if let Ok(Some(button)) = target.closest("[data-dock]") {
             let Some(tab) = button.get_attribute("data-dock") else { return };
             toggle_dock_tab(&tab);
             if tab == "inspect" {
                 let brush = Brush::Inspect;
-                state.borrow_mut().brush = brush.clone();
+                {
+                    let mut s = state.borrow_mut();
+                    s.brush = brush.clone();
+                    s.paint_active = false;
+                    s.paint_moved = false;
+                    s.paint_last_cell = None;
+                    s.suppress_next_click = false;
+                }
                 sync_dock_rail_for_brush(&brush);
                 sync_brush_swatch_active(&brush);
             }
@@ -1132,7 +1322,14 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
             "water" => Brush::SetWater,
             _ => return,
         };
-        state.borrow_mut().brush = brush.clone();
+        {
+            let mut s = state.borrow_mut();
+            s.brush = brush.clone();
+            s.paint_active = false;
+            s.paint_moved = false;
+            s.paint_last_cell = None;
+            s.suppress_next_click = false;
+        }
         open_dock_tab("terrain");
         sync_dock_rail_for_brush(&brush);
         sync_brush_swatch_active(&brush);
