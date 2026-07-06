@@ -25,4 +25,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --workspace
+      # mapkeeper-desktop (Tauri, roadmap 5.9) is Windows-only for V0 (D-29)
+      # and needs system GTK/webkit2gtk dev libs this runner doesn't have —
+      # excluded here, covered instead by the windows-desktop-build job.
+      - run: cargo test --workspace --exclude mapkeeper-desktop
+
+  windows-desktop-build:
+    name: cargo build mapkeeper-desktop (Windows only, roadmap 5.9, D-29)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build -p mapkeeper-desktop
