@@ -19,6 +19,7 @@ Use this first, then open only the needed files.
 - Dense-on-disk layer I/O (`read_or_empty` + `write_dense_layer`; created on first write) -> `crates/core/src/layer.rs`, `crates/server/src/lib.rs`, `crates/cli/src/main.rs`
 - Web UI (WASM canvas, Home/Editor flow, tool dock + hydro brush; reads dense elevation, paints via generic batch) -> `crates/web/src/`
 - Perf Step 0 measurement hooks (`open_ms`, layer fetch/parse/mirror, `redraw_ms`, `batch_flush_ms`; `#view-perf` + console) -> `crates/web/src/lib.rs` (`perf-100k--measurement-hooks`)
+- Web dense elevation client (index-addressed `DenseLayer` render cache, no HashMap mirror) -> `crates/web/src/lib.rs` (`perf-100k--web-dense-client`)
 - Desktop shell (Tauri wrapper, native dialog bridge) -> `crates/desktop/src/`
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
 - World scaffold source -> `toolchain/template/world/`

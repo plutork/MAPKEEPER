@@ -36,6 +36,26 @@ const MAX_BRUSH_RADIUS: i32 = 3;
 const HEX_GAP: f64 = 0.92;
 /// Breathing room (px) between the map and the canvas edge.
 const CANVAS_PAD: f64 = 20.0;
+/// Default land elevation when a cell is unknown/none (hydro projection).
+const DEFAULT_LAND_ELEVATION: i32 = 1;
+
+// perf-100k--web-dense-client: index-addressed elevation buffer (no sparse mirror).
+fn fresh_elevation_layer(bounds: MapBounds) -> DenseLayer {
+    DenseLayer::new_integer("elevation", bounds.len())
+}
+
+fn elevation_at(layer: &DenseLayer, bounds: MapBounds, q: i32, r: i32) -> i16 {
+    let index = bounds
+        .index_of(Axial::new(q, r))
+        .unwrap_or(0);
+    layer.int_or(index, DEFAULT_LAND_ELEVATION) as i16
+}
+
+fn set_elevation_cell(layer: &mut DenseLayer, bounds: MapBounds, q: i32, r: i32, value: i16) {
+    if let Some(index) = bounds.index_of(Axial::new(q, r)) {
+        layer.set(index, DenseState::Value(LayerValue::Int(value as i32)));
+    }
+}
 
 // perf-100k--measurement-hooks: lightweight Step 0 timing (console + view pane).
 #[derive(Default)]
@@ -216,8 +236,8 @@ enum Brush {
 struct AppState {
     /// Cells that have an author profile (used for the profile-presence marker).
     cells: HashMap<(i32, i32), String>,
-    /// Sparse elevation overrides (missing => default land elevation).
-    elevation: HashMap<(i32, i32), i16>,
+    /// Index-addressed elevation layer — primary render cache (perf-100k--web-dense-client).
+    elevation: DenseLayer,
     brush: Brush,
     selected: Option<(i32, i32)>,
     /// Hex bounds from `map/manifest.json` (via `/api/map`).
@@ -258,12 +278,13 @@ struct AppState {
 pub fn start() {
     console_error_panic_hook::set_once();
 
+    let initial_bounds = MapPreset::Small.bounds();
     let state = Rc::new(RefCell::new(AppState {
         cells: HashMap::new(),
-        elevation: HashMap::new(),
+        elevation: fresh_elevation_layer(initial_bounds),
         brush: Brush::Inspect,
         selected: None,
-        map_bounds: MapPreset::Small.bounds(),
+        map_bounds: initial_bounds,
         zoom: 1.0,
         pan_x: 0.0,
         pan_y: 0.0,
@@ -688,7 +709,7 @@ fn redraw(state: &AppState) -> usize {
             ctx.close_path();
 
             let selected = state.selected == Some((q, r));
-            let elevation = state.elevation.get(&(q, r)).copied().unwrap_or(1);
+            let elevation = elevation_at(&state.elevation, bounds, q, r);
             // Fill = hydro projection derived from elevation threshold.
             ctx.set_fill_style_str(hydro_fill(elevation));
             ctx.fill();
@@ -887,8 +908,7 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
     perf_emit(&state.borrow().perf);
 }
 
-/// Fetch the dense elevation layer (scale-layers, D-46) and index its concrete
-/// integer values by `(q,r)`; unpainted cells stay default land at draw time.
+/// Fetch the dense elevation layer (scale-layers, D-46) into index buffers.
 async fn load_elevation(state: &Rc<RefCell<AppState>>) {
     let fetch_start = perf_now();
     let Ok(resp) = gloo_net::http::Request::get("/api/layers/elevation").send().await else { return };
@@ -898,17 +918,15 @@ async fn load_elevation(state: &Rc<RefCell<AppState>>) {
     let parse_ms = perf_now() - parse_start;
     let mirror_start = perf_now();
     let bounds = state.borrow().map_bounds;
-    let mut elevation = HashMap::new();
-    for index in 0..layer.len() {
-        if let DenseState::Value(LayerValue::Int(v)) = layer.state(index) {
-            if let Some(cell) = bounds.from_index(index) {
-                elevation.insert((cell.q, cell.r), v as i16);
-            }
-        }
-    }
+    // perf-100k--web-dense-client: adopt layer wholesale — no scan-to-HashMap.
+    let adopted = if layer.cell_count == bounds.len() {
+        layer
+    } else {
+        fresh_elevation_layer(bounds)
+    };
     let mirror_ms = perf_now() - mirror_start;
     let mut state_mut = state.borrow_mut();
-    state_mut.elevation = elevation;
+    state_mut.elevation = adopted;
     state_mut.perf.layer_fetch_ms = Some(fetch_ms);
     state_mut.perf.layer_parse_or_decode_ms = Some(parse_ms);
     state_mut.perf.client_mirror_ms = Some(mirror_ms);
@@ -942,9 +960,10 @@ fn paint_stamp_cells(center: (i32, i32), brush_radius: i32, map_bounds: MapBound
 fn queue_paint_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), new_elevation: i16) {
     let painted_cells = {
         let mut s = state.borrow_mut();
-        let painted = paint_stamp_cells(center, s.brush_radius, s.map_bounds);
+        let map_bounds = s.map_bounds;
+        let painted = paint_stamp_cells(center, s.brush_radius, map_bounds);
         for (q, r) in &painted {
-            s.elevation.insert((*q, *r), new_elevation);
+            set_elevation_cell(&mut s.elevation, map_bounds, *q, *r, new_elevation);
             s.pending_paints.insert((*q, *r), new_elevation);
         }
         painted
@@ -1393,7 +1412,7 @@ fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
             let _ = gloo_net::http::Request::post("/api/projects/close").send().await;
             let mut state_mut = state.borrow_mut();
             state_mut.cells.clear();
-            state_mut.elevation.clear();
+            state_mut.elevation = fresh_elevation_layer(state_mut.map_bounds);
             state_mut.selected = None;
             state_mut.map_bounds = MapPreset::Small.bounds();
             state_mut.zoom = 1.0;
