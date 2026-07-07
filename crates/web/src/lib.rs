@@ -32,6 +32,10 @@ const PAINT_SAVE_COOLDOWN_MS: u32 = 300;
 const PAINT_BATCH_MAX_CELLS: usize = 512;
 const MIN_BRUSH_RADIUS: i32 = 0;
 const MAX_BRUSH_RADIUS: i32 = 3;
+// perf-100k--canvas-lod-grid-markers: skip per-hex stroke when many cells visible.
+const GRID_STROKE_CELL_THRESHOLD: usize = 10_000;
+// perf-100k--canvas-lod-grid-markers: hide profile dots when zoomed out.
+const PROFILE_MARKER_MIN_ZOOM: f64 = 1.0;
 /// Fill inset so adjacent hex fills leave a thin grid gap.
 const HEX_GAP: f64 = 0.92;
 /// Breathing room (px) between the map and the canvas edge.
@@ -54,6 +58,42 @@ fn elevation_at(layer: &DenseLayer, bounds: MapBounds, q: i32, r: i32) -> i16 {
 fn set_elevation_cell(layer: &mut DenseLayer, bounds: MapBounds, q: i32, r: i32, value: i16) {
     if let Some(index) = bounds.index_of(Axial::new(q, r)) {
         layer.set(index, DenseState::Value(LayerValue::Int(value as i32)));
+    }
+}
+
+fn count_visible_in_bounds(
+    q_min: i32,
+    q_max: i32,
+    r_min: i32,
+    r_max: i32,
+    bounds: MapBounds,
+) -> usize {
+    let mut n = 0usize;
+    for q in q_min..=q_max {
+        for r in r_min..=r_max {
+            if bounds.contains(Axial::new(q, r)) {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+fn stroke_grid_enabled(show_grid: bool, visible_cells: usize) -> bool {
+    show_grid && visible_cells <= GRID_STROKE_CELL_THRESHOLD
+}
+
+fn show_profile_markers(zoom: f64) -> bool {
+    zoom >= PROFILE_MARKER_MIN_ZOOM
+}
+
+fn grid_status_label(show_grid: bool, visible_cells: usize) -> &'static str {
+    if !show_grid {
+        "Off"
+    } else if visible_cells > GRID_STROKE_CELL_THRESHOLD {
+        "Auto-off"
+    } else {
+        "On"
     }
 }
 
@@ -773,6 +813,9 @@ fn redraw(state: &AppState) -> usize {
     ctx.fill_rect(0.0, 0.0, width, height);
 
     let (q_min, q_max, r_min, r_max) = visible_scan_bounds(width, height, size, ox, oy, bounds);
+    let visible_cells = count_visible_in_bounds(q_min, q_max, r_min, r_max, bounds);
+    let stroke_grid = stroke_grid_enabled(state.show_grid, visible_cells);
+    let draw_profile_dots = show_profile_markers(state.zoom);
     let mut drawn_cells = 0usize;
     for q in q_min..=q_max {
         for r in r_min..=r_max {
@@ -796,7 +839,7 @@ fn redraw(state: &AppState) -> usize {
             // Fill = hydro projection derived from elevation threshold.
             ctx.set_fill_style_str(hydro_fill(elevation));
             ctx.fill();
-            if selected || state.show_grid {
+            if selected || stroke_grid {
                 ctx.set_line_width(if selected { 3.0 } else { 1.0 });
                 ctx.set_stroke_style_str(if selected { "#9fe3c4" } else { "#3a424b" });
                 ctx.stroke();
@@ -804,7 +847,7 @@ fn redraw(state: &AppState) -> usize {
 
             // Profile-presence marker — a separate layer from terrain, so both
             // are visible at once (a cell can have terrain, a profile, or both).
-            if state.cells.contains_key(&(q, r)) {
+            if draw_profile_dots && state.cells.contains_key(&(q, r)) {
                 ctx.begin_path();
                 let dot = (size * 0.13).clamp(2.5, 5.0);
                 let _ = ctx.arc(cx, cy, dot, 0.0, std::f64::consts::PI * 2.0);
@@ -821,7 +864,7 @@ fn redraw(state: &AppState) -> usize {
             state.zoom,
             drawn_cells,
             bounds.len(),
-            if state.show_grid { "On" } else { "Off" }
+            grid_status_label(state.show_grid, visible_cells),
         ),
     );
     draw_preview_boundary(state, &ctx, size, ox, oy);
