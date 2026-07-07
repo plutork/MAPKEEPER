@@ -2114,7 +2114,7 @@ fn apply_elevation_brush_intent(s: &mut AppState) {
     // Peaks stay author-controlled — Raise/Lower does not force them on.
 }
 
-/// View defaults when a world opens (elevation dogfood; D-51 grid off on large maps).
+/// View defaults on world open (D-53) — elevation-first; grid on small maps only.
 fn reset_view_on_world_open(s: &mut AppState) {
     s.color_mode = ColorMode::Elevation;
     s.show_elevation_labels = true;
