@@ -96,6 +96,13 @@ struct ElevationCellState {
 }
 
 #[derive(Deserialize)]
+struct ElevationCellWrite {
+    q: i32,
+    r: i32,
+    elevation: i16,
+}
+
+#[derive(Deserialize)]
 struct ProfileInput {
     #[serde(default)]
     display_name: String,
@@ -299,6 +306,8 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         .route("/api/layers/terrain", get(get_terrain_layer))
         .route("/api/cells/:q/:r/terrain", axum::routing::put(put_cell_terrain))
         .route("/api/layers/elevation", get(get_elevation_layer))
+        // save-batch--http-endpoint-v1: one request -> one layer write.
+        .route("/api/layers/elevation/batch", axum::routing::put(put_elevation_batch))
         .route("/api/cells/:q/:r/elevation", axum::routing::put(put_cell_elevation))
         .with_state(state)
         .fallback_service(ServeDir::new(&config.web_dist)))
@@ -718,4 +727,30 @@ async fn put_cell_elevation(
         hydro: layer.hydro(&cell_id),
     })
     .into_response()
+}
+
+async fn put_elevation_batch(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(updates): Json<Vec<ElevationCellWrite>>,
+) -> impl IntoResponse {
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    if updates.is_empty() {
+        return StatusCode::NO_CONTENT.into_response();
+    }
+
+    let mut layer = match read_elevation_layer(&active.path) {
+        Ok(layer) => layer,
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+    };
+    for item in updates {
+        let cell_id = CellId::new(&active.id, item.q, item.r).to_string();
+        layer.set(cell_id, item.elevation);
+    }
+    if let Err(err) = write_elevation_layer(&active.path, &layer) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    StatusCode::NO_CONTENT.into_response()
 }

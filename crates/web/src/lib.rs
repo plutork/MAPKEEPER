@@ -10,8 +10,10 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::rc::Rc;
 
+use gloo_timers::future::TimeoutFuture;
 use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::hex::Axial;
 use mapkeeper_core::hydro::{hydro_from_elevation, ElevationLayer, HydroKind};
@@ -25,6 +27,11 @@ const DEFAULT_MAP_RADIUS: i32 = 6;
 const MIN_ZOOM: f64 = 0.6;
 const MAX_ZOOM: f64 = 2.5;
 const PAN_DRAG_THRESHOLD: f64 = 3.0;
+// save-batch--http-endpoint-v1: tuneable write buffering.
+const PAINT_SAVE_COOLDOWN_MS: u32 = 300;
+const PAINT_BATCH_MAX_CELLS: usize = 512;
+const MIN_BRUSH_RADIUS: i32 = 0;
+const MAX_BRUSH_RADIUS: i32 = 3;
 /// Fill inset so adjacent hex fills leave a thin grid gap.
 const HEX_GAP: f64 = 0.92;
 /// Breathing room (px) between the map and the canvas edge.
@@ -105,6 +112,13 @@ struct DeleteProjectInput<'a> {
     path: &'a str,
 }
 
+#[derive(Serialize)]
+struct ElevationCellWrite {
+    q: i32,
+    r: i32,
+    elevation: i16,
+}
+
 /// Active editing tool. `Inspect` keeps the old click→profile behavior; the
 /// hydro brushes paint elevation-driven hydro (`land`/`water`) instead.
 #[derive(Clone)]
@@ -137,6 +151,13 @@ struct AppState {
     paint_active: bool,
     paint_moved: bool,
     paint_last_cell: Option<(i32, i32)>,
+    /// Brush radius in hex cells (0 = single cell).
+    brush_radius: i32,
+    /// Local paint writes not yet persisted to server.
+    pending_paints: HashMap<(i32, i32), i16>,
+    paint_flush_scheduled: bool,
+    paint_flush_in_flight: bool,
+    hover_cell: Option<(i32, i32)>,
     /// Draw hex-cell borders over fills.
     show_grid: bool,
     suppress_next_click: bool,
@@ -165,6 +186,11 @@ pub fn start() {
         paint_active: false,
         paint_moved: false,
         paint_last_cell: None,
+        brush_radius: 0,
+        pending_paints: HashMap::new(),
+        paint_flush_scheduled: false,
+        paint_flush_in_flight: false,
+        hover_cell: None,
         show_grid: true,
         suppress_next_click: false,
         legacy_map: false,
@@ -184,6 +210,7 @@ pub fn start() {
     attach_escape_key();
     attach_pan_drag(state.clone());
     attach_paint_drag(state.clone());
+    attach_brush_hover_preview(state.clone());
     attach_wheel_zoom(state.clone());
     attach_window_resize(state.clone());
     attach_browse_folder_click();
@@ -327,6 +354,64 @@ fn sync_brush_swatch_active(brush: &Brush) {
         if let Ok(Some(button)) = drawer.query_selector(&format!("[data-brush=\"{kind}\"]")) {
             let _ = button.class_list().add_1("active");
         }
+    }
+}
+
+fn sync_brush_radius_active(radius: i32) {
+    let radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
+    set_text("brush-size-value", &(radius + 1).to_string());
+    if let Some(drawer) = document().get_element_by_id("dock-drawer") {
+        if let Ok(items) = drawer.query_selector_all("[data-brush-size]") {
+            for i in 0..items.length() {
+                if let Some(node) = items.item(i) {
+                    if let Ok(el) = node.dyn_into::<Element>() {
+                        let is_active = el
+                            .get_attribute("data-brush-size")
+                            .and_then(|v| v.parse::<i32>().ok())
+                            .map(|v| v == radius)
+                            .unwrap_or(false);
+                        if is_active {
+                            let _ = el.class_list().add_1("active");
+                        } else {
+                            let _ = el.class_list().remove_1("active");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn draw_preview_boundary(state: &AppState, ctx: &CanvasRenderingContext2d, size: f64, ox: f64, oy: f64) {
+    if matches!(state.brush, Brush::Inspect) {
+        return;
+    }
+    let Some(center) = state.hover_cell else { return };
+    let cells = paint_stamp_cells(center, state.brush_radius, state.map_radius.max(0));
+    if cells.is_empty() {
+        return;
+    }
+    let cell_set: HashSet<(i32, i32)> = cells.iter().copied().collect();
+    ctx.set_line_width(2.0);
+    ctx.set_stroke_style_str("#9fe3c4");
+    for (q, r) in cells {
+        let axial = Axial::new(q, r);
+        let is_boundary = axial
+            .neighbors()
+            .iter()
+            .any(|n| !cell_set.contains(&(n.q, n.r)));
+        if !is_boundary {
+            continue;
+        }
+        let (x, y) = axial.to_pixel(size);
+        let corners = hex_corners(ox + x, oy + y, size * HEX_GAP * 0.98);
+        ctx.begin_path();
+        ctx.move_to(corners[0].0, corners[0].1);
+        for corner in &corners[1..] {
+            ctx.line_to(corner.0, corner.1);
+        }
+        ctx.close_path();
+        ctx.stroke();
     }
 }
 
@@ -550,7 +635,9 @@ fn redraw(state: &AppState) {
             if state.show_grid { "On" } else { "Off" }
         ),
     );
+    draw_preview_boundary(state, &ctx, size, ox, oy);
     set_text("toggle-grid", if state.show_grid { "Cells: On" } else { "Cells: Off" });
+    sync_brush_radius_active(state.brush_radius);
 }
 
 fn hydro_fill(elevation: i16) -> &'static str {
@@ -672,6 +759,9 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
             state_mut.zoom = 1.0;
             state_mut.pan_x = 0.0;
             state_mut.pan_y = 0.0;
+            state_mut.pending_paints.clear();
+            state_mut.paint_flush_scheduled = false;
+            state_mut.paint_flush_in_flight = false;
             state_mut.legacy_map = map.legacy_map;
             set_world_label(&format!(
                 "{} · {} cells",
@@ -721,44 +811,98 @@ fn in_map_radius(q: i32, r: i32, radius: i32) -> bool {
     (q.abs() + r.abs() + (q + r).abs()) / 2 <= radius
 }
 
-fn round_axial_float(q: f64, r: f64) -> (i32, i32) {
-    let x = q;
-    let z = r;
-    let y = -x - z;
-
-    let mut rx = x.round();
-    let ry = y.round();
-    let mut rz = z.round();
-
-    let x_diff = (rx - x).abs();
-    let y_diff = (ry - y).abs();
-    let z_diff = (rz - z).abs();
-
-    if x_diff > y_diff && x_diff > z_diff {
-        rx = -ry - rz;
-    } else if y_diff <= z_diff {
-        rz = -rx - ry;
-    }
-
-    (rx as i32, rz as i32)
+fn paint_stamp_cells(center: (i32, i32), radius: i32, map_radius: i32) -> Vec<(i32, i32)> {
+    let radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
+    Axial::new(center.0, center.1)
+        .range(radius)
+        .into_iter()
+        .filter(|cell| in_map_radius(cell.q, cell.r, map_radius))
+        .map(|cell| (cell.q, cell.r))
+        .collect()
 }
 
-/// Discrete hex-line interpolation between two cells (inclusive).
-fn axial_line_cells(from: (i32, i32), to: (i32, i32)) -> Vec<(i32, i32)> {
-    let a = Axial::new(from.0, from.1);
-    let b = Axial::new(to.0, to.1);
-    let n = a.distance(b);
-    if n <= 0 {
-        return vec![from];
+fn queue_paint_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), new_elevation: i16) {
+    let painted_cells = {
+        let mut s = state.borrow_mut();
+        let painted = paint_stamp_cells(center, s.brush_radius, s.map_radius.max(0));
+        for (q, r) in &painted {
+            s.elevation.insert((*q, *r), new_elevation);
+            s.pending_paints.insert((*q, *r), new_elevation);
+        }
+        redraw(&s);
+        painted
+    };
+    if !painted_cells.is_empty() {
+        set_text("status", "Autosave pending…");
+        schedule_paint_flush(state);
     }
-    let mut out = Vec::with_capacity((n + 1) as usize);
-    for i in 0..=n {
-        let t = i as f64 / n as f64;
-        let q = from.0 as f64 + (to.0 - from.0) as f64 * t;
-        let r = from.1 as f64 + (to.1 - from.1) as f64 * t;
-        out.push(round_axial_float(q, r));
+}
+
+fn schedule_paint_flush(state: Rc<RefCell<AppState>>) {
+    let should_schedule = {
+        let mut s = state.borrow_mut();
+        if s.paint_flush_scheduled || s.pending_paints.is_empty() {
+            false
+        } else {
+            s.paint_flush_scheduled = true;
+            true
+        }
+    };
+    if !should_schedule {
+        return;
     }
-    out
+    wasm_bindgen_futures::spawn_local(async move {
+        TimeoutFuture::new(PAINT_SAVE_COOLDOWN_MS).await;
+        flush_pending_paints(state).await;
+    });
+}
+
+async fn flush_pending_paints(state: Rc<RefCell<AppState>>) {
+    let batch = {
+        let mut s = state.borrow_mut();
+        s.paint_flush_scheduled = false;
+        if s.paint_flush_in_flight || s.pending_paints.is_empty() {
+            return;
+        }
+        s.paint_flush_in_flight = true;
+        s.pending_paints.drain().collect::<Vec<_>>()
+    };
+
+    let mut failed_cells: Vec<((i32, i32), i16)> = Vec::new();
+    // save-batch--http-endpoint-v1: send chunked batch writes.
+    for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
+        let payload = chunk
+            .iter()
+            .map(|((q, r), elevation)| ElevationCellWrite {
+                q: *q,
+                r: *r,
+                elevation: *elevation,
+            })
+            .collect::<Vec<_>>();
+        let sent = gloo_net::http::Request::put("/api/layers/elevation/batch")
+            .json(&payload)
+            .expect("serializing elevation batch body")
+            .send()
+            .await;
+        if !matches!(sent, Ok(resp) if resp.ok()) {
+            failed_cells.extend(chunk.iter().copied());
+        }
+    }
+
+    {
+        let mut s = state.borrow_mut();
+        for ((q, r), value) in failed_cells {
+            s.pending_paints.insert((q, r), value);
+        }
+        s.paint_flush_in_flight = false;
+    }
+
+    if !state.borrow().pending_paints.is_empty() {
+        set_text("status", "Autosave retry…");
+        schedule_paint_flush(state);
+    } else {
+        set_text("status", "");
+    }
 }
 
 fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
@@ -773,12 +917,7 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
         // author profile panel (unchanged behavior).
         let brush = state.borrow().brush.clone();
         if let Some(new_elevation) = brush_elevation(&brush) {
-            wasm_bindgen_futures::spawn_local(paint_elevation(
-                state.clone(),
-                q,
-                r,
-                new_elevation,
-            ));
+            queue_paint_stamp(state.clone(), (q, r), new_elevation);
             return;
         }
 
@@ -890,12 +1029,7 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
             s.paint_moved = false;
             s.paint_last_cell = Some((q, r));
         }
-        wasm_bindgen_futures::spawn_local(paint_elevation(
-            down_state.clone(),
-            q,
-            r,
-            elevation,
-        ));
+        queue_paint_stamp(down_state.clone(), (q, r), elevation);
     });
     let _ = canvas().add_event_listener_with_callback("mousedown", on_down.as_ref().unchecked_ref());
     on_down.forget();
@@ -918,22 +1052,9 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
             }
         };
         if should_paint {
-            let radius = move_state.borrow().map_radius.max(0);
-            let from = move_state.borrow().paint_last_cell.unwrap_or((q, r));
-            for (idx, (lq, lr)) in axial_line_cells(from, (q, r)).into_iter().enumerate() {
-                if idx == 0 {
-                    continue;
-                }
-                if !in_map_radius(lq, lr, radius) {
-                    continue;
-                }
-                wasm_bindgen_futures::spawn_local(paint_elevation(
-                    move_state.clone(),
-                    lq,
-                    lr,
-                    elevation,
-                ));
-            }
+            // Keep path faithful to real cursor movement: no straight-line
+            // interpolation between sparse samples.
+            queue_paint_stamp(move_state.clone(), (q, r), elevation);
             move_state.borrow_mut().paint_last_cell = Some((q, r));
         }
     });
@@ -961,9 +1082,53 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
                 s.suppress_next_click = true;
             }
         }
+        wasm_bindgen_futures::spawn_local(flush_pending_paints(up_state.clone()));
     });
     let _ = window().add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
     on_up.forget();
+}
+
+fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
+    let move_state = state.clone();
+    let on_move = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+        let next_hover = if matches!(move_state.borrow().brush, Brush::Inspect) {
+            None
+        } else {
+            cell_from_mouse_event(&move_state, &event)
+        };
+        let changed = {
+            let mut s = move_state.borrow_mut();
+            if s.hover_cell == next_hover {
+                false
+            } else {
+                s.hover_cell = next_hover;
+                true
+            }
+        };
+        if changed {
+            redraw(&move_state.borrow());
+        }
+    });
+    let _ = canvas().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
+    on_move.forget();
+
+    let leave_state = state.clone();
+    let on_leave = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |_| {
+        let changed = {
+            let mut s = leave_state.borrow_mut();
+            if s.hover_cell.is_none() {
+                false
+            } else {
+                s.hover_cell = None;
+                true
+            }
+        };
+        if changed {
+            redraw(&leave_state.borrow());
+        }
+    });
+    let _ = canvas().add_event_listener_with_callback("mouseleave", on_leave.as_ref().unchecked_ref());
+    on_leave.forget();
 }
 
 /// Wheel zoom with cursor anchor, clamped to the chosen 0.6x–2.5x range.
@@ -1255,27 +1420,6 @@ fn brush_elevation(brush: &Brush) -> Option<i16> {
     }
 }
 
-/// PUT elevation for a cell, then mirror locally and redraw. The
-/// filesystem write happens server-side (D-20); the WASM UI never touches FS.
-async fn paint_elevation(state: Rc<RefCell<AppState>>, q: i32, r: i32, new_elevation: i16) {
-    set_text("status", "Painting…");
-    let sent = gloo_net::http::Request::put(&format!("/api/cells/{q}/{r}/elevation"))
-        .json(&new_elevation)
-        .expect("serializing elevation body")
-        .send()
-        .await;
-    match sent {
-        Ok(resp) if resp.ok() => {
-            let mut state_mut = state.borrow_mut();
-            state_mut.elevation.insert((q, r), new_elevation);
-            redraw(&state_mut);
-            drop(state_mut);
-            set_text("status", "");
-        }
-        _ => set_text("status", "Paint failed."),
-    }
-}
-
 /// Tool dock: rail tabs toggle drawers; hydro swatches set the active brush.
 fn attach_dock_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
@@ -1295,6 +1439,17 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
             return;
         }
 
+        if let Ok(Some(button)) = target.closest("[data-brush-size]") {
+            let Some(raw_size) = button.get_attribute("data-brush-size") else { return };
+            let Ok(radius) = raw_size.parse::<i32>() else { return };
+            {
+                let mut s = state.borrow_mut();
+                s.brush_radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
+            }
+            sync_brush_radius_active(state.borrow().brush_radius);
+            return;
+        }
+
         if let Ok(Some(button)) = target.closest("[data-dock]") {
             let Some(tab) = button.get_attribute("data-dock") else { return };
             toggle_dock_tab(&tab);
@@ -1303,6 +1458,7 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                 {
                     let mut s = state.borrow_mut();
                     s.brush = brush.clone();
+                    s.hover_cell = None;
                     s.paint_active = false;
                     s.paint_moved = false;
                     s.paint_last_cell = None;
@@ -1325,6 +1481,7 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
         {
             let mut s = state.borrow_mut();
             s.brush = brush.clone();
+            s.hover_cell = None;
             s.paint_active = false;
             s.paint_moved = false;
             s.paint_last_cell = None;
