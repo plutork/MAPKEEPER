@@ -31,7 +31,7 @@ use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::layer::{
     Bounds, DenseLayer, LayerCellWrite, MapManifest, ValueType, WireCellState, ELEVATION_LAYER_ID,
 };
-use mapkeeper_core::map_preset::{MapPreset, LEGACY_DEFAULT_RADIUS, hex_cell_count, parse_map_preset};
+use mapkeeper_core::map_preset::{legacy_default_bounds, parse_map_preset, rect_cell_count, MapPreset};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
 use mapkeeper_core::world;
@@ -78,7 +78,8 @@ struct CellSummary {
 #[derive(Serialize)]
 struct MapBoundsResponse {
     kind: String,
-    radius: i32,
+    width: i32,
+    height: i32,
     cell_count: u32,
 }
 
@@ -160,8 +161,9 @@ fn legacy_map_folder(world_path: &Path) -> bool {
     !map_manifest_path(world_path).exists()
 }
 
-fn write_map_manifest(world_path: &Path, radius: i32) -> Result<()> {
-    let manifest = MapManifest::default_v0(radius);
+fn write_map_manifest(world_path: &Path, preset: MapPreset) -> Result<()> {
+    let (width, height) = preset.dimensions();
+    let manifest = MapManifest::default_v0(width, height);
     let path = map_manifest_path(world_path);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -170,31 +172,31 @@ fn write_map_manifest(world_path: &Path, radius: i32) -> Result<()> {
     Ok(())
 }
 
-/// Read hex bounds from disk; missing manifest => legacy default (Small), not "outdated".
-fn read_map_bounds(world_path: &Path) -> (i32, bool) {
+/// Read hex bounds from disk. Missing manifest => Small rectangle default.
+fn read_map_bounds(world_path: &Path) -> (MapBounds, bool) {
     let path = map_manifest_path(world_path);
     let Ok(raw) = std::fs::read_to_string(&path) else {
-        return (LEGACY_DEFAULT_RADIUS, true);
+        return (legacy_default_bounds(), true);
     };
     let Ok(manifest) = MapManifest::from_json(&raw) else {
-        return (LEGACY_DEFAULT_RADIUS, true);
+        return (legacy_default_bounds(), true);
     };
     match manifest.bounds {
-        Bounds::HexRadius { radius } => (radius.max(0), false),
+        Bounds::HexRectangle { width, height } => (MapBounds::new(width, height), false),
     }
 }
 
 /// scale-layers (D-46): map bounds as the cell-index domain for dense layers.
 fn map_bounds(world_path: &Path) -> MapBounds {
-    let (radius, _) = read_map_bounds(world_path);
-    MapBounds::new(radius)
+    read_map_bounds(world_path).0
 }
 
-fn bounds_response(radius: i32) -> MapBoundsResponse {
+fn bounds_response(bounds: &MapBounds) -> MapBoundsResponse {
     MapBoundsResponse {
-        kind: "hex-radius".to_string(),
-        radius,
-        cell_count: hex_cell_count(radius),
+        kind: "hex-rectangle".to_string(),
+        width: bounds.width,
+        height: bounds.height,
+        cell_count: rect_cell_count(bounds.width, bounds.height),
     }
 }
 
@@ -414,7 +416,7 @@ async fn create_project(
         .as_deref()
         .and_then(parse_map_preset)
         .unwrap_or(MapPreset::Small);
-    if let Err(err) = write_map_manifest(&path, preset.radius()) {
+    if let Err(err) = write_map_manifest(&path, preset) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
@@ -537,10 +539,10 @@ async fn get_map(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse
             });
         }
     }
-    let (radius, legacy_map) = read_map_bounds(&active.path);
+    let (bounds, legacy_map) = read_map_bounds(&active.path);
     Json(MapResponse {
         world_id: active.id.clone(),
-        bounds: bounds_response(radius),
+        bounds: bounds_response(&bounds),
         legacy_map,
         cells,
     })

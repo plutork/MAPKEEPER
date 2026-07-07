@@ -1,9 +1,11 @@
-//! World map size presets — hex-radius bounds for new worlds (D-40).
+//! World map size presets — hex-rectangle 16:9 bounds for new worlds (D-40, D-49).
 //!
-//! Author-facing presets map to a `hex-radius` stored in `map/manifest.json`.
-//! Canvas/viewport is separate (pan/zoom — roadmap 4.2 Slice 2).
+//! Author-facing presets map to `hex-rectangle` in `map/manifest.json`.
+//! Canvas/viewport is separate (pan/zoom — roadmap 4.2).
 
-/// Author-facing map size presets for create/generate wizards (D-40, D-48).
+use crate::hex::MapBounds;
+
+/// Author-facing map size presets for create/generate wizards (D-40, D-48, D-49).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MapPreset {
     Small,
@@ -26,32 +28,38 @@ impl MapPreset {
         }
     }
 
-    pub fn radius(self) -> i32 {
+    /// Width × height (odd-r offset rectangle, 16:9) for this tier.
+    pub fn dimensions(self) -> (i32, i32) {
         match self {
-            MapPreset::Small => 6,
-            MapPreset::Medium => 18,
-            MapPreset::Large => 50,
-            // viewport-pan-zoom-culling: Epic preset unlock (~30K cells).
-            MapPreset::Epic => 100,
-            // map-presets-50k-100k (D-48): extend ladder toward D-46 ~100k ceiling.
-            MapPreset::Grand => 129,
-            MapPreset::World => 182,
+            // map-bounds--hex-rectangle-16x9: W×H tuned to ~tier N at 16:9.
+            MapPreset::Small => (14, 8),
+            MapPreset::Medium => (43, 24),
+            MapPreset::Large => (117, 66),
+            MapPreset::Epic => (233, 131),
+            MapPreset::Grand => (299, 168),
+            MapPreset::World => (421, 237),
         }
     }
 
-    /// Approximate in-bounds cell count for author-facing labels.
+    pub fn bounds(self) -> MapBounds {
+        let (w, h) = self.dimensions();
+        MapBounds::new(w, h)
+    }
+
+    /// In-bounds cell count for author-facing labels.
     pub fn approx_cell_count(self) -> u32 {
-        hex_cell_count(self.radius())
+        let (w, h) = self.dimensions();
+        rect_cell_count(w, h)
     }
 
     pub fn author_label(self) -> &'static str {
         match self {
-            MapPreset::Small => "Small (~127 cells)",
-            MapPreset::Medium => "Medium (~1,027 cells)",
-            MapPreset::Large => "Large (~7,651 cells)",
-            MapPreset::Epic => "Epic (~30,301 cells)",
-            MapPreset::Grand => "Grand (~50,311 cells)",
-            MapPreset::World => "World (~99,919 cells)",
+            MapPreset::Small => "Small (~112 cells)",
+            MapPreset::Medium => "Medium (~1,032 cells)",
+            MapPreset::Large => "Large (~7,722 cells)",
+            MapPreset::Epic => "Epic (~30,523 cells)",
+            MapPreset::Grand => "Grand (~50,232 cells)",
+            MapPreset::World => "World (~99,777 cells, not stable)",
         }
     }
 
@@ -80,17 +88,15 @@ pub fn parse_map_preset(raw: &str) -> Option<MapPreset> {
     }
 }
 
-/// Cell count for a filled hex disk: N = 1 + 3·r·(r+1).
-pub fn hex_cell_count(radius: i32) -> u32 {
-    if radius <= 0 {
-        return 1;
-    }
-    let r = radius as u32;
-    1 + 3 * r * (r + 1)
+/// Cell count for a filled hex rectangle (offset W×H).
+pub fn rect_cell_count(width: i32, height: i32) -> u32 {
+    (width.max(0) * height.max(0)) as u32
 }
 
-/// Default bounds when `map/manifest.json` is missing (pre-D-36 worlds).
-pub const LEGACY_DEFAULT_RADIUS: i32 = 6;
+/// Default bounds when `map/manifest.json` is missing (pre-D-36 folders).
+pub fn legacy_default_bounds() -> MapBounds {
+    MapPreset::Small.bounds()
+}
 
 #[cfg(test)]
 mod tests {
@@ -98,12 +104,25 @@ mod tests {
 
     #[test]
     fn preset_cell_counts() {
-        assert_eq!(MapPreset::Small.approx_cell_count(), 127);
-        assert_eq!(MapPreset::Medium.approx_cell_count(), 1027);
-        assert_eq!(MapPreset::Large.approx_cell_count(), 7651);
-        assert_eq!(MapPreset::Epic.approx_cell_count(), 30301);
-        assert_eq!(MapPreset::Grand.approx_cell_count(), 50311);
-        assert_eq!(MapPreset::World.approx_cell_count(), 99919);
+        assert_eq!(MapPreset::Small.approx_cell_count(), 112);
+        assert_eq!(MapPreset::Medium.approx_cell_count(), 1032);
+        assert_eq!(MapPreset::Large.approx_cell_count(), 7722);
+        assert_eq!(MapPreset::Epic.approx_cell_count(), 30523);
+        assert_eq!(MapPreset::Grand.approx_cell_count(), 50232);
+        assert_eq!(MapPreset::World.approx_cell_count(), 99777);
+    }
+
+    #[test]
+    fn preset_aspect_ratio_roughly_16_9() {
+        for preset in MapPreset::wizard_presets() {
+            let (w, h) = preset.dimensions();
+            let ratio = w as f64 / h as f64;
+            assert!(
+                (ratio - 16.0 / 9.0).abs() < 0.08,
+                "preset {:?} ratio {ratio}",
+                preset
+            );
+        }
     }
 
     #[test]

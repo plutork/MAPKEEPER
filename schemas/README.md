@@ -46,7 +46,7 @@ and web switched to dense (`scale-layers--adapters`).
 ## `map-manifest.schema.json` (D-36)
 
 `map/manifest.json` — bounds + declared layers; mirrors
-`crates/core/src/layer.rs::MapManifest`. V0 bounds: `hex-radius` only.
+`crates/core/src/layer.rs::MapManifest`. V0 bounds: `hex-rectangle` (`width`, `height`, 16:9 presets via D-49).
 
 **`mapkeeper.toml` schema:** not yet written — no format instability reported
 so far; add when it starts drifting or CI needs it.

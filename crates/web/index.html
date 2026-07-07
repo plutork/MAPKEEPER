@@ -268,6 +268,9 @@
   #path-row { display: flex; gap: 8px; align-items: flex-start; }
   #path-row input { flex: 1; }
   #browse-folder { flex-shrink: 0; margin: 4px 0 12px; }
+  .preset-size-warn { font-size: 12px; min-height: 16px; margin: 4px 0 10px; }
+  .preset-size-warn.preset-warn-yellow { color: #d4a72c; }
+  .preset-size-warn.preset-warn-red { color: #e5534b; }
 </style>
 </head>
 <body>
@@ -289,13 +292,14 @@
         <input id="generate-path" placeholder="C:\path\to\my-world" autocomplete="off" />
         <label for="generate-preset">Map size</label>
         <select id="generate-preset">
-          <option value="small" selected>Small (~127 cells)</option>
-          <option value="medium">Medium (~1,027 cells)</option>
-          <option value="large">Large (~7,651 cells)</option>
-          <option value="epic">Epic (~30,301 cells)</option>
-          <option value="grand">Grand (~50,311 cells)</option>
-          <option value="world">World (~99,919 cells)</option>
+          <option value="small" selected>Small (~112 cells)</option>
+          <option value="medium">Medium (~1,032 cells)</option>
+          <option value="large">Large (~7,722 cells)</option>
+          <option value="epic">Epic (~30,523 cells)</option>
+          <option value="grand">Grand (~50,232 cells)</option>
+          <option value="world">World (~99,777 cells, not stable)</option>
         </select>
+        <p id="generate-preset-warn" class="preset-size-warn"></p>
         <button id="generate" type="button">Generate</button>
         <div id="generate-status"></div>
       </article>
@@ -320,13 +324,14 @@
           </div>
           <label for="new-preset">Map size</label>
           <select id="new-preset">
-            <option value="small" selected>Small (~127 cells)</option>
-            <option value="medium">Medium (~1,027 cells)</option>
-            <option value="large">Large (~7,651 cells)</option>
-            <option value="epic">Epic (~30,301 cells)</option>
-          <option value="grand">Grand (~50,311 cells)</option>
-          <option value="world">World (~99,919 cells)</option>
+            <option value="small" selected>Small (~112 cells)</option>
+            <option value="medium">Medium (~1,032 cells)</option>
+            <option value="large">Large (~7,722 cells)</option>
+            <option value="epic">Epic (~30,523 cells)</option>
+            <option value="grand">Grand (~50,232 cells)</option>
+            <option value="world">World (~99,777 cells, not stable)</option>
           </select>
+          <p id="new-preset-warn" class="preset-size-warn"></p>
           <button id="create">Create</button>
           <div id="home-status"></div>
         </div>

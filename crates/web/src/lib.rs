@@ -17,13 +17,13 @@ use gloo_timers::future::TimeoutFuture;
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::{hydro_from_elevation, HydroKind};
 use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
+use mapkeeper_core::map_preset::MapPreset;
 use mapkeeper_core::profile::CellProfile;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 
-const DEFAULT_MAP_RADIUS: i32 = 6;
 const MIN_ZOOM: f64 = 0.6;
 const MAX_ZOOM: f64 = 2.5;
 const PAN_DRAG_THRESHOLD: f64 = 3.0;
@@ -39,7 +39,8 @@ const CANVAS_PAD: f64 = 20.0;
 
 #[derive(Deserialize)]
 struct MapBoundsResponse {
-    radius: i32,
+    width: i32,
+    height: i32,
     cell_count: u32,
 }
 
@@ -139,8 +140,8 @@ struct AppState {
     elevation: HashMap<(i32, i32), i16>,
     brush: Brush,
     selected: Option<(i32, i32)>,
-    /// Hex bounds radius from `map/manifest.json` (via `/api/map`).
-    map_radius: i32,
+    /// Hex bounds from `map/manifest.json` (via `/api/map`).
+    map_bounds: MapBounds,
     /// Camera zoom multiplier over fit-to-window base size.
     zoom: f64,
     /// Camera pan offset in screen pixels.
@@ -179,7 +180,7 @@ pub fn start() {
         elevation: HashMap::new(),
         brush: Brush::Inspect,
         selected: None,
-        map_radius: DEFAULT_MAP_RADIUS,
+        map_bounds: MapPreset::Small.bounds(),
         zoom: 1.0,
         pan_x: 0.0,
         pan_y: 0.0,
@@ -209,6 +210,7 @@ pub fn start() {
     attach_switch_world_click(state.clone());
     attach_create_click(state.clone());
     attach_generate_click(state.clone());
+    attach_preset_warn_handlers();
     attach_project_list_click(state.clone());
     attach_dock_click(state.clone());
     attach_escape_key();
@@ -391,7 +393,7 @@ fn draw_preview_boundary(state: &AppState, ctx: &CanvasRenderingContext2d, size:
         return;
     }
     let Some(center) = state.hover_cell else { return };
-    let cells = paint_stamp_cells(center, state.brush_radius, state.map_radius.max(0));
+    let cells = paint_stamp_cells(center, state.brush_radius, state.map_bounds);
     if cells.is_empty() {
         return;
     }
@@ -492,27 +494,21 @@ fn select_value(id: &str) -> String {
         .value()
 }
 
-fn map_half_extent(radius: i32) -> (f64, f64) {
+fn map_half_extent(bounds: MapBounds) -> (f64, f64) {
     let mut mx = 0.0_f64;
     let mut my = 0.0_f64;
-    for q in -radius..=radius {
-        for r in -radius..=radius {
-            if (q.abs() + r.abs() + (q + r).abs()) / 2 > radius {
-                continue;
-            }
-            let (x, y) = Axial::new(q, r).to_pixel(1.0);
-            mx = mx.max(x.abs());
-            my = my.max(y.abs());
-        }
+    for cell in bounds.cells() {
+        let (x, y) = cell.to_pixel(1.0);
+        mx = mx.max(x.abs());
+        my = my.max(y.abs());
     }
     (mx + 3f64.sqrt() / 2.0, my + 1.0)
 }
 
-/// Fit-to-window layout: hex `size` and origin so the radial map fills the
-/// canvas with padding. The map is symmetric about the axial origin, so the
-/// pixel origin is just the canvas center.
-fn hex_layout(width: f64, height: f64, radius: i32) -> (f64, f64, f64) {
-    let (hx, hy) = map_half_extent(radius);
+/// Fit-to-window layout: hex `size` and origin so the rectangle map fills the
+/// canvas with padding. Centered on the axial origin.
+fn hex_layout(width: f64, height: f64, bounds: MapBounds) -> (f64, f64, f64) {
+    let (hx, hy) = map_half_extent(bounds);
     let avail_w = (width - 2.0 * CANVAS_PAD).max(1.0);
     let avail_h = (height - 2.0 * CANVAS_PAD).max(1.0);
     let size = (avail_w / (2.0 * hx)).min(avail_h / (2.0 * hy)).max(1.0);
@@ -521,8 +517,7 @@ fn hex_layout(width: f64, height: f64, radius: i32) -> (f64, f64, f64) {
 
 /// Full layout with camera applied on top of the fit-to-window base.
 fn map_layout(state: &AppState, width: f64, height: f64) -> (f64, f64, f64) {
-    let radius = state.map_radius.max(0);
-    let (base_size, base_ox, base_oy) = hex_layout(width, height, radius);
+    let (base_size, base_ox, base_oy) = hex_layout(width, height, state.map_bounds);
     let size = base_size * state.zoom;
     let ox = base_ox + state.pan_x;
     let oy = base_oy + state.pan_y;
@@ -533,14 +528,15 @@ fn clamp_zoom(value: f64) -> f64 {
     value.clamp(MIN_ZOOM, MAX_ZOOM)
 }
 
-fn total_cell_count(radius: i32) -> usize {
-    let r = radius.max(0) as i64;
-    (1 + 3 * r * (r + 1)) as usize
-}
-
-/// Approximate axial scan bounds for visible cells. Adds a small padding ring
-/// to avoid clipping border cells due to hex corner geometry.
-fn visible_scan_bounds(width: f64, height: f64, size: f64, ox: f64, oy: f64, radius: i32) -> (i32, i32, i32, i32) {
+fn visible_scan_bounds(
+    width: f64,
+    height: f64,
+    size: f64,
+    ox: f64,
+    oy: f64,
+    bounds: MapBounds,
+) -> (i32, i32, i32, i32) {
+    let (bmin_q, bmax_q, bmin_r, bmax_r) = bounds.axial_limits();
     let mut min_q = i32::MAX;
     let mut max_q = i32::MIN;
     let mut min_r = i32::MAX;
@@ -554,10 +550,10 @@ fn visible_scan_bounds(width: f64, height: f64, size: f64, ox: f64, oy: f64, rad
     }
     let pad = ((2.0 / size).ceil() as i32).max(2);
     (
-        min_q.saturating_sub(pad).max(-radius),
-        max_q.saturating_add(pad).min(radius),
-        min_r.saturating_sub(pad).max(-radius),
-        max_r.saturating_add(pad).min(radius),
+        min_q.saturating_sub(pad).max(bmin_q),
+        max_q.saturating_add(pad).min(bmax_q),
+        min_r.saturating_sub(pad).max(bmin_r),
+        max_r.saturating_add(pad).min(bmax_r),
     )
 }
 
@@ -580,21 +576,21 @@ fn sync_canvas_size() -> (f64, f64) {
 fn redraw(state: &AppState) {
     let (width, height) = sync_canvas_size();
     let ctx = context();
-    let radius = state.map_radius.max(0);
+    let bounds = state.map_bounds;
     let (size, ox, oy) = map_layout(state, width, height);
 
     ctx.clear_rect(0.0, 0.0, width, height);
     ctx.set_fill_style_str("#0e1113");
     ctx.fill_rect(0.0, 0.0, width, height);
 
-    let (q_min, q_max, r_min, r_max) = visible_scan_bounds(width, height, size, ox, oy, radius);
+    let (q_min, q_max, r_min, r_max) = visible_scan_bounds(width, height, size, ox, oy, bounds);
     let mut drawn_cells = 0usize;
     for q in q_min..=q_max {
         for r in r_min..=r_max {
-            if (q.abs() + r.abs() + (q + r).abs()) / 2 > radius {
+            let cell = Axial::new(q, r);
+            if !bounds.contains(cell) {
                 continue;
             }
-            let cell = Axial::new(q, r);
             let (x, y) = cell.to_pixel(size);
             let (cx, cy) = (ox + x, oy + y);
             let corners = hex_corners(cx, cy, size * HEX_GAP);
@@ -635,7 +631,7 @@ fn redraw(state: &AppState) {
             "Zoom {:.2}x · Draw {} / {} cells · Grid {}",
             state.zoom,
             drawn_cells,
-            total_cell_count(radius),
+            bounds.len(),
             if state.show_grid { "On" } else { "Off" }
         ),
     );
@@ -759,7 +755,10 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
         if let Ok(map) = resp.json::<MapResponse>().await {
             let mut state_mut = state.borrow_mut();
             state_mut.cells = map.cells.into_iter().map(|c| ((c.q, c.r), c.display_name)).collect();
-            state_mut.map_radius = map.bounds.radius.max(0);
+            state_mut.map_bounds = MapBounds::new(
+                map.bounds.width.max(1),
+                map.bounds.height.max(1),
+            );
             state_mut.zoom = 1.0;
             state_mut.pan_x = 0.0;
             state_mut.pan_y = 0.0;
@@ -791,7 +790,7 @@ async fn load_elevation(state: &Rc<RefCell<AppState>>) {
     let Ok(resp) = gloo_net::http::Request::get("/api/layers/elevation").send().await else { return };
     let Ok(layer) = resp.json::<DenseLayer>().await else { return };
     let mut state_mut = state.borrow_mut();
-    let bounds = MapBounds::new(state_mut.map_radius.max(0));
+    let bounds = state_mut.map_bounds;
     state_mut.elevation.clear();
     for index in 0..layer.len() {
         if let DenseState::Value(LayerValue::Int(v)) = layer.state(index) {
@@ -805,27 +804,24 @@ async fn load_elevation(state: &Rc<RefCell<AppState>>) {
 fn cell_from_mouse_event(state: &Rc<RefCell<AppState>>, event: &web_sys::MouseEvent) -> Option<(i32, i32)> {
     let canvas = canvas();
     let rect = canvas.get_bounding_client_rect();
-    let radius = state.borrow().map_radius.max(0);
+    let bounds = state.borrow().map_bounds;
     let (size, ox, oy) = map_layout(&state.borrow(), rect.width(), rect.height());
     let mx = event.client_x() as f64 - rect.left() - ox;
     let my = event.client_y() as f64 - rect.top() - oy;
     let cell = Axial::from_pixel(mx, my, size);
-    if (cell.q.abs() + cell.r.abs() + (cell.q + cell.r).abs()) / 2 > radius {
-        return None;
+    if bounds.contains(cell) {
+        Some((cell.q, cell.r))
+    } else {
+        None
     }
-    Some((cell.q, cell.r))
 }
 
-fn in_map_radius(q: i32, r: i32, radius: i32) -> bool {
-    (q.abs() + r.abs() + (q + r).abs()) / 2 <= radius
-}
-
-fn paint_stamp_cells(center: (i32, i32), radius: i32, map_radius: i32) -> Vec<(i32, i32)> {
-    let radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
+fn paint_stamp_cells(center: (i32, i32), brush_radius: i32, map_bounds: MapBounds) -> Vec<(i32, i32)> {
+    let brush = brush_radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
     Axial::new(center.0, center.1)
-        .range(radius)
+        .range(brush)
         .into_iter()
-        .filter(|cell| in_map_radius(cell.q, cell.r, map_radius))
+        .filter(|cell| map_bounds.contains(*cell))
         .map(|cell| (cell.q, cell.r))
         .collect()
 }
@@ -833,7 +829,7 @@ fn paint_stamp_cells(center: (i32, i32), radius: i32, map_radius: i32) -> Vec<(i
 fn queue_paint_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), new_elevation: i16) {
     let painted_cells = {
         let mut s = state.borrow_mut();
-        let painted = paint_stamp_cells(center, s.brush_radius, s.map_radius.max(0));
+        let painted = paint_stamp_cells(center, s.brush_radius, s.map_bounds);
         for (q, r) in &painted {
             s.elevation.insert((*q, *r), new_elevation);
             s.pending_paints.insert((*q, *r), new_elevation);
@@ -1162,8 +1158,8 @@ fn attach_wheel_zoom(state: Rc<RefCell<AppState>>) {
         let mx = client_x - rect.left();
         let my = client_y - rect.top();
         let mut s = state.borrow_mut();
-        let radius = s.map_radius.max(0);
-        let (base_size, base_ox, base_oy) = hex_layout(rect.width(), rect.height(), radius);
+        let bounds = s.map_bounds;
+        let (base_size, base_ox, base_oy) = hex_layout(rect.width(), rect.height(), bounds);
         let old_size = base_size * s.zoom;
         let old_ox = base_ox + s.pan_x;
         let old_oy = base_oy + s.pan_y;
@@ -1277,7 +1273,7 @@ fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
             state_mut.cells.clear();
             state_mut.elevation.clear();
             state_mut.selected = None;
-            state_mut.map_radius = DEFAULT_MAP_RADIUS;
+            state_mut.map_bounds = MapPreset::Small.bounds();
             state_mut.zoom = 1.0;
             state_mut.pan_x = 0.0;
             state_mut.pan_y = 0.0;
@@ -1300,6 +1296,48 @@ fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
         .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
         .expect("attaching switch-world handler");
     closure.forget();
+}
+
+/// map-bounds--hex-rectangle-16x9: Grand/World preset warnings on Home (D-49).
+fn sync_preset_size_warning(select_id: &str, warn_id: &str) {
+    let preset = select_value(select_id);
+    let Some(el) = document().get_element_by_id(warn_id) else {
+        return;
+    };
+    let (text, class) = match preset.as_str() {
+        "grand" => (
+            "Large map — performance may vary on your machine.",
+            "preset-warn-yellow",
+        ),
+        "world" => (
+            "Experimental map size (not stable) — expect slowdowns.",
+            "preset-warn-red",
+        ),
+        _ => ("", ""),
+    };
+    el.set_text_content(if text.is_empty() { None } else { Some(text) });
+    let _ = el.class_list().remove_1("preset-warn-yellow");
+    let _ = el.class_list().remove_1("preset-warn-red");
+    if !class.is_empty() {
+        let _ = el.class_list().add_1(class);
+    }
+}
+
+fn attach_preset_warn_handlers() {
+    for (select_id, warn_id) in [("new-preset", "new-preset-warn"), ("generate-preset", "generate-preset-warn")] {
+        sync_preset_size_warning(select_id, warn_id);
+        let select_id = select_id.to_string();
+        let warn_id = warn_id.to_string();
+        let select_for_change = select_id.clone();
+        let warn_for_change = warn_id.clone();
+        let on_change = Closure::<dyn FnMut()>::new(move || {
+            sync_preset_size_warning(&select_for_change, &warn_for_change);
+        });
+        if let Ok(Some(select)) = document().query_selector(&format!("#{select_id}")) {
+            let _ = select.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+        }
+        on_change.forget();
+    }
 }
 
 /// "Create" button on the Home screen: scaffolds a new world via the server

@@ -17,7 +17,7 @@ use mapkeeper_core::hydro::{hydro_from_elevation, DEFAULT_LAND_ELEVATION, ELEVAT
 use mapkeeper_core::layer::{
     Bounds, DenseLayer, DenseState, LayerValue, MapManifest, ValueType, TERRAIN_LAYER_ID,
 };
-use mapkeeper_core::map_preset::{parse_map_preset, MapPreset, LEGACY_DEFAULT_RADIUS};
+use mapkeeper_core::map_preset::{legacy_default_bounds, parse_map_preset, MapPreset};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
 use mapkeeper_core::world;
@@ -265,7 +265,7 @@ fn cmd_init(args: InitArgs) -> Result<()> {
             )
         })?,
     };
-    write_map_manifest(&args.path, preset.radius())?;
+    write_map_manifest(&args.path, preset)?;
     fs::write(&manifest, world::manifest_toml(&args.world_id))?;
     println!(
         "Scaffolded world '{}' at {}",
@@ -295,8 +295,9 @@ fn write_scaffold_files(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write_map_manifest(world_path: &Path, radius: i32) -> Result<()> {
-    let manifest = MapManifest::default_v0(radius);
+fn write_map_manifest(world_path: &Path, preset: MapPreset) -> Result<()> {
+    let (width, height) = preset.dimensions();
+    let manifest = MapManifest::default_v0(width, height);
     let path = world_path.join("map/manifest.json");
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -392,16 +393,15 @@ fn layer_file_path(world: &Path, layer_id: &str) -> PathBuf {
 
 /// Map bounds from `map/manifest.json` (missing => legacy Small default).
 fn read_bounds(world: &Path) -> MapBounds {
-    let radius = match fs::read_to_string(world.join("map/manifest.json")) {
+    match fs::read_to_string(world.join("map/manifest.json")) {
         Ok(raw) => match MapManifest::from_json(&raw) {
             Ok(m) => match m.bounds {
-                Bounds::HexRadius { radius } => radius.max(0),
+                Bounds::HexRectangle { width, height } => MapBounds::new(width, height),
             },
-            Err(_) => LEGACY_DEFAULT_RADIUS,
+            Err(_) => legacy_default_bounds(),
         },
-        Err(_) => LEGACY_DEFAULT_RADIUS,
-    };
-    MapBounds::new(radius)
+        Err(_) => legacy_default_bounds(),
+    }
 }
 
 #[derive(Deserialize)]

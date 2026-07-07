@@ -1,8 +1,16 @@
 {
   "schema_version": 1,
-  "bounds": { "kind": "hex-radius", "radius": 6 },
+  "bounds": { "kind": "hex-rectangle", "width": 14, "height": 8 },
   "layers": [
-    { "layer_id": "terrain", "value_type": "categorical", "file": "layers/terrain.json" },
-    { "layer_id": "elevation", "value_type": "integer", "file": "layers/elevation.json" }
+    {
+      "layer_id": "terrain",
+      "value_type": "categorical",
+      "file": "layers/terrain.json"
+    },
+    {
+      "layer_id": "elevation",
+      "value_type": "integer",
+      "file": "layers/elevation.json"
+    }
   ]
 }

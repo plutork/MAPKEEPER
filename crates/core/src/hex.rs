@@ -75,88 +75,100 @@ impl Axial {
     }
 }
 
-/// Radial hex bounds centered on the origin — the V0 blank map is a
-/// radius-`radius` hexagon. Owned here so renderer/hit-testing/import share
-/// one in-bounds rule instead of re-deriving it (spatial contract, 2.4).
+/// Pointy-top odd-r offset rectangle centered on the axial origin (D-49).
+/// `width` × `height` cells; index order matches row-major offset (col, row).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MapBounds {
-    pub radius: i32,
+    pub width: i32,
+    pub height: i32,
 }
 
 impl MapBounds {
-    pub fn new(radius: i32) -> Self {
-        Self { radius }
+    pub fn new(width: i32, height: i32) -> Self {
+        Self {
+            width: width.max(1),
+            height: height.max(1),
+        }
     }
 
-    /// True if `cell` lies within the bounded hexagon.
+    /// True if `cell` lies within the bounded rectangle.
     pub fn contains(&self, cell: Axial) -> bool {
-        Axial::new(0, 0).distance(cell) <= self.radius
+        self.axial_to_offset(cell).is_some()
     }
 
-    /// Every in-bounds cell, row-major by `q` then `r`.
+    /// Every in-bounds cell, row-major by offset row then col.
     pub fn cells(&self) -> Vec<Axial> {
-        Axial::new(0, 0).range(self.radius)
-    }
-
-    // scale-layers: cell index — canonical `(q,r) <-> linear index` so map
-    // layers can be stored dense/index-addressed (D-46). `cell_id` string stays
-    // the external identity; this index is the internal key. Order matches
-    // `cells()` (column-major by `q`, then `r`), so `index_of(cells()[i]) == i`.
-
-    /// Number of cells in the bounded hexagon (`1 + 3r(r+1)`).
-    pub fn len(&self) -> usize {
-        let r = self.radius.max(0) as usize;
-        1 + 3 * r * (r + 1)
-    }
-
-    /// A radius-0 hexagon still has one cell, so bounds are never empty; kept
-    /// for clippy/ergonomics.
-    pub fn is_empty(&self) -> bool {
-        false
-    }
-
-    /// Height (cell count) of column `q`, or 0 if `q` is out of bounds.
-    fn column_height(&self, q: i32) -> usize {
-        if q.abs() > self.radius {
-            return 0;
-        }
-        (2 * self.radius + 1 - q.abs()) as usize
-    }
-
-    /// Lowest `r` present in column `q`.
-    fn column_r_lo(&self, q: i32) -> i32 {
-        (-self.radius).max(-q - self.radius)
-    }
-
-    /// Linear index of `cell` within [`Self::cells`] order, or `None` if the
-    /// cell is out of bounds.
-    pub fn index_of(&self, cell: Axial) -> Option<usize> {
-        if !self.contains(cell) {
-            return None;
-        }
-        let mut prefix = 0usize;
-        for q in -self.radius..cell.q {
-            prefix += self.column_height(q);
-        }
-        let offset = (cell.r - self.column_r_lo(cell.q)) as usize;
-        Some(prefix + offset)
-    }
-
-    /// Inverse of [`Self::index_of`] — the cell at linear index `index`.
-    pub fn from_index(&self, index: usize) -> Option<Axial> {
-        if index >= self.len() {
-            return None;
-        }
-        let mut remaining = index;
-        for q in -self.radius..=self.radius {
-            let h = self.column_height(q);
-            if remaining < h {
-                let r = self.column_r_lo(q) + remaining as i32;
-                return Some(Axial::new(q, r));
+        let mut out = Vec::with_capacity(self.len());
+        for row in 0..self.height {
+            for col in 0..self.width {
+                out.push(self.offset_to_axial(col, row));
             }
-            remaining -= h;
         }
-        None
+        out
+    }
+
+    // map-bounds--hex-rectangle-16x9: cell index for dense layers (D-46).
+
+    /// Number of cells (`width * height`).
+    pub fn len(&self) -> usize {
+        (self.width.max(0) * self.height.max(0)) as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn offset_to_axial(&self, col: i32, row: i32) -> Axial {
+        let col_c = col - self.width / 2;
+        let row_c = row - self.height / 2;
+        let q = col_c - (row_c - (row_c & 1)) / 2;
+        let r = row_c;
+        Axial::new(q, r)
+    }
+
+    fn axial_to_offset(&self, cell: Axial) -> Option<(i32, i32)> {
+        let row_c = cell.r;
+        let col_c = cell.q + (row_c - (row_c & 1)) / 2;
+        let col = col_c + self.width / 2;
+        let row = row_c + self.height / 2;
+        if (0..self.width).contains(&col) && (0..self.height).contains(&row) {
+            Some((col, row))
+        } else {
+            None
+        }
+    }
+
+    /// Linear index of `cell` within [`Self::cells`] order, or `None` if OOB.
+    pub fn index_of(&self, cell: Axial) -> Option<usize> {
+        let (col, row) = self.axial_to_offset(cell)?;
+        Some((row * self.width + col) as usize)
+    }
+
+    /// Inverse of [`Self::index_of`].
+    pub fn from_index(&self, index: usize) -> Option<Axial> {
+        let w = self.width as usize;
+        if w == 0 || index >= self.len() {
+            return None;
+        }
+        let col = (index % w) as i32;
+        let row = (index / w) as i32;
+        Some(self.offset_to_axial(col, row))
+    }
+
+    /// Min/max axial q/r over in-bounds cells (for viewport culling).
+    pub fn axial_limits(&self) -> (i32, i32, i32, i32) {
+        let cells = self.cells();
+        let mut min_q = i32::MAX;
+        let mut max_q = i32::MIN;
+        let mut min_r = i32::MAX;
+        let mut max_r = i32::MIN;
+        for c in cells {
+            min_q = min_q.min(c.q);
+            max_q = max_q.max(c.q);
+            min_r = min_r.min(c.r);
+            max_r = max_r.max(c.r);
+        }
+        (min_q, max_q, min_r, max_r)
     }
 }
 
@@ -236,27 +248,26 @@ mod tests {
     }
 
     #[test]
-    fn bounds_contains() {
-        let bounds = MapBounds::new(2);
+    fn bounds_contains_rectangle() {
+        let bounds = MapBounds::new(4, 3);
+        assert_eq!(bounds.len(), 12);
         assert!(bounds.contains(Axial::new(0, 0)));
-        assert!(bounds.contains(Axial::new(2, 0)));
-        assert!(!bounds.contains(Axial::new(3, 0)));
-        assert_eq!(bounds.cells().len(), 19);
+        assert!(!bounds.contains(Axial::new(99, 99)));
     }
 
     // scale-layers: cell index (D-46).
     #[test]
     fn len_matches_cells() {
-        for radius in 0..=8 {
-            let bounds = MapBounds::new(radius);
+        for (w, h) in [(1, 1), (4, 3), (14, 8), (43, 24)] {
+            let bounds = MapBounds::new(w, h);
             assert_eq!(bounds.len(), bounds.cells().len());
         }
     }
 
     #[test]
     fn index_roundtrip_matches_cells_order() {
-        for radius in 0..=6 {
-            let bounds = MapBounds::new(radius);
+        for (w, h) in [(1, 1), (4, 3), (7, 5), (14, 8)] {
+            let bounds = MapBounds::new(w, h);
             let cells = bounds.cells();
             for (i, cell) in cells.iter().enumerate() {
                 assert_eq!(bounds.index_of(*cell), Some(i));
@@ -268,7 +279,7 @@ mod tests {
 
     #[test]
     fn index_of_rejects_out_of_bounds() {
-        let bounds = MapBounds::new(3);
+        let bounds = MapBounds::new(3, 3);
         assert_eq!(bounds.index_of(Axial::new(9, 9)), None);
     }
 }

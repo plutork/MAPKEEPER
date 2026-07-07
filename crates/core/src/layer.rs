@@ -37,12 +37,12 @@ pub enum ValueType {
     Integer,
 }
 
-/// Spatial bounds declared by a map manifest. Only a radial hexagon centered
-/// at the origin exists in V0 (matches [`crate::hex::MapBounds`]).
+/// Spatial bounds declared by a map manifest. V0: pointy-top hex rectangle
+/// 16:9 (`map-bounds--hex-rectangle-16x9`, D-49).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Bounds {
-    HexRadius { radius: i32 },
+    HexRectangle { width: i32, height: i32 },
 }
 
 /// A layer declared by the map manifest — its id, value kind, and the file
@@ -66,11 +66,14 @@ pub struct MapManifest {
 }
 
 impl MapManifest {
-    /// The V0 scaffold manifest: radius-`radius` bounds + typed layers.
-    pub fn default_v0(radius: i32) -> Self {
+    /// Scaffold manifest: `width`×`height` hex rectangle + typed layers.
+    pub fn default_v0(width: i32, height: i32) -> Self {
         Self {
             schema_version: CURRENT_SCHEMA_VERSION,
-            bounds: Bounds::HexRadius { radius },
+            bounds: Bounds::HexRectangle {
+                width: width.max(1),
+                height: height.max(1),
+            },
             layers: vec![
                 LayerRef {
                     layer_id: TERRAIN_LAYER_ID.to_string(),
@@ -350,8 +353,11 @@ mod tests {
 
     #[test]
     fn manifest_declares_terrain_layer() {
-        let manifest = MapManifest::default_v0(6);
-        assert_eq!(manifest.bounds, Bounds::HexRadius { radius: 6 });
+        let manifest = MapManifest::default_v0(14, 8);
+        assert_eq!(
+            manifest.bounds,
+            Bounds::HexRectangle { width: 14, height: 8 }
+        );
         assert_eq!(manifest.layers.len(), 2);
         assert_eq!(manifest.layers[0].layer_id, TERRAIN_LAYER_ID);
         assert_eq!(manifest.layers[0].file, "layers/terrain.json");
@@ -424,7 +430,7 @@ mod tests {
 
     #[test]
     fn read_or_empty_parses_dense_or_starts_empty() {
-        let bounds = MapBounds::new(2);
+        let bounds = MapBounds::new(4, 3);
 
         // None => empty typed layer sized to bounds.
         let empty = DenseLayer::read_or_empty(None, "terrain", ValueType::Categorical, &bounds);
