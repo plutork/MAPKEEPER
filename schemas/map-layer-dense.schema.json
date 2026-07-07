@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/plutork/MAPKEEPER/schemas/map-layer-dense.schema.json",
+  "title": "mapkeeper dense map layer (D-46)",
+  "description": "Dense, index-addressed map-state layer — mirrors crates/core/src/layer.rs::DenseLayer (scale-layers, D-46). Cells are addressed by linear index within the map bounds (core::hex::MapBounds::index_of), not by cell_id strings. states[i] is 0=unknown, 1=none, 2=value; the value column (codes for categorical, values for integer) is meaningful only where states[i]==2. Categorical values are palette/dictionary-encoded. Evolution of the sparse map-layer.schema.json; profiles are unaffected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "layer_id", "value_type", "cell_count", "states"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2,
+      "description": "Dense layer file format version."
+    },
+    "layer_id": {
+      "type": "string",
+      "description": "Layer identifier, e.g. 'terrain' or 'elevation'.",
+      "pattern": "^[a-z0-9_-]+$"
+    },
+    "value_type": {
+      "enum": ["categorical", "integer"],
+      "description": "Kind of value the layer stores."
+    },
+    "cell_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of cells (dense array length), equals MapBounds::len()."
+    },
+    "states": {
+      "type": "array",
+      "description": "Per-cell state tag: 0=unknown, 1=none, 2=value.",
+      "items": { "type": "integer", "enum": [0, 1, 2] }
+    },
+    "palette": {
+      "type": "array",
+      "description": "Categorical dictionary of distinct values; codes[i] indexes into it.",
+      "items": { "type": "string" }
+    },
+    "codes": {
+      "type": "array",
+      "description": "Categorical value column (palette index per cell).",
+      "items": { "type": "integer", "minimum": 0 }
+    },
+    "values": {
+      "type": "array",
+      "description": "Integer value column.",
+      "items": { "type": "integer" }
+    }
+  }
+}

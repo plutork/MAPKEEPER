@@ -5,6 +5,7 @@ schema) and an `invalid/` set (must fail it):
 
 - `profiles/` -> `schemas/cell-profile.schema.json` (roadmap 1.2, D-12/D-22)
 - `layers/` -> `schemas/map-layer.schema.json` (Hex Map Model Foundation, D-36)
+- `layers-dense/` -> `schemas/map-layer-dense.schema.json` (scale-layers, D-46)
 - `manifests/` -> `schemas/map-manifest.schema.json` (D-36)
 
 `layers/invalid` covers the partial-state contract too: a stored `unknown`

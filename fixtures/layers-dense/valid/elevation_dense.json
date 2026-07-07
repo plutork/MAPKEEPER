@@ -1,0 +1,8 @@
+{
+  "schema_version": 2,
+  "layer_id": "elevation",
+  "value_type": "integer",
+  "cell_count": 4,
+  "states": [2, 2, 0, 0],
+  "values": [5, -3, 0, 0]
+}

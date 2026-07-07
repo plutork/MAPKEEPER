@@ -2,9 +2,10 @@
 """Validate example fixtures against the mapkeeper JSON Schemas.
 
 Covers:
-- profiles  -> schemas/cell-profile.schema.json  (roadmap 1.2, D-22)
-- layers    -> schemas/map-layer.schema.json      (Hex Map Model Foundation, D-36)
-- manifests -> schemas/map-manifest.schema.json   (D-36)
+- profiles     -> schemas/cell-profile.schema.json     (roadmap 1.2, D-22)
+- layers       -> schemas/map-layer.schema.json         (Hex Map Model Foundation, D-36)
+- layers-dense -> schemas/map-layer-dense.schema.json   (scale-layers, D-46)
+- manifests    -> schemas/map-manifest.schema.json      (D-36)
 
 For each contract, `<dir>/valid/*.json` must pass its schema and
 `<dir>/invalid/*.json` must fail it.
@@ -29,6 +30,7 @@ FIXTURES_DIR = Path(__file__).resolve().parent
 CONTRACTS = [
     ("profiles", "cell-profile.schema.json"),
     ("layers", "map-layer.schema.json"),
+    ("layers-dense", "map-layer-dense.schema.json"),
     ("manifests", "map-manifest.schema.json"),
 ]
 

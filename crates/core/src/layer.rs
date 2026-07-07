@@ -198,6 +198,218 @@ impl MapManifest {
     }
 }
 
+// ---------------------------------------------------------------------------
+// scale-layers (D-46): generic dense, index-addressed typed layer.
+//
+// Evolution of the sparse string-keyed model above (kept intact until the
+// adapters switch over in the `scale-layers--adapters` slice). Under the fixed
+// ~100k ceiling the map bounds are known, so a layer is stored as dense columns
+// addressed by cell index (see `core::hex::MapBounds::index_of`), not by a map
+// of `cell_id` strings. Categorical values are palette/dictionary-encoded so a
+// fully-painted terrain layer is a byte array of small codes, not repeated
+// strings. Partial state (unknown/none/value, D-36) is preserved.
+//
+// This model is bounds-agnostic itself: it just holds `cell_count` slots; the
+// caller maps `(q,r) <-> index` through `MapBounds`. Profiles (D-22) are
+// unaffected — they stay per-cell JSON.
+// ---------------------------------------------------------------------------
+
+/// Format version for the dense on-disk layer shape (distinct from the sparse
+/// `CURRENT_SCHEMA_VERSION == 1`).
+pub const DENSE_SCHEMA_VERSION: u32 = 2;
+
+/// State tag stored per cell in a dense layer. Kept as a small integer on disk.
+mod state_tag {
+    pub const UNKNOWN: u8 = 0;
+    pub const NONE: u8 = 1;
+    pub const VALUE: u8 = 2;
+}
+
+/// A concrete value carried by a dense layer cell — variant matches the layer's
+/// [`ValueType`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LayerValue {
+    Text(String),
+    Int(i32),
+}
+
+/// Resolved partial state for a dense-layer cell (generic over value kind).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DenseState {
+    Unknown,
+    None,
+    Value(LayerValue),
+}
+
+/// A dense, index-addressed layer: one state slot per cell plus a typed value
+/// column. `states[i]` is one of `state_tag::{UNKNOWN,NONE,VALUE}`; the value
+/// column (`codes` for categorical, `values` for integer) is only meaningful
+/// where the state is `VALUE`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DenseLayer {
+    pub schema_version: u32,
+    pub layer_id: String,
+    pub value_type: ValueType,
+    pub cell_count: usize,
+    pub states: Vec<u8>,
+    /// Categorical dictionary — distinct values; `codes[i]` indexes into this.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub palette: Vec<String>,
+    /// Categorical value column (palette index per cell).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub codes: Vec<u32>,
+    /// Integer value column.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<i32>,
+}
+
+impl DenseLayer {
+    /// A fresh categorical layer with `cell_count` unknown cells.
+    pub fn new_categorical(layer_id: impl Into<String>, cell_count: usize) -> Self {
+        Self {
+            schema_version: DENSE_SCHEMA_VERSION,
+            layer_id: layer_id.into(),
+            value_type: ValueType::Categorical,
+            cell_count,
+            states: vec![state_tag::UNKNOWN; cell_count],
+            palette: Vec::new(),
+            codes: vec![0; cell_count],
+            values: Vec::new(),
+        }
+    }
+
+    /// A fresh integer layer with `cell_count` unknown cells.
+    pub fn new_integer(layer_id: impl Into<String>, cell_count: usize) -> Self {
+        Self {
+            schema_version: DENSE_SCHEMA_VERSION,
+            layer_id: layer_id.into(),
+            value_type: ValueType::Integer,
+            cell_count,
+            states: vec![state_tag::UNKNOWN; cell_count],
+            palette: Vec::new(),
+            codes: Vec::new(),
+            values: vec![0; cell_count],
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.cell_count
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cell_count == 0
+    }
+
+    /// Resolve the partial state at `index`. Out-of-range => `Unknown`.
+    pub fn state(&self, index: usize) -> DenseState {
+        if index >= self.cell_count {
+            return DenseState::Unknown;
+        }
+        match self.states[index] {
+            state_tag::NONE => DenseState::None,
+            state_tag::VALUE => match self.value_type {
+                ValueType::Categorical => {
+                    let code = self.codes[index] as usize;
+                    match self.palette.get(code) {
+                        Some(v) => DenseState::Value(LayerValue::Text(v.clone())),
+                        None => DenseState::Unknown,
+                    }
+                }
+                ValueType::Integer => DenseState::Value(LayerValue::Int(self.values[index])),
+            },
+            _ => DenseState::Unknown,
+        }
+    }
+
+    /// Set the partial state at `index`. Mismatched value kinds are ignored
+    /// (defensive — callers should match the layer's `value_type`).
+    pub fn set(&mut self, index: usize, state: DenseState) {
+        if index >= self.cell_count {
+            return;
+        }
+        match state {
+            DenseState::Unknown => self.states[index] = state_tag::UNKNOWN,
+            DenseState::None => self.states[index] = state_tag::NONE,
+            DenseState::Value(LayerValue::Text(v)) if self.value_type == ValueType::Categorical => {
+                let code = self.intern(&v);
+                self.states[index] = state_tag::VALUE;
+                self.codes[index] = code;
+            }
+            DenseState::Value(LayerValue::Int(v)) if self.value_type == ValueType::Integer => {
+                self.states[index] = state_tag::VALUE;
+                self.values[index] = v;
+            }
+            DenseState::Value(_) => { /* kind mismatch — ignore */ }
+        }
+    }
+
+    /// Integer value at `index`, or `default` when the cell is not a concrete
+    /// integer value (unknown/none). Basis for derived layers like hydro.
+    pub fn int_or(&self, index: usize, default: i32) -> i32 {
+        match self.state(index) {
+            DenseState::Value(LayerValue::Int(v)) => v,
+            _ => default,
+        }
+    }
+
+    /// Intern a categorical value into the palette, returning its code.
+    fn intern(&mut self, value: &str) -> u32 {
+        if let Some(pos) = self.palette.iter().position(|v| v == value) {
+            return pos as u32;
+        }
+        self.palette.push(value.to_string());
+        (self.palette.len() - 1) as u32
+    }
+
+    pub fn from_json(raw: &str) -> serde_json::Result<DenseLayer> {
+        serde_json::from_str(raw)
+    }
+
+    pub fn to_json_pretty(&self) -> serde_json::Result<String> {
+        serde_json::to_string_pretty(self)
+    }
+
+    /// Migrate a sparse categorical [`Layer`] (e.g. `terrain`, schema v1) into
+    /// the dense model, mapping each `cell_id` to its index via `bounds`.
+    /// Cells outside the bounds are dropped (defensive).
+    pub fn from_sparse_layer(old: &Layer, bounds: &crate::hex::MapBounds) -> DenseLayer {
+        let mut dense = DenseLayer::new_categorical(old.layer_id.clone(), bounds.len());
+        for (cell_id, entry) in &old.cells {
+            let Some(index) = index_for(cell_id, bounds) else { continue };
+            match entry {
+                Entry::None => dense.set(index, DenseState::None),
+                Entry::Value { value } => {
+                    dense.set(index, DenseState::Value(LayerValue::Text(value.clone())))
+                }
+            }
+        }
+        dense
+    }
+
+    /// Migrate a sparse [`crate::hydro::ElevationLayer`] (schema v1) into the
+    /// dense integer model. Old semantics had no `unknown`: a missing key meant
+    /// the default land elevation. Here stored cells become concrete values and
+    /// absent cells stay `unknown`; read them back with
+    /// `int_or(index, DEFAULT_LAND_ELEVATION)` to preserve the old default.
+    pub fn from_sparse_elevation(
+        old: &crate::hydro::ElevationLayer,
+        bounds: &crate::hex::MapBounds,
+    ) -> DenseLayer {
+        let mut dense = DenseLayer::new_integer(old.layer_id.clone(), bounds.len());
+        for (cell_id, elevation) in &old.cells {
+            let Some(index) = index_for(cell_id, bounds) else { continue };
+            dense.set(index, DenseState::Value(LayerValue::Int(*elevation as i32)));
+        }
+        dense
+    }
+}
+
+/// Resolve a `cell_id` string to its dense index within `bounds`.
+fn index_for(cell_id: &str, bounds: &crate::hex::MapBounds) -> Option<usize> {
+    let cell = crate::cell_id::CellId::parse(cell_id)?;
+    bounds.index_of(crate::hex::Axial::new(cell.q, cell.r))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,5 +484,104 @@ mod tests {
 
         let json = manifest.to_json_pretty().unwrap();
         assert_eq!(MapManifest::from_json(&json).unwrap(), manifest);
+    }
+
+    // scale-layers (D-46): dense typed-layer tests.
+    use crate::hex::MapBounds;
+
+    #[test]
+    fn dense_categorical_partial_states() {
+        let mut layer = DenseLayer::new_categorical("terrain", 5);
+        assert_eq!(layer.state(0), DenseState::Unknown);
+
+        layer.set(0, DenseState::Value(LayerValue::Text("forest".into())));
+        layer.set(1, DenseState::Value(LayerValue::Text("forest".into())));
+        layer.set(2, DenseState::None);
+
+        assert_eq!(layer.state(0), DenseState::Value(LayerValue::Text("forest".into())));
+        assert_eq!(layer.state(1), DenseState::Value(LayerValue::Text("forest".into())));
+        assert_eq!(layer.state(2), DenseState::None);
+        assert_eq!(layer.state(3), DenseState::Unknown);
+        // palette dictionary-encodes the repeated value once.
+        assert_eq!(layer.palette, vec!["forest".to_string()]);
+    }
+
+    #[test]
+    fn dense_set_unknown_clears() {
+        let mut layer = DenseLayer::new_categorical("terrain", 3);
+        layer.set(0, DenseState::Value(LayerValue::Text("water".into())));
+        assert_eq!(layer.state(0), DenseState::Value(LayerValue::Text("water".into())));
+        layer.set(0, DenseState::Unknown);
+        assert_eq!(layer.state(0), DenseState::Unknown);
+    }
+
+    #[test]
+    fn dense_integer_values_and_int_or() {
+        let mut layer = DenseLayer::new_integer("elevation", 4);
+        layer.set(0, DenseState::Value(LayerValue::Int(5)));
+        layer.set(1, DenseState::Value(LayerValue::Int(-2)));
+        assert_eq!(layer.int_or(0, 1), 5);
+        assert_eq!(layer.int_or(1, 1), -2);
+        // unknown falls back to the supplied default (old land default = 1).
+        assert_eq!(layer.int_or(2, 1), 1);
+    }
+
+    #[test]
+    fn dense_kind_mismatch_is_ignored() {
+        let mut layer = DenseLayer::new_integer("elevation", 2);
+        layer.set(0, DenseState::Value(LayerValue::Text("nope".into())));
+        assert_eq!(layer.state(0), DenseState::Unknown);
+    }
+
+    #[test]
+    fn dense_json_roundtrip() {
+        let mut layer = DenseLayer::new_categorical("terrain", 3);
+        layer.set(0, DenseState::Value(LayerValue::Text("mountain".into())));
+        layer.set(1, DenseState::None);
+        let json = layer.to_json_pretty().unwrap();
+        assert!(json.contains("\"schema_version\": 2"));
+        assert!(json.contains("\"value_type\": \"categorical\""));
+        let back = DenseLayer::from_json(&json).unwrap();
+        assert_eq!(back, layer);
+    }
+
+    #[test]
+    fn migrate_sparse_terrain_preserves_values() {
+        let bounds = MapBounds::new(2);
+        let mut sparse = Layer::terrain();
+        sparse.set("w.hex.q0.r0", CellState::value("forest"));
+        sparse.set("w.hex.q1.r0", CellState::None);
+
+        let dense = DenseLayer::from_sparse_layer(&sparse, &bounds);
+        let i0 = bounds.index_of(crate::hex::Axial::new(0, 0)).unwrap();
+        let i1 = bounds.index_of(crate::hex::Axial::new(1, 0)).unwrap();
+        assert_eq!(dense.state(i0), DenseState::Value(LayerValue::Text("forest".into())));
+        assert_eq!(dense.state(i1), DenseState::None);
+        assert_eq!(dense.len(), bounds.len());
+    }
+
+    #[test]
+    fn migrate_sparse_elevation_preserves_default_semantics() {
+        use crate::hydro::{ElevationLayer, DEFAULT_LAND_ELEVATION};
+        let bounds = MapBounds::new(2);
+        let mut sparse = ElevationLayer::new();
+        sparse.set("w.hex.q0.r0", -3);
+
+        let dense = DenseLayer::from_sparse_elevation(&sparse, &bounds);
+        let i0 = bounds.index_of(crate::hex::Axial::new(0, 0)).unwrap();
+        let i1 = bounds.index_of(crate::hex::Axial::new(1, 0)).unwrap();
+        assert_eq!(dense.int_or(i0, DEFAULT_LAND_ELEVATION as i32), -3);
+        // absent cell keeps the old "missing = default land" behavior via int_or.
+        assert_eq!(dense.int_or(i1, DEFAULT_LAND_ELEVATION as i32), DEFAULT_LAND_ELEVATION as i32);
+    }
+
+    #[test]
+    fn migrate_drops_out_of_bounds_cells() {
+        let bounds = MapBounds::new(1);
+        let mut sparse = Layer::terrain();
+        sparse.set("w.hex.q9.r9", CellState::value("forest"));
+        let dense = DenseLayer::from_sparse_layer(&sparse, &bounds);
+        // nothing landed in-bounds
+        assert!((0..dense.len()).all(|i| dense.state(i) == DenseState::Unknown));
     }
 }

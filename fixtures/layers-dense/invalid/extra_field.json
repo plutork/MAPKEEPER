@@ -1,0 +1,8 @@
+{
+  "schema_version": 2,
+  "layer_id": "terrain",
+  "value_type": "categorical",
+  "cell_count": 1,
+  "states": [0],
+  "unexpected": true
+}

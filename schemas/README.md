@@ -38,6 +38,25 @@ that layer (partial-state model):
 V0 proof layer: `terrain` (`value_type: "categorical"`, string values). Other
 layers (elevation, water, …) are additive later.
 
+## `map-layer-dense.schema.json` (D-46, scale-layers)
+
+Dense, **index-addressed** layer file — mirrors
+`crates/core/src/layer.rs::DenseLayer`. Evolution of the sparse layer above for
+the 50–100k ceiling: cells are addressed by linear index within the map bounds
+(`core::hex::MapBounds::index_of`), not by `cell_id` strings, and categorical
+values are palette/dictionary-encoded.
+
+| Field | Meaning |
+|-------|---------|
+| `schema_version` | `2` (dense; sparse is `1`) |
+| `states[i]` | `0`=unknown, `1`=none, `2`=value |
+| `palette` + `codes[i]` | categorical: dictionary + per-cell palette index |
+| `values[i]` | integer value column |
+
+Partial-state trio (D-36) is preserved. The sparse `map-layer.schema.json`
+stays valid until adapters switch over (`scale-layers--adapters` slice); this
+is a decision-first foundation (D-46), not yet wired end to end.
+
 ## `map-manifest.schema.json` (D-36)
 
 `map/manifest.json` — bounds + declared layers; mirrors

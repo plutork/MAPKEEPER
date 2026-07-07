@@ -10,6 +10,8 @@ Use this first, then open only the needed files.
 - Spatial contract (distance/ring/range/bounds) -> `crates/core/src/hex.rs`
 - Map size presets (Small/Medium/Large/Epic -> hex-radius) -> `crates/core/src/map_preset.rs`
 - Map state model (layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
+- Cell index (`(q,r) <-> linear index`, `MapBounds::index_of`/`from_index`/`len`) -> `crates/core/src/hex.rs`
+- Dense typed-layer model (index-addressed, palette categorical + integer; migration from sparse) -> `crates/core/src/layer.rs` (`DenseLayer`)
 - Elevation/hydro threshold model (`elevation <= 0 => water`) -> `crates/core/src/hydro.rs`
 - HTTP API, world file I/O, launcher endpoints -> `crates/server/src/`
 - Terrain layer endpoints (`/api/layers/terrain`, `/api/cells/:q/:r/terrain`) -> `crates/server/src/lib.rs`
@@ -49,6 +51,13 @@ Use this first, then open only the needed files.
 - **Hydro projection** now derives from sparse integer elevation (`core::hydro`):
   `elevation <= 0` => water, `> 0` => land.
 - **Author profiles** (`profiles/*.json`) are human-facing and **not** a layer.
+- **scale-layers (D-46, decision-first foundation):** `core::hex` has a cell
+  index (`(q,r) <-> linear`) and `core::layer::DenseLayer` is a dense,
+  index-addressed generic typed layer (palette-encoded categorical + integer,
+  unknown/none/value preserved) with migration from the sparse `Layer`/
+  `ElevationLayer`. Not yet wired into adapters — server/cli/web still use the
+  sparse model until the `scale-layers--adapters` slice. Dense schema:
+  `schemas/map-layer-dense.schema.json` (v2); fixtures `fixtures/layers-dense/`.
 - Renderer is a projection of the layer model, not the source of truth.
 - Renderer layout (4.2): fit-to-window canvas + camera viewport — base
   `hex_layout`/`map_half_extent` plus `zoom` (0.6x–2.5x), `pan` (LMB drag),
