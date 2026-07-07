@@ -15,20 +15,28 @@ live in `profiles/` (which is *not* a layer). Both are anchored by the same
 
 ## Layers (V0)
 
-- `layers/terrain.json` — `categorical` terrain per cell (legacy proof layer).
-- `layers/elevation.json` — sparse integer elevation per cell.
+- `layers/terrain.json` — `categorical` terrain per cell.
+- `layers/elevation.json` — `integer` elevation per cell.
 - Hydro (`land`/`water`) is derived from elevation threshold:
   `elevation <= 0` => water, `elevation > 0` => land.
 
-More layers (rivers, regions, routes, settlements) come
-later; each is additive and anchored by `cell_id`.
+Layer files are created on first paint (the editor writes them sized to the map
+bounds), so a brand-new world has no `layers/*.json` yet. More layers (rivers,
+regions, routes, settlements) come later; each is additive and anchored by
+`cell_id`.
 
-## Partial state (`unknown` / `none` / `value`)
+## On-disk shape (dense) + partial state
+
+Layers are **dense**: cells are addressed by their linear index within the map
+bounds (not by `cell_id` string), and categorical values are
+palette/dictionary-encoded — this keeps 50–100k-cell maps compact
+(`schemas/map-layer-dense.schema.json`). `cell_id` stays the identity you use
+from the API and agents.
 
 You do not have to fill every cell. Each cell is one of three states per layer:
 
-- **unknown** — not filled / not decided → the cell is simply absent from the file.
-- **none** — explicitly absent → `{ "state": "none" }`.
-- **value** — a concrete known value → `{ "state": "value", "value": "forest" }`.
+- **unknown** — not filled / not decided.
+- **none** — explicitly absent.
+- **value** — a concrete known value (e.g. `"forest"`, or an integer).
 
-The editor writes these; agents can read them directly from the JSON.
+The editor writes these; agents read them via the API (`GET /api/layers/<id>`).

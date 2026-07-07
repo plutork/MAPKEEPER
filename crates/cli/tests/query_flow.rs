@@ -247,57 +247,38 @@ fn layer_generic_set_get_list_clear_round_trip() {
     assert!(stdout.contains("\"state\": \"unknown\""));
 }
 
-/// An old sparse v1 layer file is migrated on read and rewritten dense (v2).
+/// scale-layers (D-46): no scaffold layer file; first terrain write creates a
+/// dense (v2) `map/layers/terrain.json` sized to the world bounds.
 #[test]
-fn terrain_v1_sparse_migrates_on_read_and_rewrites_dense() {
+fn first_terrain_write_creates_dense_layer_file() {
     let dir = tempdir().unwrap();
     let world = dir.path();
 
     mapkeeper().arg("init").arg("world").arg("--path").arg(world).assert().success();
 
-    let layers_dir = world.join("map").join("layers");
-    fs::create_dir_all(&layers_dir).unwrap();
-    let v1 = r#"{
-  "schema_version": 1,
-  "layer_id": "terrain",
-  "value_type": "categorical",
-  "cells": {
-    "world.hex.q0.r0": { "state": "value", "value": "forest" },
-    "world.hex.q1.r0": { "state": "none" }
-  }
-}"#;
-    fs::write(layers_dir.join("terrain.json"), v1).unwrap();
+    let layer_file = world.join("map").join("layers").join("terrain.json");
+    assert!(!layer_file.exists(), "scaffold must not ship a layer file");
 
-    // Read migrates the sparse file transparently.
-    let get = mapkeeper()
-        .args(["terrain", "get", "world.hex.q0.r0"])
-        .arg("--world")
-        .arg(world)
-        .assert()
-        .success();
-    let stdout = String::from_utf8_lossy(&get.get_output().stdout).to_string();
-    assert!(stdout.contains("\"value\": \"forest\""));
-
-    let get = mapkeeper()
-        .args(["terrain", "get", "world.hex.q1.r0"])
-        .arg("--world")
-        .arg(world)
-        .assert()
-        .success();
-    let stdout = String::from_utf8_lossy(&get.get_output().stdout).to_string();
-    assert!(stdout.contains("\"state\": \"none\""));
-
-    // Any write rewrites the file in the dense (v2) shape.
     mapkeeper()
         .args(["terrain", "set", "world.hex.q2.r0", "--value", "hill"])
         .arg("--world")
         .arg(world)
         .assert()
         .success();
-    let on_disk = fs::read_to_string(layers_dir.join("terrain.json")).unwrap();
+
+    let on_disk = fs::read_to_string(&layer_file).unwrap();
     assert!(on_disk.contains("\"schema_version\": 2"));
     assert!(on_disk.contains("\"states\""));
     assert!(!on_disk.contains("\"cells\""));
+
+    let get = mapkeeper()
+        .args(["terrain", "get", "world.hex.q2.r0"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&get.get_output().stdout).to_string();
+    assert!(stdout.contains("\"value\": \"hill\""));
 }
 
 #[test]

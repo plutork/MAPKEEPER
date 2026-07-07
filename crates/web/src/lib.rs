@@ -14,9 +14,9 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use gloo_timers::future::TimeoutFuture;
-use mapkeeper_core::cell_id::CellId;
-use mapkeeper_core::hex::Axial;
-use mapkeeper_core::hydro::{hydro_from_elevation, ElevationLayer, HydroKind};
+use mapkeeper_core::hex::{Axial, MapBounds};
+use mapkeeper_core::hydro::{hydro_from_elevation, HydroKind};
+use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
 use mapkeeper_core::profile::CellProfile;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -112,11 +112,15 @@ struct DeleteProjectInput<'a> {
     path: &'a str,
 }
 
+/// One cell in a generic layer batch (`PUT /api/layers/:id/batch`), matching
+/// `core::layer::LayerCellWrite` + `WireCellState::Value`. Elevation paints are
+/// always concrete integer values (scale-layers, D-46).
 #[derive(Serialize)]
-struct ElevationCellWrite {
+struct LayerCellWrite {
     q: i32,
     r: i32,
-    elevation: i16,
+    state: &'static str,
+    value: i16,
 }
 
 /// Active editing tool. `Inspect` keeps the old click→profile behavior; the
@@ -526,7 +530,7 @@ fn map_layout(state: &AppState, width: f64, height: f64) -> (f64, f64, f64) {
 }
 
 fn clamp_zoom(value: f64) -> f64 {
-    value.max(MIN_ZOOM).min(MAX_ZOOM)
+    value.clamp(MIN_ZOOM, MAX_ZOOM)
 }
 
 fn total_cell_count(radius: i32) -> usize {
@@ -781,15 +785,20 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
     redraw(&state.borrow());
 }
 
-/// Fetch sparse elevation overrides; missing keys remain default land.
+/// Fetch the dense elevation layer (scale-layers, D-46) and index its concrete
+/// integer values by `(q,r)`; unpainted cells stay default land at draw time.
 async fn load_elevation(state: &Rc<RefCell<AppState>>) {
     let Ok(resp) = gloo_net::http::Request::get("/api/layers/elevation").send().await else { return };
-    let Ok(layer) = resp.json::<ElevationLayer>().await else { return };
+    let Ok(layer) = resp.json::<DenseLayer>().await else { return };
     let mut state_mut = state.borrow_mut();
+    let bounds = MapBounds::new(state_mut.map_radius.max(0));
     state_mut.elevation.clear();
-    for (cell_id, value) in layer.cells {
-        let Some(id) = CellId::parse(&cell_id) else { continue };
-        state_mut.elevation.insert((id.q, id.r), value);
+    for index in 0..layer.len() {
+        if let DenseState::Value(LayerValue::Int(v)) = layer.state(index) {
+            if let Some(cell) = bounds.from_index(index) {
+                state_mut.elevation.insert((cell.q, cell.r), v as i16);
+            }
+        }
     }
 }
 
@@ -873,10 +882,11 @@ async fn flush_pending_paints(state: Rc<RefCell<AppState>>) {
     for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
         let payload = chunk
             .iter()
-            .map(|((q, r), elevation)| ElevationCellWrite {
+            .map(|((q, r), elevation)| LayerCellWrite {
                 q: *q,
                 r: *r,
-                elevation: *elevation,
+                state: "value",
+                value: *elevation,
             })
             .collect::<Vec<_>>();
         let sent = gloo_net::http::Request::put("/api/layers/elevation/batch")

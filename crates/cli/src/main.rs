@@ -437,30 +437,27 @@ fn cell_index(bounds: &MapBounds, cell_id: &str) -> Result<usize> {
         .with_context(|| format!("cell {cell_id} is outside the map bounds"))
 }
 
+/// Default value kind for a not-yet-created layer (`elevation` = integer).
+fn default_value_type(layer_id: &str) -> ValueType {
+    if layer_id == ELEVATION_LAYER_ID {
+        ValueType::Integer
+    } else {
+        ValueType::Categorical
+    }
+}
+
 fn read_terrain_dense(world: &Path, bounds: &MapBounds) -> DenseLayer {
-    let raw = fs::read_to_string(layer_file_path(world, TERRAIN_LAYER_ID)).ok();
-    DenseLayer::categorical_from_disk(raw.as_deref(), TERRAIN_LAYER_ID, bounds)
+    read_dense_layer(world, TERRAIN_LAYER_ID, bounds)
 }
 
 fn read_elevation_dense(world: &Path, bounds: &MapBounds) -> DenseLayer {
-    let raw = fs::read_to_string(layer_file_path(world, ELEVATION_LAYER_ID)).ok();
-    DenseLayer::elevation_from_disk(raw.as_deref(), bounds)
+    read_dense_layer(world, ELEVATION_LAYER_ID, bounds)
 }
 
-/// Read any layer file into dense form (migrate known sparse shapes on read).
-fn read_generic_dense(world: &Path, layer_id: &str, bounds: &MapBounds) -> DenseLayer {
-    match fs::read_to_string(layer_file_path(world, layer_id)).ok() {
-        None => DenseLayer::new_categorical(layer_id, bounds.len()),
-        Some(raw) => {
-            if let Ok(dense) = DenseLayer::from_json(&raw) {
-                dense
-            } else if layer_id == ELEVATION_LAYER_ID {
-                DenseLayer::elevation_from_disk(Some(&raw), bounds)
-            } else {
-                DenseLayer::categorical_from_disk(Some(&raw), layer_id, bounds)
-            }
-        }
-    }
+/// Read any layer file into dense form, or an empty typed layer if absent.
+fn read_dense_layer(world: &Path, layer_id: &str, bounds: &MapBounds) -> DenseLayer {
+    let raw = fs::read_to_string(layer_file_path(world, layer_id)).ok();
+    DenseLayer::read_or_empty(raw.as_deref(), layer_id, default_value_type(layer_id), bounds)
 }
 
 /// Keep default-land sparse (old semantics): default elevation clears the cell.
@@ -598,14 +595,14 @@ fn cmd_elevation_clear(world: &Path, cell_id: &str) -> Result<()> {
 fn cmd_layer_get(world: &Path, layer_id: &str, cell_id: &str) -> Result<()> {
     let bounds = read_bounds(world);
     let index = cell_index(&bounds, cell_id)?;
-    let dense = read_generic_dense(world, layer_id, &bounds);
+    let dense = read_dense_layer(world, layer_id, &bounds);
     println!("{}", serde_json::to_string_pretty(&state_json(&dense.state(index)))?);
     Ok(())
 }
 
 fn cmd_layer_list(world: &Path, layer_id: &str) -> Result<()> {
     let bounds = read_bounds(world);
-    let dense = read_generic_dense(world, layer_id, &bounds);
+    let dense = read_dense_layer(world, layer_id, &bounds);
     if (0..dense.len()).all(|i| matches!(dense.state(i), DenseState::Unknown)) {
         println!("(layer {layer_id} has no stored cells)");
         return Ok(());
@@ -632,7 +629,7 @@ fn cmd_layer_set(
     };
     // On a brand-new layer pick the column kind from the flag used.
     let mut dense = if layer_file_path(world, layer_id).exists() {
-        read_generic_dense(world, layer_id, &bounds)
+        read_dense_layer(world, layer_id, &bounds)
     } else if matches!(state, DenseState::Value(LayerValue::Int(_))) {
         DenseLayer::new_integer(layer_id, bounds.len())
     } else {
@@ -663,7 +660,7 @@ fn cmd_layer_set(
 fn cmd_layer_clear(world: &Path, layer_id: &str, cell_id: &str) -> Result<()> {
     let bounds = read_bounds(world);
     let index = cell_index(&bounds, cell_id)?;
-    let mut dense = read_generic_dense(world, layer_id, &bounds);
+    let mut dense = read_dense_layer(world, layer_id, &bounds);
     dense.set(index, DenseState::Unknown);
     write_dense_layer(world, &dense)?;
     println!("Cleared {layer_id} for {cell_id} (now unknown)");

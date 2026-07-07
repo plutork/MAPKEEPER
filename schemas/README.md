@@ -20,42 +20,28 @@ roadmap block 6, time slices). See the `mapkeeper-cell-schema` skill.
 Profiles are **author-facing** description and are **not** a map layer — map
 state lives separately under `map/` (below).
 
-## `map-layer.schema.json` (D-36)
-
-One map-state layer file, `map/layers/<id>.json` — mirrors
-`crates/core/src/layer.rs::Layer`. Layers are machine-readable world state,
-kept separate from author profiles; `cell_id` is the shared anchor.
-
-Sparse `cell_id -> entry`; **a missing key means the cell is `unknown`** for
-that layer (partial-state model):
-
-| On disk | Meaning |
-|---------|---------|
-| key absent | `unknown` — not filled / not decided |
-| `{ "state": "none" }` | `none` — explicitly absent |
-| `{ "state": "value", "value": <T> }` | `value` — concrete known value |
-
-V0 proof layer: `terrain` (`value_type: "categorical"`, string values). Other
-layers (elevation, water, …) are additive later.
-
 ## `map-layer-dense.schema.json` (D-46, scale-layers)
 
-Dense, **index-addressed** layer file — mirrors
-`crates/core/src/layer.rs::DenseLayer`. Evolution of the sparse layer above for
-the 50–100k ceiling: cells are addressed by linear index within the map bounds
+The **only** map-state layer format, `map/layers/<id>.json` — mirrors
+`crates/core/src/layer.rs::DenseLayer`. Layers are machine-readable world state,
+kept separate from author profiles. Dense and **index-addressed** for the
+50–100k ceiling: cells are addressed by linear index within the map bounds
 (`core::hex::MapBounds::index_of`), not by `cell_id` strings, and categorical
-values are palette/dictionary-encoded.
+values are palette/dictionary-encoded. `cell_id` stays the external identity
+(API / profiles / agent); the linear index is the internal storage key.
 
 | Field | Meaning |
 |-------|---------|
-| `schema_version` | `2` (dense; sparse is `1`) |
+| `schema_version` | `2` |
 | `states[i]` | `0`=unknown, `1`=none, `2`=value |
 | `palette` + `codes[i]` | categorical: dictionary + per-cell palette index |
 | `values[i]` | integer value column |
 
-Partial-state trio (D-36) is preserved. The sparse `map-layer.schema.json`
-stays valid until adapters switch over (`scale-layers--adapters` slice); this
-is a decision-first foundation (D-46), not yet wired end to end.
+Partial-state trio (D-36) is preserved: `unknown` (not filled), `none`
+(explicitly absent), `value` (concrete). Layer files are created on first write
+sized to the map bounds; a `GET` of an absent layer returns an empty typed
+layer. The old sparse `map-layer.schema.json` (v1) was removed once server, CLI
+and web switched to dense (`scale-layers--adapters`).
 
 ## `map-manifest.schema.json` (D-36)
 

@@ -9,16 +9,15 @@ Use this first, then open only the needed files.
 - Core rules, ids, geometry, profile model -> `crates/core/src/`
 - Spatial contract (distance/ring/range/bounds) -> `crates/core/src/hex.rs`
 - Map size presets (Small/Medium/Large/Epic -> hex-radius) -> `crates/core/src/map_preset.rs`
-- Map state model (layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
+- Map state model (dense layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
 - Cell index (`(q,r) <-> linear index`, `MapBounds::index_of`/`from_index`/`len`) -> `crates/core/src/hex.rs`
-- Dense typed-layer model (index-addressed, palette categorical + integer; migration from sparse) -> `crates/core/src/layer.rs` (`DenseLayer`)
+- Dense typed-layer model (index-addressed, palette categorical + integer; `read_or_empty`; generic wire `WireCellState`/`LayerCellWrite`) -> `crates/core/src/layer.rs` (`DenseLayer`)
 - Elevation/hydro threshold model (`elevation <= 0 => water`) -> `crates/core/src/hydro.rs`
 - HTTP API, world file I/O, launcher endpoints -> `crates/server/src/`
-- Terrain layer endpoints (`/api/layers/terrain`, `/api/cells/:q/:r/terrain`) -> `crates/server/src/lib.rs`
-- Elevation endpoints (`/api/layers/elevation`, `/api/cells/:q/:r/elevation`, `/api/layers/elevation/batch`) -> `crates/server/src/lib.rs`
+- Generic layer endpoints (`GET /api/layers/:id`, `PUT /api/layers/:id/batch`, `PUT /api/layers/:id/cells/:q/:r`) -> `crates/server/src/lib.rs`
 - CLI commands and query flow (`profile`, `terrain`, `elevation`, generic `layer <id>`) -> `crates/cli/src/`
-- Dense-on-disk layer I/O + migrate-on-read + dense->sparse projection (server & cli) -> `crates/core/src/layer.rs` (`categorical_from_disk`/`elevation_from_disk`/`to_sparse_*`), `crates/server/src/lib.rs`, `crates/cli/src/main.rs`
-- Web UI (WASM canvas, Home/Editor flow, tool dock + hydro brush) -> `crates/web/src/`
+- Dense-on-disk layer I/O (`read_or_empty` + `write_dense_layer`; created on first write) -> `crates/core/src/layer.rs`, `crates/server/src/lib.rs`, `crates/cli/src/main.rs`
+- Web UI (WASM canvas, Home/Editor flow, tool dock + hydro brush; reads dense elevation, paints via generic batch) -> `crates/web/src/`
 - Desktop shell (Tauri wrapper, native dialog bridge) -> `crates/desktop/src/`
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
 - World scaffold source -> `toolchain/template/world/`
@@ -49,21 +48,25 @@ Use this first, then open only the needed files.
 
 - **Map state = layers** under `map/layers/<id>.json` (machine-readable;
   missing cell = `unknown`). Model in `core::layer`.
-- **On-disk shape = dense v2** (scale-layers D-46, adapters slice): server & cli
-  read/write `DenseLayer` (`schema_version: 2`, index-addressed). Old sparse v1
-  files migrate transparently on read; the next write rewrites them dense.
+- **On-disk shape = dense (`DenseLayer`, `schema_version: 2`)** everywhere
+  (scale-layers D-46): index-addressed, palette-encoded categorical + integer.
+  The sparse v1 model (`Layer`/`ElevationLayer`) was **removed**; old files are
+  not migrated. Layer files are created on first write, sized to the map bounds;
+  a `GET` of an absent layer returns an empty typed layer.
 - **Hydro projection** derives from integer elevation (`core::hydro`):
-  `elevation <= 0` => water, `> 0` => land.
+  `elevation <= 0` => water, `> 0` => land. Web computes hydro client-side over
+  the dense elevation layer.
 - **Author profiles** (`profiles/*.json`) are human-facing and **not** a layer.
-- **scale-layers (D-46) — adapters slice (server + cli done):** server & cli
-  store dense on disk and back the layer commands/endpoints with `DenseLayer`
-  (`core::hex` cell index + palette-encoded categorical + integer, unknown/none/
-  value preserved). To avoid touching web this slice, the HTTP responses/requests
-  the browser consumes (`GET /api/layers/elevation` etc.) are kept byte-compatible
-  via dense->sparse projection (`DenseLayer::to_sparse_*`); the web switch to
-  dense/generic + generic `/api/layers/:id` + removing the sparse model is the
-  next slice. CLI adds generic `layer get/set/list/clear <id>`. Dense schema:
-  `schemas/map-layer-dense.schema.json` (v2); fixtures `fixtures/layers-dense/`.
+- **scale-layers (D-46) — adapters slice (done, server + cli + web):** one
+  generic layer API by id — `GET /api/layers/:id` returns the dense layer,
+  `PUT /api/layers/:id/batch` (`[LayerCellWrite]`) and
+  `PUT /api/layers/:id/cells/:q/:r` (`WireCellState`) write cells. Value kind is
+  resolved against the layer's `value_type` (categorical string / integer);
+  `elevation` defaults to integer, other new ids to categorical. Web reads the
+  dense elevation layer and flushes paints via the generic batch. CLI keeps
+  `terrain`/`elevation` plus generic `layer get/set/list/clear <id>`. Dense
+  schema: `schemas/map-layer-dense.schema.json` (v2); fixtures
+  `fixtures/layers-dense/`.
 - Renderer is a projection of the layer model, not the source of truth.
 - Renderer layout (4.2): fit-to-window canvas + camera viewport — base
   `hex_layout`/`map_half_extent` plus `zoom` (0.6x–2.5x), `pan` (LMB drag),

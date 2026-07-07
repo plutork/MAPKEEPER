@@ -11,29 +11,16 @@
 //! - `none` — explicitly absent → stored as `{ "state": "none" }`.
 //! - `value` — a concrete known value → `{ "state": "value", "value": <T> }`.
 //!
-//! On-disk shape (`map/layers/<id>.json`, sparse):
-//!
-//! ```json
-//! {
-//!   "schema_version": 1,
-//!   "layer_id": "terrain",
-//!   "value_type": "categorical",
-//!   "cells": {
-//!     "world.hex.q0.r0": { "state": "value", "value": "forest" },
-//!     "world.hex.q1.r0": { "state": "none" }
-//!   }
-//! }
-//! ```
+//! On-disk shape (`map/layers/<id>.json`) is the **dense** [`DenseLayer`]
+//! (scale-layers, D-46): cells are addressed by linear index within the map
+//! bounds (`core::hex::MapBounds::index_of`), not by `cell_id` strings, and
+//! categorical values are palette/dictionary-encoded. The sparse string-keyed
+//! model was removed once adapters + web switched over.
 //!
 //! This module owns the model, (de)serialization and `unknown/none/value`
 //! resolution — pure, no filesystem. `server`/`cli` do the actual I/O (D-20).
-//!
-//! V0 proof slice: only `terrain`, a `categorical` (string-valued) layer. No
-//! generators, validators, or other layers yet — but the shape is designed so
-//! those are additive later (future generators are local product tools over
-//! these layers, not AI runtime).
-
-use std::collections::BTreeMap;
+//! `cell_id` strings stay the external identity (API/profiles/agent); the
+//! linear index is the internal storage key.
 
 use serde::{Deserialize, Serialize};
 
@@ -41,103 +28,13 @@ pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 pub const TERRAIN_LAYER_ID: &str = "terrain";
 pub const ELEVATION_LAYER_ID: &str = "elevation";
 
-/// Kind of value a layer stores. Only `categorical` (string) exists in the V0
-/// proof slice; numeric/enum kinds (elevation, …) are future additions.
+/// Kind of value a layer stores: `categorical` (palette-encoded strings) or
+/// `integer`. Future numeric/enum kinds are additive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ValueType {
     Categorical,
     Integer,
-}
-
-/// A stored cell entry — only the two *stored* partial states (`none` /
-/// `value`). `unknown` is represented by the **absence** of a key, so it
-/// never appears on disk.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "lowercase")]
-pub enum Entry {
-    None,
-    Value { value: String },
-}
-
-/// Resolved partial state for a cell in a layer — the full `unknown / none /
-/// value` trio. Used at the API boundary (get/set) and by callers; `Unknown`
-/// on a `set` clears the cell (removes the key).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "lowercase")]
-pub enum CellState {
-    Unknown,
-    None,
-    Value { value: String },
-}
-
-impl CellState {
-    pub fn value(v: impl Into<String>) -> Self {
-        CellState::Value { value: v.into() }
-    }
-}
-
-/// A single map layer: sparse `cell_id -> Entry`, with a typed header. Missing
-/// keys resolve to `unknown`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Layer {
-    pub schema_version: u32,
-    pub layer_id: String,
-    pub value_type: ValueType,
-    #[serde(default)]
-    pub cells: BTreeMap<String, Entry>,
-}
-
-impl Layer {
-    pub fn new(layer_id: impl Into<String>, value_type: ValueType) -> Self {
-        Self {
-            schema_version: CURRENT_SCHEMA_VERSION,
-            layer_id: layer_id.into(),
-            value_type,
-            cells: BTreeMap::new(),
-        }
-    }
-
-    /// A fresh, empty `terrain` layer (categorical) — the V0 proof layer.
-    pub fn terrain() -> Self {
-        Self::new(TERRAIN_LAYER_ID, ValueType::Categorical)
-    }
-
-    /// Resolve a cell to its full partial state. Absent key => `Unknown`.
-    pub fn state(&self, cell_id: &str) -> CellState {
-        match self.cells.get(cell_id) {
-            None => CellState::Unknown,
-            Some(Entry::None) => CellState::None,
-            Some(Entry::Value { value }) => CellState::Value { value: value.clone() },
-        }
-    }
-
-    /// Set a cell's partial state. `Unknown` removes the key (back to not
-    /// stored); `None`/`Value` store the corresponding entry.
-    pub fn set(&mut self, cell_id: impl Into<String>, state: CellState) {
-        let cell_id = cell_id.into();
-        match state {
-            CellState::Unknown => {
-                self.cells.remove(&cell_id);
-            }
-            CellState::None => {
-                self.cells.insert(cell_id, Entry::None);
-            }
-            CellState::Value { value } => {
-                self.cells.insert(cell_id, Entry::Value { value });
-            }
-        }
-    }
-
-    /// Parse a layer from JSON.
-    pub fn from_json(raw: &str) -> serde_json::Result<Layer> {
-        serde_json::from_str(raw)
-    }
-
-    /// Serialize a layer to pretty JSON (stable key order via `BTreeMap`).
-    pub fn to_json_pretty(&self) -> serde_json::Result<String> {
-        serde_json::to_string_pretty(self)
-    }
 }
 
 /// Spatial bounds declared by a map manifest. Only a radial hexagon centered
@@ -369,183 +266,87 @@ impl DenseLayer {
         serde_json::to_string_pretty(self)
     }
 
-    /// Migrate a sparse categorical [`Layer`] (e.g. `terrain`, schema v1) into
-    /// the dense model, mapping each `cell_id` to its index via `bounds`.
-    /// Cells outside the bounds are dropped (defensive).
-    pub fn from_sparse_layer(old: &Layer, bounds: &crate::hex::MapBounds) -> DenseLayer {
-        let mut dense = DenseLayer::new_categorical(old.layer_id.clone(), bounds.len());
-        for (cell_id, entry) in &old.cells {
-            let Some(index) = index_for(cell_id, bounds) else { continue };
-            match entry {
-                Entry::None => dense.set(index, DenseState::None),
-                Entry::Value { value } => {
-                    dense.set(index, DenseState::Value(LayerValue::Text(value.clone())))
-                }
-            }
+    /// A fresh empty layer of `value_type` sized to `bounds`.
+    pub fn empty(layer_id: &str, value_type: ValueType, bounds: &crate::hex::MapBounds) -> DenseLayer {
+        match value_type {
+            ValueType::Categorical => DenseLayer::new_categorical(layer_id, bounds.len()),
+            ValueType::Integer => DenseLayer::new_integer(layer_id, bounds.len()),
         }
-        dense
     }
 
-    /// Migrate a sparse [`crate::hydro::ElevationLayer`] (schema v1) into the
-    /// dense integer model. Old semantics had no `unknown`: a missing key meant
-    /// the default land elevation. Here stored cells become concrete values and
-    /// absent cells stay `unknown`; read them back with
-    /// `int_or(index, DEFAULT_LAND_ELEVATION)` to preserve the old default.
-    pub fn from_sparse_elevation(
-        old: &crate::hydro::ElevationLayer,
-        bounds: &crate::hex::MapBounds,
-    ) -> DenseLayer {
-        let mut dense = DenseLayer::new_integer(old.layer_id.clone(), bounds.len());
-        for (cell_id, elevation) in &old.cells {
-            let Some(index) = index_for(cell_id, bounds) else { continue };
-            dense.set(index, DenseState::Value(LayerValue::Int(*elevation as i32)));
-        }
-        dense
-    }
-
-    /// Project this dense categorical layer back to the sparse [`Layer`] shape
-    /// (schema v1) — used to keep the HTTP/CLI contract byte-compatible while
-    /// storage moves to dense (adapters slice). `world_id` rebuilds `cell_id`
-    /// strings from indices via `bounds`.
-    pub fn to_sparse_layer(&self, bounds: &crate::hex::MapBounds, world_id: &str) -> Layer {
-        let mut sparse = Layer::new(self.layer_id.clone(), ValueType::Categorical);
-        for index in 0..self.cell_count {
-            let Some(cell) = bounds.from_index(index) else { continue };
-            let cell_id = crate::cell_id::CellId::new(world_id, cell.q, cell.r).to_string();
-            match self.state(index) {
-                DenseState::Value(LayerValue::Text(v)) => sparse.set(cell_id, CellState::value(v)),
-                DenseState::None => sparse.set(cell_id, CellState::None),
-                _ => {}
-            }
-        }
-        sparse
-    }
-
-    /// Project this dense integer layer back to the sparse
-    /// [`crate::hydro::ElevationLayer`] shape (schema v1). Cells resolving to
-    /// the default land elevation stay sparse (matches the old semantics).
-    pub fn to_sparse_elevation(
-        &self,
-        bounds: &crate::hex::MapBounds,
-        world_id: &str,
-    ) -> crate::hydro::ElevationLayer {
-        let mut sparse = crate::hydro::ElevationLayer::new();
-        for index in 0..self.cell_count {
-            let Some(cell) = bounds.from_index(index) else { continue };
-            if let DenseState::Value(LayerValue::Int(v)) = self.state(index) {
-                let cell_id = crate::cell_id::CellId::new(world_id, cell.q, cell.r).to_string();
-                sparse.set(cell_id, v as i16); // ElevationLayer::set drops default land
-            }
-        }
-        sparse
-    }
-
-    /// Migrate-on-read for a categorical layer: parse raw file contents as dense
-    /// (v2) if possible, else as sparse (v1) and migrate, else start empty.
-    /// `raw == None` means the file does not exist yet.
-    pub fn categorical_from_disk(
+    /// Read a dense layer from a file's raw contents, or start empty (typed by
+    /// `value_type`, sized to `bounds`). `raw == None` means the file is absent;
+    /// unparseable contents also fall back to empty (old formats are not kept).
+    pub fn read_or_empty(
         raw: Option<&str>,
         layer_id: &str,
+        value_type: ValueType,
         bounds: &crate::hex::MapBounds,
     ) -> DenseLayer {
-        match raw {
-            None => DenseLayer::new_categorical(layer_id, bounds.len()),
-            Some(raw) => {
-                if let Ok(dense) = DenseLayer::from_json(raw) {
-                    return dense;
-                }
-                if let Ok(sparse) = Layer::from_json(raw) {
-                    return DenseLayer::from_sparse_layer(&sparse, bounds);
-                }
-                DenseLayer::new_categorical(layer_id, bounds.len())
+        if let Some(raw) = raw {
+            if let Ok(dense) = DenseLayer::from_json(raw) {
+                return dense;
             }
+        }
+        DenseLayer::empty(layer_id, value_type, bounds)
+    }
+}
+
+/// Wire form of a cell's partial state for the generic layer API — mirrors
+/// [`DenseState`] but the value is JSON (string for categorical, number for
+/// integer), resolved against the layer's [`ValueType`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "lowercase")]
+pub enum WireCellState {
+    Unknown,
+    None,
+    Value { value: serde_json::Value },
+}
+
+impl WireCellState {
+    /// Resolve to a [`DenseState`] for `value_type`. `None` when the JSON value
+    /// kind does not match the layer (e.g. a string for an integer layer).
+    pub fn to_dense(&self, value_type: ValueType) -> Option<DenseState> {
+        match self {
+            WireCellState::Unknown => Some(DenseState::Unknown),
+            WireCellState::None => Some(DenseState::None),
+            WireCellState::Value { value } => match value_type {
+                ValueType::Categorical => {
+                    value.as_str().map(|s| DenseState::Value(LayerValue::Text(s.to_string())))
+                }
+                ValueType::Integer => {
+                    value.as_i64().map(|i| DenseState::Value(LayerValue::Int(i as i32)))
+                }
+            },
         }
     }
 
-    /// Migrate-on-read for the integer elevation layer (see
-    /// [`Self::categorical_from_disk`]).
-    pub fn elevation_from_disk(raw: Option<&str>, bounds: &crate::hex::MapBounds) -> DenseLayer {
-        match raw {
-            None => DenseLayer::new_integer(crate::hydro::ELEVATION_LAYER_ID, bounds.len()),
-            Some(raw) => {
-                if let Ok(dense) = DenseLayer::from_json(raw) {
-                    return dense;
-                }
-                if let Ok(sparse) = crate::hydro::ElevationLayer::from_json(raw) {
-                    return DenseLayer::from_sparse_elevation(&sparse, bounds);
-                }
-                DenseLayer::new_integer(crate::hydro::ELEVATION_LAYER_ID, bounds.len())
+    pub fn from_dense(state: DenseState) -> WireCellState {
+        match state {
+            DenseState::Unknown => WireCellState::Unknown,
+            DenseState::None => WireCellState::None,
+            DenseState::Value(LayerValue::Text(v)) => {
+                WireCellState::Value { value: serde_json::Value::String(v) }
+            }
+            DenseState::Value(LayerValue::Int(i)) => {
+                WireCellState::Value { value: serde_json::Value::from(i) }
             }
         }
     }
 }
 
-/// Resolve a `cell_id` string to its dense index within `bounds`.
-fn index_for(cell_id: &str, bounds: &crate::hex::MapBounds) -> Option<usize> {
-    let cell = crate::cell_id::CellId::parse(cell_id)?;
-    bounds.index_of(crate::hex::Axial::new(cell.q, cell.r))
+/// One cell write in a generic layer batch (`PUT /api/layers/:id/batch`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerCellWrite {
+    pub q: i32,
+    pub r: i32,
+    #[serde(flatten)]
+    pub state: WireCellState,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn unknown_none_value_resolution() {
-        let mut layer = Layer::terrain();
-        assert_eq!(layer.state("w.hex.q0.r0"), CellState::Unknown);
-
-        layer.set("w.hex.q0.r0", CellState::value("forest"));
-        layer.set("w.hex.q1.r0", CellState::None);
-
-        assert_eq!(layer.state("w.hex.q0.r0"), CellState::value("forest"));
-        assert_eq!(layer.state("w.hex.q1.r0"), CellState::None);
-        assert_eq!(layer.state("w.hex.q9.r9"), CellState::Unknown);
-    }
-
-    #[test]
-    fn setting_unknown_clears_the_cell() {
-        let mut layer = Layer::terrain();
-        layer.set("w.hex.q0.r0", CellState::value("water"));
-        assert!(layer.cells.contains_key("w.hex.q0.r0"));
-        layer.set("w.hex.q0.r0", CellState::Unknown);
-        assert!(!layer.cells.contains_key("w.hex.q0.r0"));
-        assert_eq!(layer.state("w.hex.q0.r0"), CellState::Unknown);
-    }
-
-    #[test]
-    fn serializes_to_authored_shape() {
-        let mut layer = Layer::terrain();
-        layer.set("world.hex.q0.r0", CellState::value("forest"));
-        layer.set("world.hex.q1.r0", CellState::None);
-        let json = layer.to_json_pretty().unwrap();
-
-        assert!(json.contains("\"schema_version\": 1"));
-        assert!(json.contains("\"layer_id\": \"terrain\""));
-        assert!(json.contains("\"value_type\": \"categorical\""));
-        assert!(json.contains("\"state\": \"value\""));
-        assert!(json.contains("\"value\": \"forest\""));
-        assert!(json.contains("\"state\": \"none\""));
-
-        // Round trips.
-        let back = Layer::from_json(&json).unwrap();
-        assert_eq!(back, layer);
-    }
-
-    #[test]
-    fn parses_sparse_file_with_missing_cells_as_unknown() {
-        let raw = r#"{
-            "schema_version": 1,
-            "layer_id": "terrain",
-            "value_type": "categorical",
-            "cells": {
-                "w.hex.q0.r0": { "state": "value", "value": "mountain" }
-            }
-        }"#;
-        let layer = Layer::from_json(raw).unwrap();
-        assert_eq!(layer.state("w.hex.q0.r0"), CellState::value("mountain"));
-        assert_eq!(layer.state("w.hex.q5.r5"), CellState::Unknown);
-    }
 
     #[test]
     fn manifest_declares_terrain_layer() {
@@ -622,89 +423,48 @@ mod tests {
     }
 
     #[test]
-    fn migrate_sparse_terrain_preserves_values() {
-        let bounds = MapBounds::new(2);
-        let mut sparse = Layer::terrain();
-        sparse.set("w.hex.q0.r0", CellState::value("forest"));
-        sparse.set("w.hex.q1.r0", CellState::None);
-
-        let dense = DenseLayer::from_sparse_layer(&sparse, &bounds);
-        let i0 = bounds.index_of(crate::hex::Axial::new(0, 0)).unwrap();
-        let i1 = bounds.index_of(crate::hex::Axial::new(1, 0)).unwrap();
-        assert_eq!(dense.state(i0), DenseState::Value(LayerValue::Text("forest".into())));
-        assert_eq!(dense.state(i1), DenseState::None);
-        assert_eq!(dense.len(), bounds.len());
-    }
-
-    #[test]
-    fn migrate_sparse_elevation_preserves_default_semantics() {
-        use crate::hydro::{ElevationLayer, DEFAULT_LAND_ELEVATION};
-        let bounds = MapBounds::new(2);
-        let mut sparse = ElevationLayer::new();
-        sparse.set("w.hex.q0.r0", -3);
-
-        let dense = DenseLayer::from_sparse_elevation(&sparse, &bounds);
-        let i0 = bounds.index_of(crate::hex::Axial::new(0, 0)).unwrap();
-        let i1 = bounds.index_of(crate::hex::Axial::new(1, 0)).unwrap();
-        assert_eq!(dense.int_or(i0, DEFAULT_LAND_ELEVATION as i32), -3);
-        // absent cell keeps the old "missing = default land" behavior via int_or.
-        assert_eq!(dense.int_or(i1, DEFAULT_LAND_ELEVATION as i32), DEFAULT_LAND_ELEVATION as i32);
-    }
-
-    #[test]
-    fn migrate_drops_out_of_bounds_cells() {
-        let bounds = MapBounds::new(1);
-        let mut sparse = Layer::terrain();
-        sparse.set("w.hex.q9.r9", CellState::value("forest"));
-        let dense = DenseLayer::from_sparse_layer(&sparse, &bounds);
-        // nothing landed in-bounds
-        assert!((0..dense.len()).all(|i| dense.state(i) == DenseState::Unknown));
-    }
-
-    #[test]
-    fn terrain_sparse_dense_roundtrip_projection() {
-        let bounds = MapBounds::new(2);
-        let mut sparse = Layer::terrain();
-        sparse.set("main.hex.q0.r0", CellState::value("forest"));
-        sparse.set("main.hex.q-1.r1", CellState::None);
-
-        let dense = DenseLayer::from_sparse_layer(&sparse, &bounds);
-        let back = dense.to_sparse_layer(&bounds, "main");
-        assert_eq!(back, sparse);
-    }
-
-    #[test]
-    fn elevation_sparse_dense_roundtrip_projection() {
-        use crate::hydro::ElevationLayer;
-        let bounds = MapBounds::new(2);
-        let mut sparse = ElevationLayer::new();
-        sparse.set("main.hex.q0.r0", -3);
-        sparse.set("main.hex.q1.r-1", 7);
-
-        let dense = DenseLayer::from_sparse_elevation(&sparse, &bounds);
-        let back = dense.to_sparse_elevation(&bounds, "main");
-        assert_eq!(back, sparse);
-    }
-
-    #[test]
-    fn from_disk_reads_dense_and_migrates_sparse() {
+    fn read_or_empty_parses_dense_or_starts_empty() {
         let bounds = MapBounds::new(2);
 
-        // None => empty dense.
-        let empty = DenseLayer::categorical_from_disk(None, "terrain", &bounds);
+        // None => empty typed layer sized to bounds.
+        let empty = DenseLayer::read_or_empty(None, "terrain", ValueType::Categorical, &bounds);
         assert_eq!(empty.len(), bounds.len());
+        assert_eq!(empty.value_type, ValueType::Categorical);
 
-        // Sparse v1 JSON migrates.
-        let mut sparse = Layer::terrain();
-        sparse.set("main.hex.q0.r0", CellState::value("water"));
-        let v1 = sparse.to_json_pretty().unwrap();
-        let migrated = DenseLayer::categorical_from_disk(Some(&v1), "terrain", &bounds);
-        let i0 = bounds.index_of(crate::hex::Axial::new(0, 0)).unwrap();
-        assert_eq!(migrated.state(i0), DenseState::Value(LayerValue::Text("water".into())));
+        // Unparseable => empty (old formats are not kept).
+        let junk = DenseLayer::read_or_empty(Some("not json"), "elevation", ValueType::Integer, &bounds);
+        assert_eq!(junk.value_type, ValueType::Integer);
+        assert_eq!(junk.len(), bounds.len());
 
-        // Dense v2 JSON is read back as-is.
-        let v2 = migrated.to_json_pretty().unwrap();
-        let reread = DenseLayer::categorical_from_disk(Some(&v2), "terrain", &bounds);
-        assert_eq!(reread, migrated);
+        // Valid dense round-trips.
+        let mut layer = DenseLayer::new_categorical("terrain", bounds.len());
+        layer.set(0, DenseState::Value(LayerValue::Text("forest".into())));
+        let json = layer.to_json_pretty().unwrap();
+        let back = DenseLayer::read_or_empty(Some(&json), "terrain", ValueType::Categorical, &bounds);
+        assert_eq!(back, layer);
+    }
+
+    #[test]
+    fn wire_cell_state_roundtrips_by_value_type() {
+        // Categorical text.
+        let dense = WireCellState::Value { value: serde_json::json!("forest") }
+            .to_dense(ValueType::Categorical)
+            .unwrap();
+        assert_eq!(dense, DenseState::Value(LayerValue::Text("forest".into())));
+        // Integer number.
+        let dense = WireCellState::Value { value: serde_json::json!(-3) }
+            .to_dense(ValueType::Integer)
+            .unwrap();
+        assert_eq!(dense, DenseState::Value(LayerValue::Int(-3)));
+        // Kind mismatch => None.
+        assert!(WireCellState::Value { value: serde_json::json!("x") }
+            .to_dense(ValueType::Integer)
+            .is_none());
+        // from_dense inverse for the value cases.
+        assert!(matches!(
+            WireCellState::from_dense(DenseState::Value(LayerValue::Int(7))),
+            WireCellState::Value { .. }
+        ));
+        assert!(matches!(WireCellState::from_dense(DenseState::None), WireCellState::None));
     }
 }

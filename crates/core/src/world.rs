@@ -49,14 +49,10 @@ pub const SCAFFOLD_FILES: &[ScaffoldFile] = &[
         rel_path: "map/manifest.json",
         contents: include_str!("../../../toolchain/template/world/map/manifest.json"),
     },
-    ScaffoldFile {
-        rel_path: "map/layers/terrain.json",
-        contents: include_str!("../../../toolchain/template/world/map/layers/terrain.json"),
-    },
-    ScaffoldFile {
-        rel_path: "map/layers/elevation.json",
-        contents: include_str!("../../../toolchain/template/world/map/layers/elevation.json"),
-    },
+    // scale-layers (D-46): layer files (`map/layers/<id>.json`) are dense and
+    // sized to the world bounds, so they are created on first write by
+    // server/cli (GET returns an empty typed layer) rather than shipped as a
+    // fixed-size scaffold file. `map/layers/` itself is still created (SCAFFOLD_DIRS).
     ScaffoldFile {
         rel_path: "canon/README.md",
         contents: include_str!("../../../toolchain/template/world/canon/README.md"),
