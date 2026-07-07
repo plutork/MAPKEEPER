@@ -18,6 +18,7 @@ Use this first, then open only the needed files.
 - CLI commands and query flow (`profile`, `terrain`, `elevation`, generic `layer <id>`) -> `crates/cli/src/`
 - Dense-on-disk layer I/O (`read_or_empty` + `write_dense_layer`; created on first write) -> `crates/core/src/layer.rs`, `crates/server/src/lib.rs`, `crates/cli/src/main.rs`
 - Web UI (WASM canvas, Home/Editor flow, tool dock + hydro brush; reads dense elevation, paints via generic batch) -> `crates/web/src/`
+- Perf Step 0 measurement hooks (`open_ms`, layer fetch/parse/mirror, `redraw_ms`, `batch_flush_ms`; `#view-perf` + console) -> `crates/web/src/lib.rs` (`perf-100k--measurement-hooks`)
 - Desktop shell (Tauri wrapper, native dialog bridge) -> `crates/desktop/src/`
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
 - World scaffold source -> `toolchain/template/world/`
@@ -30,7 +31,7 @@ Use this first, then open only the needed files.
 - Server boundary entry: `crates/server/src/lib.rs`
 - Web boundary entry: `crates/web/src/lib.rs`
 - Home screen layout entry: `crates/web/index.html`
-- Editor tool dock (rail + collapsible drawers: Inspect/profile, Hydro brush with size 1x–4x + hover preview + debounced autosave + batch save PUT, View stub, World): `crates/web/index.html`, `crates/web/src/lib.rs` — **overlays** the map (D-39); canvas stable on drawer toggle
+- Editor tool dock (rail + collapsible drawers: Inspect/profile, Hydro brush with size 1x–4x + hover preview + debounced autosave + batch save PUT, View stub + perf line `#view-perf`, World): `crates/web/index.html`, `crates/web/src/lib.rs` — **overlays** the map (D-39); canvas stable on drawer toggle
 - Project list actions (`open` / `remove` / `delete`, with secondary manage flow): `crates/web/src/lib.rs`, `crates/server/src/lib.rs`
 - Default create path suggestion (`Documents/MAPKEEPER Worlds`): `crates/server/src/lib.rs`, `crates/web/src/lib.rs`
 - Map bounds at create (`map_preset`, `write_map_manifest`, `/api/map` bounds + `legacy_map`): `crates/server/src/lib.rs`, `crates/core/src/map_preset.rs`

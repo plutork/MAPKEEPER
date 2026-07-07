@@ -37,6 +37,86 @@ const HEX_GAP: f64 = 0.92;
 /// Breathing room (px) between the map and the canvas edge.
 const CANVAS_PAD: f64 = 20.0;
 
+// perf-100k--measurement-hooks: lightweight Step 0 timing (console + view pane).
+#[derive(Default)]
+struct PerfMetrics {
+    open_ms: Option<f64>,
+    layer_fetch_ms: Option<f64>,
+    layer_parse_or_decode_ms: Option<f64>,
+    client_mirror_ms: Option<f64>,
+    first_redraw_ms: Option<f64>,
+    redraw_ms: Option<f64>,
+    drawn_cells: Option<usize>,
+    batch_flush_ms: Option<f64>,
+}
+
+#[derive(Default)]
+struct PerfTimers {
+    open_start: Option<f64>,
+}
+
+fn perf_now() -> f64 {
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| p.now())
+        .unwrap_or_else(js_sys::Date::now)
+}
+
+fn perf_ms_label(v: Option<f64>) -> String {
+    match v {
+        Some(ms) => format!("{ms:.0}ms"),
+        None => "—".to_string(),
+    }
+}
+
+impl PerfMetrics {
+    fn console_line(&self) -> String {
+        format!(
+            "open={} fetch={} parse={} mirror={} 1st_redraw={} redraw={} drawn={} batch={}",
+            perf_ms_label(self.open_ms),
+            perf_ms_label(self.layer_fetch_ms),
+            perf_ms_label(self.layer_parse_or_decode_ms),
+            perf_ms_label(self.client_mirror_ms),
+            perf_ms_label(self.first_redraw_ms),
+            perf_ms_label(self.redraw_ms),
+            self.drawn_cells
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "—".to_string()),
+            perf_ms_label(self.batch_flush_ms),
+        )
+    }
+
+    fn view_line(&self) -> String {
+        format!(
+            "Perf: open {} · fetch {} · parse {} · mirror {} · redraw {} · batch {} · drawn {}",
+            perf_ms_label(self.open_ms),
+            perf_ms_label(self.layer_fetch_ms),
+            perf_ms_label(self.layer_parse_or_decode_ms),
+            perf_ms_label(self.client_mirror_ms),
+            perf_ms_label(self.redraw_ms),
+            perf_ms_label(self.batch_flush_ms),
+            self.drawn_cells
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "—".to_string()),
+        )
+    }
+}
+
+fn perf_emit(metrics: &PerfMetrics) {
+    set_text("view-perf", &metrics.view_line());
+    web_sys::console::log_1(&format!("[perf] {}", metrics.console_line()).into());
+}
+
+fn redraw_and_sample(state: &Rc<RefCell<AppState>>) {
+    let t0 = perf_now();
+    let drawn = redraw(&state.borrow());
+    let ms = perf_now() - t0;
+    let mut s = state.borrow_mut();
+    s.perf.redraw_ms = Some(ms);
+    s.perf.drawn_cells = Some(drawn);
+    set_text("view-perf", &s.perf.view_line());
+}
+
 #[derive(Deserialize)]
 struct MapBoundsResponse {
     width: i32,
@@ -169,6 +249,9 @@ struct AppState {
     legacy_map: bool,
     default_worlds_root: Option<String>,
     path_touched: bool,
+    /// Step 0 perf samples (perf-100k--measurement-hooks).
+    perf: PerfMetrics,
+    perf_timers: PerfTimers,
 }
 
 #[wasm_bindgen(start)]
@@ -201,6 +284,8 @@ pub fn start() {
         legacy_map: false,
         default_worlds_root: None,
         path_touched: false,
+        perf: PerfMetrics::default(),
+        perf_timers: PerfTimers::default(),
     }));
 
     redraw(&state.borrow());
@@ -573,7 +658,7 @@ fn sync_canvas_size() -> (f64, f64) {
     (canvas.width() as f64, canvas.height() as f64)
 }
 
-fn redraw(state: &AppState) {
+fn redraw(state: &AppState) -> usize {
     let (width, height) = sync_canvas_size();
     let ctx = context();
     let bounds = state.map_bounds;
@@ -638,6 +723,7 @@ fn redraw(state: &AppState) {
     draw_preview_boundary(state, &ctx, size, ox, oy);
     set_text("toggle-grid", if state.show_grid { "Cells: On" } else { "Cells: Off" });
     sync_brush_radius_active(state.brush_radius);
+    drawn_cells
 }
 
 fn hydro_fill(elevation: i16) -> &'static str {
@@ -751,6 +837,11 @@ fn refresh_suggested_path(state: &Rc<RefCell<AppState>>) {
 }
 
 async fn load_map(state: Rc<RefCell<AppState>>) {
+    {
+        let mut s = state.borrow_mut();
+        s.perf = PerfMetrics::default();
+        s.perf_timers.open_start = Some(perf_now());
+    }
     if let Ok(resp) = gloo_net::http::Request::get("/api/map").send().await {
         if let Ok(map) = resp.json::<MapResponse>().await {
             let mut state_mut = state.borrow_mut();
@@ -781,24 +872,46 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
         }
     }
     load_elevation(&state).await;
-    redraw(&state.borrow());
+    let redraw_start = perf_now();
+    let drawn = redraw(&state.borrow());
+    let first_redraw_ms = perf_now() - redraw_start;
+    {
+        let mut s = state.borrow_mut();
+        s.perf.first_redraw_ms = Some(first_redraw_ms);
+        s.perf.redraw_ms = Some(first_redraw_ms);
+        s.perf.drawn_cells = Some(drawn);
+        if let Some(t0) = s.perf_timers.open_start.take() {
+            s.perf.open_ms = Some(perf_now() - t0);
+        }
+    }
+    perf_emit(&state.borrow().perf);
 }
 
 /// Fetch the dense elevation layer (scale-layers, D-46) and index its concrete
 /// integer values by `(q,r)`; unpainted cells stay default land at draw time.
 async fn load_elevation(state: &Rc<RefCell<AppState>>) {
+    let fetch_start = perf_now();
     let Ok(resp) = gloo_net::http::Request::get("/api/layers/elevation").send().await else { return };
+    let fetch_ms = perf_now() - fetch_start;
+    let parse_start = perf_now();
     let Ok(layer) = resp.json::<DenseLayer>().await else { return };
-    let mut state_mut = state.borrow_mut();
-    let bounds = state_mut.map_bounds;
-    state_mut.elevation.clear();
+    let parse_ms = perf_now() - parse_start;
+    let mirror_start = perf_now();
+    let bounds = state.borrow().map_bounds;
+    let mut elevation = HashMap::new();
     for index in 0..layer.len() {
         if let DenseState::Value(LayerValue::Int(v)) = layer.state(index) {
             if let Some(cell) = bounds.from_index(index) {
-                state_mut.elevation.insert((cell.q, cell.r), v as i16);
+                elevation.insert((cell.q, cell.r), v as i16);
             }
         }
     }
+    let mirror_ms = perf_now() - mirror_start;
+    let mut state_mut = state.borrow_mut();
+    state_mut.elevation = elevation;
+    state_mut.perf.layer_fetch_ms = Some(fetch_ms);
+    state_mut.perf.layer_parse_or_decode_ms = Some(parse_ms);
+    state_mut.perf.client_mirror_ms = Some(mirror_ms);
 }
 
 fn cell_from_mouse_event(state: &Rc<RefCell<AppState>>, event: &web_sys::MouseEvent) -> Option<(i32, i32)> {
@@ -834,9 +947,9 @@ fn queue_paint_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), new_eleva
             s.elevation.insert((*q, *r), new_elevation);
             s.pending_paints.insert((*q, *r), new_elevation);
         }
-        redraw(&s);
         painted
     };
+    redraw_and_sample(&state);
     if !painted_cells.is_empty() {
         set_text("status", "Autosave pending…");
         schedule_paint_flush(state);
@@ -874,6 +987,7 @@ async fn flush_pending_paints(state: Rc<RefCell<AppState>>) {
     };
 
     let mut failed_cells: Vec<((i32, i32), i16)> = Vec::new();
+    let mut measured_batch = false;
     // save-batch--http-endpoint-v1: send chunked batch writes.
     for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
         let payload = chunk
@@ -885,12 +999,16 @@ async fn flush_pending_paints(state: Rc<RefCell<AppState>>) {
                 value: *elevation,
             })
             .collect::<Vec<_>>();
+        let batch_start = perf_now();
         let sent = gloo_net::http::Request::put("/api/layers/elevation/batch")
             .json(&payload)
             .expect("serializing elevation batch body")
             .send()
             .await;
-        if !matches!(sent, Ok(resp) if resp.ok()) {
+        if matches!(sent, Ok(resp) if resp.ok()) {
+            state.borrow_mut().perf.batch_flush_ms = Some(perf_now() - batch_start);
+            measured_batch = true;
+        } else {
             failed_cells.extend(chunk.iter().copied());
         }
     }
@@ -901,6 +1019,10 @@ async fn flush_pending_paints(state: Rc<RefCell<AppState>>) {
             s.pending_paints.insert((q, r), value);
         }
         s.paint_flush_in_flight = false;
+    }
+
+    if measured_batch {
+        perf_emit(&state.borrow().perf);
     }
 
     if !state.borrow().pending_paints.is_empty() {
@@ -990,7 +1112,7 @@ fn attach_pan_drag(state: Rc<RefCell<AppState>>) {
             }
         }
         if redraw_now {
-            redraw(&move_state.borrow());
+            redraw_and_sample(&move_state);
         }
     });
     let _ = window().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
@@ -1112,7 +1234,7 @@ fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
             }
         };
         if changed {
-            redraw(&move_state.borrow());
+            redraw_and_sample(&move_state);
         }
     });
     let _ = canvas().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
@@ -1130,7 +1252,7 @@ fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
             }
         };
         if changed {
-            redraw(&leave_state.borrow());
+            redraw_and_sample(&leave_state);
         }
     });
     let _ = canvas().add_event_listener_with_callback("mouseleave", on_leave.as_ref().unchecked_ref());
@@ -1174,7 +1296,7 @@ fn attach_wheel_zoom(state: Rc<RefCell<AppState>>) {
         s.pan_x = new_ox - base_ox;
         s.pan_y = new_oy - base_oy;
         drop(s);
-        redraw(&state.borrow());
+        redraw_and_sample(&state);
     });
     let _ = canvas().add_event_listener_with_callback("wheel", closure.as_ref().unchecked_ref());
     closure.forget();
@@ -1232,7 +1354,7 @@ fn attach_save_click(state: Rc<RefCell<AppState>>) {
             match sent {
                 Ok(resp) if resp.ok() => {
                     state.borrow_mut().cells.insert((q, r), display_name);
-                    redraw(&state.borrow());
+                    redraw_and_sample(&state);
                     set_text("status", "Saved.");
                 }
                 _ => set_text("status", "Save failed."),
@@ -1252,7 +1374,7 @@ fn attach_close_click(state: Rc<RefCell<AppState>>) {
         state.borrow_mut().selected = None;
         set_drawer_open(false);
         clear_inspect_selection();
-        redraw(&state.borrow());
+        redraw_and_sample(&state);
     });
     document()
         .get_element_by_id("close")
@@ -1437,7 +1559,7 @@ fn attach_generate_click(state: Rc<RefCell<AppState>>) {
 /// fit-to-window). Cheap — one redraw per resize event.
 fn attach_window_resize(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
-        redraw(&state.borrow());
+        redraw_and_sample(&state);
     });
     let _ = window().add_event_listener_with_callback("resize", closure.as_ref().unchecked_ref());
     closure.forget();
@@ -1482,7 +1604,7 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                     s.show_grid
                 };
                 button.set_text_content(Some(if show_grid { "Cells: On" } else { "Cells: Off" }));
-                redraw(&state.borrow());
+                redraw_and_sample(&state);
             }
             return;
         }

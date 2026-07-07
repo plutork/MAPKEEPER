@@ -40,4 +40,5 @@ features = [
     "DomTokenList",
     "Node",
     "NodeList",
+    "Performance",
 ]
