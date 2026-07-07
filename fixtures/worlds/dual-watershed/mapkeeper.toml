@@ -1,0 +1,6 @@
+# mapkeeper fixture world (river dogfood)
+
+[world]
+id = "fixture-dual-watershed"
+name = "fixture-dual-watershed"
+version = "0.1.0"

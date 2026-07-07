@@ -1,0 +1,6 @@
+# mapkeeper fixture world (river dogfood)
+
+[world]
+id = "fixture-mountain-ridge"
+name = "fixture-mountain-ridge"
+version = "0.1.0"

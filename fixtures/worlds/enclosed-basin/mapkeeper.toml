@@ -1,0 +1,6 @@
+# mapkeeper fixture world (river dogfood)
+
+[world]
+id = "fixture-enclosed-basin"
+name = "fixture-enclosed-basin"
+version = "0.1.0"

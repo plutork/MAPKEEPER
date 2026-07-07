@@ -15,3 +15,9 @@ the repo root). The CLI query path itself (`init`/`profile set`/`get`/`list`,
 plus `terrain set`/`get`) is covered separately by
 `crates/cli/tests/query_flow.rs` (`cargo test`). Both run in CI:
 `.github/workflows/ci.yml`.
+
+## River dogfood worlds
+
+`worlds/` — five Small elevation presets for river layer dogfood (see
+`worlds/README.md`). Regenerate via `worlds/generate_fixture_worlds.py`.
+Validated by `validate_schema.py` alongside schema fixtures.

@@ -1,0 +1,6 @@
+# mapkeeper fixture world (river dogfood)
+
+[world]
+id = "fixture-coastal-slope"
+name = "fixture-coastal-slope"
+version = "0.1.0"

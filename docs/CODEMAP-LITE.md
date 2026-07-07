@@ -25,6 +25,7 @@ Use this first, then open only the needed files.
 - Canvas LOD: adaptive grid stroke + profile marker zoom cutoff -> `crates/web/src/lib.rs` (`perf-100k--canvas-lod-grid-markers`, **D-51** grid lines seamless: `FILL_SCALE_GRID_ON/OFF`, rename toggle)
 - Desktop shell (Tauri wrapper, native dialog bridge) -> `crates/desktop/src/`
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
+- River dogfood fixture worlds (Small elevation presets) -> `fixtures/worlds/` (`river-dogfood-fixture-worlds`)
 - World scaffold source -> `toolchain/template/world/`
 - CI/build behavior -> `.github/workflows/`
 
