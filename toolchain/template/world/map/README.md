@@ -20,10 +20,15 @@ live in `profiles/` (which is *not* a layer). Both are anchored by the same
 - Hydro (`land`/`water`) is derived from elevation threshold:
   `elevation <= 0` => water, `elevation > 0` => land.
 
-Layer files are created on first paint (the editor writes them sized to the map
-bounds), so a brand-new world has no `layers/*.json` yet. More layers (rivers,
-regions, routes, settlements) come later; each is additive and anchored by
-`cell_id`.
+**New worlds start as ocean:** create/init writes a dense `elevation` layer
+with every cell at `0` (sea level), sized to the map bounds. You paint islands
+with Raise/Lower or Land presets in the editor.
+
+Older worlds without an elevation file still resolve unknown cells as land
+(`DEFAULT_LAND_ELEVATION=1`) until painted or recreated.
+
+More layers (rivers, regions, routes, settlements) come later; each is additive
+and anchored by `cell_id`.
 
 ## On-disk shape (dense) + partial state
 

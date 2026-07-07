@@ -8,14 +8,20 @@
 //! placeholder profile (title + notes) -> save -> cell is "painted". No
 //! real cell schema (roadmap 3.2) yet — that is the point of this pass.
 
+mod elevation_view;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use elevation_view::{
+    draw_elevation_label, draw_mountain_glyph, labels_status_label, overlays_lod_ok, peaks_status_label,
+    set_fill_rgb, ColorMode, MOUNTAIN_THRESHOLD,
+};
 use gloo_timers::future::TimeoutFuture;
 use mapkeeper_core::hex::{Axial, MapBounds};
-use mapkeeper_core::hydro::{hydro_from_elevation, HydroKind};
+use mapkeeper_core::hydro::{hydro_from_elevation, stamp_delta, HydroKind};
 use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
 use mapkeeper_core::map_preset::MapPreset;
 use mapkeeper_core::profile::CellProfile;
@@ -48,16 +54,16 @@ fn fresh_elevation_layer(bounds: MapBounds) -> DenseLayer {
     DenseLayer::new_integer("elevation", bounds.len())
 }
 
-fn elevation_at(layer: &DenseLayer, bounds: MapBounds, q: i32, r: i32) -> i16 {
+fn elevation_at(layer: &DenseLayer, bounds: MapBounds, q: i32, r: i32) -> i32 {
     let index = bounds
         .index_of(Axial::new(q, r))
         .unwrap_or(0);
-    layer.int_or(index, DEFAULT_LAND_ELEVATION) as i16
+    layer.int_or(index, DEFAULT_LAND_ELEVATION)
 }
 
-fn set_elevation_cell(layer: &mut DenseLayer, bounds: MapBounds, q: i32, r: i32, value: i16) {
+fn set_elevation_cell(layer: &mut DenseLayer, bounds: MapBounds, q: i32, r: i32, value: i32) {
     if let Some(index) = bounds.index_of(Axial::new(q, r)) {
-        layer.set(index, DenseState::Value(LayerValue::Int(value as i32)));
+        layer.set(index, DenseState::Value(LayerValue::Int(value)));
     }
 }
 
@@ -187,6 +193,9 @@ struct DrawSnapshot {
     selected: Option<(i32, i32)>,
     show_grid: bool,
     hover_cell: Option<(i32, i32)>,
+    color_mode: ColorMode,
+    show_elevation_labels: bool,
+    show_peaks: bool,
     content_rev: u64,
 }
 
@@ -198,6 +207,9 @@ fn draw_snapshot(s: &AppState) -> DrawSnapshot {
         selected: s.selected,
         show_grid: s.show_grid,
         hover_cell: s.hover_cell,
+        color_mode: s.color_mode,
+        show_elevation_labels: s.show_elevation_labels,
+        show_peaks: s.show_peaks,
         content_rev: s.content_rev,
     }
 }
@@ -335,7 +347,7 @@ struct LayerCellWrite {
     q: i32,
     r: i32,
     state: &'static str,
-    value: i16,
+    value: i32,
 }
 
 /// Active editing tool. `Inspect` keeps the old click→profile behavior; the
@@ -345,6 +357,8 @@ enum Brush {
     Inspect,
     SetLand,
     SetWater,
+    Raise,
+    Lower,
 }
 
 struct AppState {
@@ -372,8 +386,15 @@ struct AppState {
     paint_last_cell: Option<(i32, i32)>,
     /// Brush radius in hex cells (0 = single cell).
     brush_radius: i32,
+    /// Raise/Lower step magnitude (1, 5, or 10).
+    brush_step: i32,
+    /// Even falloff vs hill gradient for Raise/Lower.
+    falloff_even: bool,
+    color_mode: ColorMode,
+    show_elevation_labels: bool,
+    show_peaks: bool,
     /// Local paint writes not yet persisted to server.
-    pending_paints: HashMap<(i32, i32), i16>,
+    pending_paints: HashMap<(i32, i32), i32>,
     paint_flush_scheduled: bool,
     paint_flush_in_flight: bool,
     hover_cell: Option<(i32, i32)>,
@@ -415,6 +436,11 @@ pub fn start() {
         paint_moved: false,
         paint_last_cell: None,
         brush_radius: 0,
+        brush_step: 1,
+        falloff_even: true,
+        color_mode: ColorMode::Hydro,
+        show_elevation_labels: false,
+        show_peaks: false,
         pending_paints: HashMap::new(),
         paint_flush_scheduled: false,
         paint_flush_in_flight: false,
@@ -584,6 +610,8 @@ fn sync_brush_swatch_active(brush: &Brush) {
         Brush::Inspect => return,
         Brush::SetLand => "land".to_string(),
         Brush::SetWater => "water".to_string(),
+        Brush::Raise => "raise".to_string(),
+        Brush::Lower => "lower".to_string(),
     };
     if let Some(drawer) = document().get_element_by_id("dock-drawer") {
         if let Ok(Some(button)) = drawer.query_selector(&format!("[data-brush=\"{kind}\"]")) {
@@ -816,6 +844,12 @@ fn redraw(state: &AppState) -> usize {
     let visible_cells = count_visible_in_bounds(q_min, q_max, r_min, r_max, bounds);
     let stroke_grid = stroke_grid_enabled(state.show_grid, visible_cells);
     let draw_profile_dots = show_profile_markers(state.zoom);
+    let overlay_lod = overlays_lod_ok(visible_cells, state.zoom);
+    let draw_labels = state.show_elevation_labels && overlay_lod;
+    let draw_peaks = state.show_peaks
+        && state.color_mode == ColorMode::Elevation
+        && overlay_lod;
+    let mut color_buf = String::with_capacity(20);
     let mut drawn_cells = 0usize;
     for q in q_min..=q_max {
         for r in r_min..=r_max {
@@ -836,13 +870,30 @@ fn redraw(state: &AppState) -> usize {
 
             let selected = state.selected == Some((q, r));
             let elevation = elevation_at(&state.elevation, bounds, q, r);
-            // Fill = hydro projection derived from elevation threshold.
-            ctx.set_fill_style_str(hydro_fill(elevation));
+            match state.color_mode {
+                ColorMode::Hydro => {
+                    ctx.set_fill_style_str(hydro_fill(elevation));
+                }
+                ColorMode::Elevation => {
+                    set_fill_rgb(
+                        &ctx,
+                        elevation_view::elevation_fill_rgb(elevation),
+                        &mut color_buf,
+                    );
+                }
+            }
             ctx.fill();
             if selected || stroke_grid {
                 ctx.set_line_width(if selected { 3.0 } else { 1.0 });
                 ctx.set_stroke_style_str(if selected { "#9fe3c4" } else { "#3a424b" });
                 ctx.stroke();
+            }
+
+            if draw_peaks && elevation > MOUNTAIN_THRESHOLD {
+                draw_mountain_glyph(&ctx, cx, cy, size);
+            }
+            if draw_labels {
+                draw_elevation_label(&ctx, cx, cy, size, elevation);
             }
 
             // Profile-presence marker — a separate layer from terrain, so both
@@ -857,23 +908,63 @@ fn redraw(state: &AppState) -> usize {
             drawn_cells += 1;
         }
     }
+    let hover_elev = state.hover_cell.map(|(q, r)| {
+        elevation_at(&state.elevation, bounds, q, r)
+    });
+    let hover_note = hover_elev
+        .map(|e| format!(" · Hover elev {e}"))
+        .unwrap_or_default();
     set_text(
         "view-stats",
         &format!(
-            "Zoom {:.2}x · Draw {} / {} cells · Grid {}",
+            "Zoom {:.2}x · Draw {} / {} cells · Grid {} · {} · {}{}",
             state.zoom,
             drawn_cells,
             bounds.len(),
             grid_status_label(state.show_grid, visible_cells),
+            labels_status_label(state.show_elevation_labels, visible_cells, state.zoom),
+            peaks_status_label(
+                state.show_peaks,
+                state.color_mode,
+                visible_cells,
+                state.zoom,
+            ),
+            hover_note,
         ),
     );
     draw_preview_boundary(state, &ctx, size, ox, oy);
     set_text("toggle-grid", if state.show_grid { "Cells: On" } else { "Cells: Off" });
+    set_text(
+        "toggle-color-mode",
+        if state.color_mode == ColorMode::Elevation {
+            "Color: Elevation"
+        } else {
+            "Color: Hydro"
+        },
+    );
+    set_text(
+        "toggle-elevation-labels",
+        if state.show_elevation_labels {
+            "Show elevation: On"
+        } else {
+            "Show elevation: Off"
+        },
+    );
+    set_text(
+        "toggle-peaks",
+        if state.show_peaks {
+            "Peaks: On"
+        } else {
+            "Peaks: Off"
+        },
+    );
     sync_brush_radius_active(state.brush_radius);
+    sync_falloff_active(state.falloff_even, state.brush_radius);
+    sync_brush_step_active(state.brush_step);
     drawn_cells
 }
 
-fn hydro_fill(elevation: i16) -> &'static str {
+fn hydro_fill(elevation: i32) -> &'static str {
     match hydro_from_elevation(elevation) {
         HydroKind::Land => "#6a7b43",
         HydroKind::Water => "#2e5f8a",
@@ -1086,7 +1177,7 @@ fn paint_stamp_cells(center: (i32, i32), brush_radius: i32, map_bounds: MapBound
         .collect()
 }
 
-fn queue_paint_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), new_elevation: i16) {
+fn queue_paint_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), new_elevation: i32) {
     let painted_cells = {
         let mut s = state.borrow_mut();
         let map_bounds = s.map_bounds;
@@ -1100,6 +1191,41 @@ fn queue_paint_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), new_eleva
     };
     schedule_redraw(state.clone());
     if !painted_cells.is_empty() {
+        set_text("status", "Autosave pending…");
+        schedule_paint_flush(state);
+    }
+}
+
+/// elevation-authoring-v2: raise/lower with optional hill falloff.
+fn queue_paint_delta_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), step_sign: i32) {
+    let painted_cells = {
+        let mut s = state.borrow_mut();
+        let map_bounds = s.map_bounds;
+        let brush_radius = s.brush_radius;
+        let step = s.brush_step;
+        let even = s.falloff_even || brush_radius == 0;
+        let center_axial = Axial::new(center.0, center.1);
+        let painted = paint_stamp_cells(center, brush_radius, map_bounds);
+        let mut changed = 0usize;
+        for (q, r) in &painted {
+            let distance = center_axial.distance(Axial::new(*q, *r));
+            let delta = stamp_delta(step * step_sign, distance, brush_radius, even);
+            if delta == 0 {
+                continue;
+            }
+            let current = elevation_at(&s.elevation, map_bounds, *q, *r);
+            let new_elevation = current + delta;
+            set_elevation_cell(&mut s.elevation, map_bounds, *q, *r, new_elevation);
+            s.pending_paints.insert((*q, *r), new_elevation);
+            changed += 1;
+        }
+        if changed > 0 {
+            bump_content_rev(&mut s);
+        }
+        changed
+    };
+    schedule_redraw(state.clone());
+    if painted_cells > 0 {
         set_text("status", "Autosave pending…");
         schedule_paint_flush(state);
     }
@@ -1135,7 +1261,7 @@ async fn flush_pending_paints(state: Rc<RefCell<AppState>>) {
         s.pending_paints.drain().collect::<Vec<_>>()
     };
 
-    let mut failed_cells: Vec<((i32, i32), i16)> = Vec::new();
+    let mut failed_cells: Vec<((i32, i32), i32)> = Vec::new();
     let mut measured_batch = false;
     // save-batch--http-endpoint-v1: send chunked batch writes.
     for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
@@ -1193,8 +1319,12 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
         // Hydro brush paints elevation-driven hydro; Inspect opens the
         // author profile panel (unchanged behavior).
         let brush = state.borrow().brush.clone();
-        if let Some(new_elevation) = brush_elevation(&brush) {
+        if let Some(new_elevation) = brush_absolute_elevation(&brush) {
             queue_paint_stamp(state.clone(), (q, r), new_elevation);
+            return;
+        }
+        if let Some(step_sign) = brush_delta_sign(&brush) {
+            queue_paint_delta_stamp(state.clone(), (q, r), step_sign);
             return;
         }
 
@@ -1298,15 +1428,27 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
             return;
         }
         let brush = down_state.borrow().brush.clone();
-        let Some(elevation) = brush_elevation(&brush) else { return };
-        let Some((q, r)) = cell_from_mouse_event(&down_state, &event) else { return };
-        {
-            let mut s = down_state.borrow_mut();
-            s.paint_active = true;
-            s.paint_moved = false;
-            s.paint_last_cell = Some((q, r));
+        if let Some(elevation) = brush_absolute_elevation(&brush) {
+            let Some((q, r)) = cell_from_mouse_event(&down_state, &event) else { return };
+            {
+                let mut s = down_state.borrow_mut();
+                s.paint_active = true;
+                s.paint_moved = false;
+                s.paint_last_cell = Some((q, r));
+            }
+            queue_paint_stamp(down_state.clone(), (q, r), elevation);
+            return;
         }
-        queue_paint_stamp(down_state.clone(), (q, r), elevation);
+        if let Some(step_sign) = brush_delta_sign(&brush) {
+            let Some((q, r)) = cell_from_mouse_event(&down_state, &event) else { return };
+            {
+                let mut s = down_state.borrow_mut();
+                s.paint_active = true;
+                s.paint_moved = false;
+                s.paint_last_cell = Some((q, r));
+            }
+            queue_paint_delta_stamp(down_state.clone(), (q, r), step_sign);
+        }
     });
     let _ = canvas().add_event_listener_with_callback("mousedown", on_down.as_ref().unchecked_ref());
     on_down.forget();
@@ -1317,7 +1459,6 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
             return;
         }
         let brush = move_state.borrow().brush.clone();
-        let Some(elevation) = brush_elevation(&brush) else { return };
         let Some((q, r)) = cell_from_mouse_event(&move_state, &event) else { return };
         let should_paint = {
             let mut s = move_state.borrow_mut();
@@ -1328,12 +1469,17 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
                 true
             }
         };
-        if should_paint {
-            // Keep path faithful to real cursor movement: no straight-line
-            // interpolation between sparse samples.
-            queue_paint_stamp(move_state.clone(), (q, r), elevation);
-            move_state.borrow_mut().paint_last_cell = Some((q, r));
+        if !should_paint {
+            return;
         }
+        if let Some(elevation) = brush_absolute_elevation(&brush) {
+            queue_paint_stamp(move_state.clone(), (q, r), elevation);
+        } else if let Some(step_sign) = brush_delta_sign(&brush) {
+            queue_paint_delta_stamp(move_state.clone(), (q, r), step_sign);
+        } else {
+            return;
+        }
+        move_state.borrow_mut().paint_last_cell = Some((q, r));
     });
     let _ = window().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
     on_move.forget();
@@ -1368,10 +1514,10 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
 fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
     let move_state = state.clone();
     let on_move = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        let next_hover = if matches!(move_state.borrow().brush, Brush::Inspect) {
-            None
-        } else {
+        let next_hover = if brush_paints(&move_state.borrow().brush) {
             cell_from_mouse_event(&move_state, &event)
+        } else {
+            None
         };
         let changed = {
             let mut s = move_state.borrow_mut();
@@ -1734,13 +1880,84 @@ fn attach_new_path_input(state: Rc<RefCell<AppState>>) {
     closure.forget();
 }
 
-/// Map a brush to target elevation. `Inspect` writes nothing.
-fn brush_elevation(brush: &Brush) -> Option<i16> {
+fn sync_brush_step_active(step: i32) {
+    if let Some(drawer) = document().get_element_by_id("dock-drawer") {
+        if let Ok(items) = drawer.query_selector_all("[data-brush-step]") {
+            for i in 0..items.length() {
+                if let Some(node) = items.item(i) {
+                    if let Ok(el) = node.dyn_into::<Element>() {
+                        let is_active = el
+                            .get_attribute("data-brush-step")
+                            .and_then(|v| v.parse::<i32>().ok())
+                            .map(|v| v == step)
+                            .unwrap_or(false);
+                        if is_active {
+                            let _ = el.class_list().add_1("active");
+                        } else {
+                            let _ = el.class_list().remove_1("active");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn sync_falloff_active(falloff_even: bool, brush_radius: i32) {
+    let hill_enabled = brush_radius > 0;
+    if let Some(drawer) = document().get_element_by_id("dock-drawer") {
+        if let Ok(items) = drawer.query_selector_all("[data-falloff]") {
+            for i in 0..items.length() {
+                if let Some(node) = items.item(i) {
+                    if let Ok(el) = node.dyn_into::<Element>() {
+                        let mode = el.get_attribute("data-falloff").unwrap_or_default();
+                        let is_hill = mode == "hill";
+                        if is_hill && !hill_enabled {
+                            let _ = el.class_list().add_1("disabled");
+                            let _ = el.set_attribute("disabled", "");
+                        } else {
+                            let _ = el.class_list().remove_1("disabled");
+                            let _ = el.remove_attribute("disabled");
+                        }
+                        let is_active = (mode == "even" && falloff_even)
+                            || (mode == "hill" && !falloff_even && hill_enabled);
+                        if is_active {
+                            let _ = el.class_list().add_1("active");
+                        } else {
+                            let _ = el.class_list().remove_1("active");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn apply_elevation_brush_intent(s: &mut AppState) {
+    s.color_mode = ColorMode::Elevation;
+    s.show_elevation_labels = true;
+    s.show_peaks = true;
+}
+
+/// Map a brush to absolute target elevation. `Inspect` / Raise / Lower write nothing here.
+fn brush_absolute_elevation(brush: &Brush) -> Option<i32> {
     match brush {
-        Brush::Inspect => None,
+        Brush::Inspect | Brush::Raise | Brush::Lower => None,
         Brush::SetLand => Some(1),
         Brush::SetWater => Some(0),
     }
+}
+
+fn brush_delta_sign(brush: &Brush) -> Option<i32> {
+    match brush {
+        Brush::Raise => Some(1),
+        Brush::Lower => Some(-1),
+        _ => None,
+    }
+}
+
+fn brush_paints(brush: &Brush) -> bool {
+    !matches!(brush, Brush::Inspect)
 }
 
 /// Tool dock: rail tabs toggle drawers; hydro swatches set the active brush.
@@ -1750,15 +1967,64 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
 
         if let Ok(Some(button)) = target.closest("[data-view-toggle]") {
             let Some(kind) = button.get_attribute("data-view-toggle") else { return };
-            if kind == "grid" {
-                let show_grid = {
+            match kind.as_str() {
+                "grid" => {
+                    let show_grid = {
+                        let mut s = state.borrow_mut();
+                        s.show_grid = !s.show_grid;
+                        s.show_grid
+                    };
+                    button.set_text_content(Some(if show_grid { "Cells: On" } else { "Cells: Off" }));
+                    schedule_redraw(state.clone());
+                }
+                "color-mode" => {
                     let mut s = state.borrow_mut();
-                    s.show_grid = !s.show_grid;
-                    s.show_grid
-                };
-                button.set_text_content(Some(if show_grid { "Cells: On" } else { "Cells: Off" }));
-                schedule_redraw(state.clone());
+                    s.color_mode = if s.color_mode == ColorMode::Hydro {
+                        ColorMode::Elevation
+                    } else {
+                        ColorMode::Hydro
+                    };
+                    if s.color_mode == ColorMode::Elevation {
+                        s.show_peaks = true;
+                    }
+                    drop(s);
+                    schedule_redraw(state.clone());
+                }
+                "elevation-labels" => {
+                    state.borrow_mut().show_elevation_labels =
+                        !state.borrow().show_elevation_labels;
+                    schedule_redraw(state.clone());
+                }
+                "peaks" => {
+                    state.borrow_mut().show_peaks = !state.borrow().show_peaks;
+                    schedule_redraw(state.clone());
+                }
+                _ => {}
             }
+            return;
+        }
+
+        if let Ok(Some(button)) = target.closest("[data-brush-step]") {
+            let Some(raw) = button.get_attribute("data-brush-step") else { return };
+            let Ok(step) = raw.parse::<i32>() else { return };
+            if [1, 5, 10].contains(&step) {
+                state.borrow_mut().brush_step = step;
+                sync_brush_step_active(step);
+            }
+            return;
+        }
+
+        if let Ok(Some(button)) = target.closest("[data-falloff]") {
+            if button.has_attribute("disabled") {
+                return;
+            }
+            let Some(mode) = button.get_attribute("data-falloff") else { return };
+            let even = mode != "hill";
+            if state.borrow().brush_radius == 0 && !even {
+                return;
+            }
+            state.borrow_mut().falloff_even = even;
+            sync_falloff_active(even, state.borrow().brush_radius);
             return;
         }
 
@@ -1768,8 +2034,12 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
             {
                 let mut s = state.borrow_mut();
                 s.brush_radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
+                if s.brush_radius == 0 {
+                    s.falloff_even = true;
+                }
             }
             sync_brush_radius_active(state.borrow().brush_radius);
+            sync_falloff_active(state.borrow().falloff_even, state.borrow().brush_radius);
             return;
         }
 
@@ -1799,11 +2069,16 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
         let brush = match kind.as_str() {
             "land" => Brush::SetLand,
             "water" => Brush::SetWater,
+            "raise" => Brush::Raise,
+            "lower" => Brush::Lower,
             _ => return,
         };
         {
             let mut s = state.borrow_mut();
             s.brush = brush.clone();
+            if matches!(brush, Brush::Raise | Brush::Lower) {
+                apply_elevation_brush_intent(&mut s);
+            }
             s.hover_cell = None;
             s.paint_active = false;
             s.paint_moved = false;
@@ -1813,6 +2088,11 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
         open_dock_tab("terrain");
         sync_dock_rail_for_brush(&brush);
         sync_brush_swatch_active(&brush);
+        if matches!(brush, Brush::Raise | Brush::Lower) {
+            sync_falloff_active(state.borrow().falloff_even, state.borrow().brush_radius);
+            sync_brush_step_active(state.borrow().brush_step);
+            schedule_redraw(state.clone());
+        }
     });
     document()
         .get_element_by_id("tool-dock")

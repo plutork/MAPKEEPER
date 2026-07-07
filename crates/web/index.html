@@ -139,7 +139,13 @@
   .swatch.active { border-color: #9fe3c4; color: #eafff5; }
   .swatch .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
   .swatch-row { display: flex; gap: 6px; margin-top: 4px; }
-  .swatch-row .swatch { flex: 1; text-align: center; }
+  .swatch.disabled { opacity: 0.45; pointer-events: none; }
+  .legend-bar {
+    height: 12px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #1e5a8a 0%, #5a9a50 20%, #d4c832 55%, #dc3c28 100%);
+    border: 1px solid #3a3f47;
+  }
 
   .view { display: none; width: 100%; }
   .view.active { display: block; }
@@ -351,12 +357,12 @@
   <div id="editor" class="view">
     <div class="map-wrap">
       <canvas id="map" width="720" height="560"></canvas>
-      <div id="hint">mapkeeper — LMB drag pan, wheel zoom, tool dock on the right (Inspect names cells; Hydro paints land/water)</div>
+      <div id="hint">mapkeeper — LMB drag pan, wheel zoom, tool dock on the right (Inspect names cells; Terrain paints elevation)</div>
     </div>
     <aside id="tool-dock">
       <nav id="dock-rail" aria-label="Tools">
         <button class="dock-btn active tool-active" data-dock="inspect" type="button" title="Inspect">&#128269;</button>
-        <button class="dock-btn" data-dock="terrain" type="button" title="Hydro">&#9998;</button>
+        <button class="dock-btn" data-dock="terrain" type="button" title="Terrain">&#9998;</button>
         <button class="dock-btn" data-dock="view" type="button" title="View">&#128065;</button>
         <button class="dock-btn" data-dock="world" type="button" title="World">&#127968;</button>
       </nav>
@@ -376,11 +382,19 @@
           <div id="status"></div>
         </div>
         <div class="drawer-pane" data-drawer="terrain">
-          <p class="pane-label">Hydro</p>
-          <p class="dock-note">Physics-first step: paint Land/Water. Land-type controls are temporarily hidden.</p>
-          <div class="swatch-row">
+          <p class="pane-label">Terrain</p>
+          <p class="dock-note">Paint elevation: presets, raise/lower, or inspect cell names.</p>
+          <div class="swatch-grid">
             <button class="swatch" data-brush="land" type="button"><span class="dot" style="background:#6a7b43"></span>Land</button>
             <button class="swatch" data-brush="water" type="button"><span class="dot" style="background:#2e5f8a"></span>Water</button>
+            <button class="swatch" data-brush="raise" type="button"><span class="dot" style="background:#8b7355"></span>Raise</button>
+            <button class="swatch" data-brush="lower" type="button"><span class="dot" style="background:#4a6a8a"></span>Lower</button>
+          </div>
+          <p class="pane-label">Step (raise/lower)</p>
+          <div class="swatch-row">
+            <button class="swatch active" data-brush-step="1" type="button">1</button>
+            <button class="swatch" data-brush-step="5" type="button">5</button>
+            <button class="swatch" data-brush-step="10" type="button">10</button>
           </div>
           <p class="pane-label">Brush size</p>
           <div class="swatch-row">
@@ -389,7 +403,12 @@
             <button class="swatch" data-brush-size="2" type="button">3x</button>
             <button class="swatch" data-brush-size="3" type="button">4x</button>
           </div>
-          <p class="dock-note">Current: <span id="brush-size-value">1</span>x. Tip: zoom out and use 2x/3x for fast terrain blocking.</p>
+          <p class="pane-label">Falloff (raise/lower, 2x–4x)</p>
+          <div class="swatch-row">
+            <button class="swatch active" data-falloff="even" type="button">Even</button>
+            <button class="swatch" data-falloff="hill" type="button">Hill</button>
+          </div>
+          <p class="dock-note">Current: <span id="brush-size-value">1</span>x. Raise/Lower auto-switch to Elevation view.</p>
           <p class="dock-note">Autosave writes on a short cooldown and flushes on mouse release.</p>
         </div>
         <div class="drawer-pane" data-drawer="view">
@@ -397,7 +416,13 @@
           <p id="view-stats" class="dock-note">Zoom 1.00x · Draw 0 / 0 cells</p>
           <p id="view-perf" class="dock-note">Perf: —</p>
           <p class="dock-note">LMB drag pans the camera. Mouse wheel zooms (0.6x–2.5x).</p>
+          <button id="toggle-color-mode" class="swatch" data-view-toggle="color-mode" type="button">Color: Hydro</button>
           <button id="toggle-grid" class="swatch" data-view-toggle="grid" type="button">Cells: On</button>
+          <button id="toggle-elevation-labels" class="swatch" data-view-toggle="elevation-labels" type="button">Show elevation: Off</button>
+          <button id="toggle-peaks" class="swatch" data-view-toggle="peaks" type="button">Peaks: Off</button>
+          <p class="pane-label">Elevation legend</p>
+          <div class="legend-bar" title="Water blues → land green → yellow → red (cap 100); peaks ≥75"></div>
+          <p class="dock-note">Sea level 0 · land tint 1–100 · peaks when elev &gt; 75. Overlays LOD: ≤2000 visible or zoom ≥1.6.</p>
           <p class="dock-note">Cells toggle stays on; grid strokes auto-hide when many cells are visible (LOD).</p>
         </div>
         <div class="drawer-pane" data-drawer="world">

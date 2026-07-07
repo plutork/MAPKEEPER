@@ -13,7 +13,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::hex::{Axial, MapBounds};
-use mapkeeper_core::hydro::{hydro_from_elevation, DEFAULT_LAND_ELEVATION, ELEVATION_LAYER_ID};
+use mapkeeper_core::hydro::{filled_elevation_layer, hydro_from_elevation, DEFAULT_LAND_ELEVATION, ELEVATION_LAYER_ID, OCEAN_ELEVATION};
 use mapkeeper_core::layer::{
     Bounds, DenseLayer, DenseState, LayerValue, MapManifest, ValueType, TERRAIN_LAYER_ID,
 };
@@ -147,7 +147,7 @@ enum ElevationAction {
         #[arg(long, default_value = ".")]
         world: PathBuf,
         #[arg(long)]
-        value: i16,
+        value: i32,
     },
     /// Reset cell to default land elevation (sparse clear).
     Clear {
@@ -266,6 +266,7 @@ fn cmd_init(args: InitArgs) -> Result<()> {
         })?,
     };
     write_map_manifest(&args.path, preset)?;
+    write_initial_ocean_elevation(&args.path, preset)?;
     fs::write(&manifest, world::manifest_toml(&args.world_id))?;
     println!(
         "Scaffolded world '{}' at {}",
@@ -304,6 +305,14 @@ fn write_map_manifest(world_path: &Path, preset: MapPreset) -> Result<()> {
     }
     fs::write(path, manifest.to_json_pretty()?)?;
     Ok(())
+}
+
+/// elevation-authoring-v2: dense elevation layer filled with ocean level.
+fn write_initial_ocean_elevation(world_path: &Path, preset: MapPreset) -> Result<()> {
+    let (width, height) = preset.dimensions();
+    let bounds = MapBounds::new(width, height);
+    let layer = filled_elevation_layer(&bounds, OCEAN_ELEVATION);
+    write_dense_layer(world_path, &layer)
 }
 
 fn projects_path() -> PathBuf {
@@ -461,11 +470,11 @@ fn read_dense_layer(world: &Path, layer_id: &str, bounds: &MapBounds) -> DenseLa
 }
 
 /// Keep default-land sparse (old semantics): default elevation clears the cell.
-fn set_dense_elevation(dense: &mut DenseLayer, index: usize, elevation: i16) {
+fn set_dense_elevation(dense: &mut DenseLayer, index: usize, elevation: i32) {
     if elevation == DEFAULT_LAND_ELEVATION {
         dense.set(index, DenseState::Unknown);
     } else {
-        dense.set(index, DenseState::Value(LayerValue::Int(elevation as i32)));
+        dense.set(index, DenseState::Value(LayerValue::Int(elevation)));
     }
 }
 
@@ -552,7 +561,7 @@ fn cmd_elevation_get(world: &Path, cell_id: &str) -> Result<()> {
     let bounds = read_bounds(world);
     let index = cell_index(&bounds, cell_id)?;
     let dense = read_elevation_dense(world, &bounds);
-    let elevation = dense.int_or(index, DEFAULT_LAND_ELEVATION as i32) as i16;
+    let elevation = dense.int_or(index, DEFAULT_LAND_ELEVATION);
     let payload = serde_json::json!({
         "cell_id": cell_id,
         "elevation": elevation,
@@ -572,7 +581,7 @@ fn cmd_elevation_list(world: &Path) -> Result<()> {
     print_layer_list(world, &dense, &bounds)
 }
 
-fn cmd_elevation_set(world: &Path, cell_id: &str, value: i16) -> Result<()> {
+fn cmd_elevation_set(world: &Path, cell_id: &str, value: i32) -> Result<()> {
     let bounds = read_bounds(world);
     let index = cell_index(&bounds, cell_id)?;
     let mut dense = read_elevation_dense(world, &bounds);

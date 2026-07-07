@@ -12,12 +12,13 @@ Use this first, then open only the needed files.
 - Map state model (dense layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
 - Cell index (`(q,r) <-> linear index`, `MapBounds::index_of`/`from_index`/`len`) -> `crates/core/src/hex.rs`
 - Dense typed-layer model (index-addressed, palette categorical + integer; `read_or_empty`; generic wire `WireCellState`/`LayerCellWrite`) -> `crates/core/src/layer.rs` (`DenseLayer`)
-- Elevation/hydro threshold model (`elevation <= 0 => water`) -> `crates/core/src/hydro.rs`
+- Elevation/hydro threshold model (`elevation <= 0 => water`) + stamp falloff math -> `crates/core/src/hydro.rs` (`elevation-authoring-v2`: `filled_elevation_layer`, `stamp_delta`)
 - HTTP API, world file I/O, launcher endpoints -> `crates/server/src/`
 - Generic layer endpoints (`GET /api/layers/:id`, `PUT /api/layers/:id/batch`, `PUT /api/layers/:id/cells/:q/:r`) -> `crates/server/src/lib.rs`
+- New-world ocean fill (dense elevation all `0` after bounds) -> `crates/server/src/lib.rs` (`write_map_manifest`), `crates/cli/src/main.rs` (`write_initial_ocean_elevation`)
 - CLI commands and query flow (`profile`, `terrain`, `elevation`, generic `layer <id>`) -> `crates/cli/src/`
-- Dense-on-disk layer I/O (`read_or_empty` + `write_dense_layer`; created on first write) -> `crates/core/src/layer.rs`, `crates/server/src/lib.rs`, `crates/cli/src/main.rs`
-- Web UI (WASM canvas, Home/Editor flow, tool dock + hydro brush; reads dense elevation, paints via generic batch) -> `crates/web/src/`
+- Dense-on-disk layer I/O (`read_or_empty` + `write_dense_layer`) -> `crates/core/src/layer.rs`, `crates/server/src/lib.rs`, `crates/cli/src/main.rs`
+- Web UI (WASM canvas, Home/Editor flow, tool dock + terrain brushes; elevation view palette/labels/peaks in `elevation_view.rs`) -> `crates/web/src/`
 - Perf Step 0 measurement hooks (`open_ms`, layer fetch/parse/mirror, `redraw_ms`, `batch_flush_ms`; `#view-perf` + console) -> `crates/web/src/lib.rs` (`perf-100k--measurement-hooks`)
 - Web dense elevation client (index-addressed `DenseLayer` render cache, no HashMap mirror) -> `crates/web/src/lib.rs` (`perf-100k--web-dense-client`)
 - rAF redraw coalescing (`schedule_redraw`, one draw per animation frame) -> `crates/web/src/lib.rs` (`perf-100k--raf-redraw-coalesce`)
@@ -34,7 +35,7 @@ Use this first, then open only the needed files.
 - Server boundary entry: `crates/server/src/lib.rs`
 - Web boundary entry: `crates/web/src/lib.rs`
 - Home screen layout entry: `crates/web/index.html`
-- Editor tool dock (rail + collapsible drawers: Inspect/profile, Hydro brush with size 1x–4x + hover preview + debounced autosave + batch save PUT, View stub + perf line `#view-perf`, World): `crates/web/index.html`, `crates/web/src/lib.rs` — **overlays** the map (D-39); canvas stable on drawer toggle
+- Editor tool dock (rail + collapsible drawers: Inspect/profile, Terrain brushes Land/Water/Raise/Lower + step/falloff, View color mode + elevation overlays, World): `crates/web/index.html`, `crates/web/src/lib.rs`, `crates/web/src/elevation_view.rs` — **overlays** the map (D-39); canvas stable on drawer toggle
 - Project list actions (`open` / `remove` / `delete`, with secondary manage flow): `crates/web/src/lib.rs`, `crates/server/src/lib.rs`
 - Default create path suggestion (`Documents/MAPKEEPER Worlds`): `crates/server/src/lib.rs`, `crates/web/src/lib.rs`
 - Map bounds at create (`map_preset`, `write_map_manifest`, `/api/map` bounds + `legacy_map`): `crates/server/src/lib.rs`, `crates/core/src/map_preset.rs`

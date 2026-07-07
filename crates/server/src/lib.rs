@@ -169,6 +169,10 @@ fn write_map_manifest(world_path: &Path, preset: MapPreset) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(path, manifest.to_json_pretty()?)?;
+    // elevation-authoring-v2: new worlds start as ocean (programmatic fill).
+    let bounds = MapBounds::new(width, height);
+    let ocean = mapkeeper_core::hydro::filled_elevation_layer(&bounds, mapkeeper_core::hydro::OCEAN_ELEVATION);
+    write_dense_layer(world_path, &ocean).map_err(|e| anyhow::anyhow!(e))?;
     Ok(())
 }
 
