@@ -16,7 +16,8 @@ Use this first, then open only the needed files.
 - HTTP API, world file I/O, launcher endpoints -> `crates/server/src/`
 - Terrain layer endpoints (`/api/layers/terrain`, `/api/cells/:q/:r/terrain`) -> `crates/server/src/lib.rs`
 - Elevation endpoints (`/api/layers/elevation`, `/api/cells/:q/:r/elevation`, `/api/layers/elevation/batch`) -> `crates/server/src/lib.rs`
-- CLI commands and query flow (`profile`, `terrain`, `elevation`) -> `crates/cli/src/`
+- CLI commands and query flow (`profile`, `terrain`, `elevation`, generic `layer <id>`) -> `crates/cli/src/`
+- Dense-on-disk layer I/O + migrate-on-read + dense->sparse projection (server & cli) -> `crates/core/src/layer.rs` (`categorical_from_disk`/`elevation_from_disk`/`to_sparse_*`), `crates/server/src/lib.rs`, `crates/cli/src/main.rs`
 - Web UI (WASM canvas, Home/Editor flow, tool dock + hydro brush) -> `crates/web/src/`
 - Desktop shell (Tauri wrapper, native dialog bridge) -> `crates/desktop/src/`
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
@@ -46,17 +47,22 @@ Use this first, then open only the needed files.
 
 ## Model boundary (D-36)
 
-- **Map state = layers** under `map/layers/<id>.json` (machine-readable, sparse
-  `cell_id -> {state}`; missing key = `unknown`). Model in `core::layer`.
-- **Hydro projection** now derives from sparse integer elevation (`core::hydro`):
+- **Map state = layers** under `map/layers/<id>.json` (machine-readable;
+  missing cell = `unknown`). Model in `core::layer`.
+- **On-disk shape = dense v2** (scale-layers D-46, adapters slice): server & cli
+  read/write `DenseLayer` (`schema_version: 2`, index-addressed). Old sparse v1
+  files migrate transparently on read; the next write rewrites them dense.
+- **Hydro projection** derives from integer elevation (`core::hydro`):
   `elevation <= 0` => water, `> 0` => land.
 - **Author profiles** (`profiles/*.json`) are human-facing and **not** a layer.
-- **scale-layers (D-46, decision-first foundation):** `core::hex` has a cell
-  index (`(q,r) <-> linear`) and `core::layer::DenseLayer` is a dense,
-  index-addressed generic typed layer (palette-encoded categorical + integer,
-  unknown/none/value preserved) with migration from the sparse `Layer`/
-  `ElevationLayer`. Not yet wired into adapters — server/cli/web still use the
-  sparse model until the `scale-layers--adapters` slice. Dense schema:
+- **scale-layers (D-46) — adapters slice (server + cli done):** server & cli
+  store dense on disk and back the layer commands/endpoints with `DenseLayer`
+  (`core::hex` cell index + palette-encoded categorical + integer, unknown/none/
+  value preserved). To avoid touching web this slice, the HTTP responses/requests
+  the browser consumes (`GET /api/layers/elevation` etc.) are kept byte-compatible
+  via dense->sparse projection (`DenseLayer::to_sparse_*`); the web switch to
+  dense/generic + generic `/api/layers/:id` + removing the sparse model is the
+  next slice. CLI adds generic `layer get/set/list/clear <id>`. Dense schema:
   `schemas/map-layer-dense.schema.json` (v2); fixtures `fixtures/layers-dense/`.
 - Renderer is a projection of the layer model, not the source of truth.
 - Renderer layout (4.2): fit-to-window canvas + camera viewport — base

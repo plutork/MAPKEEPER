@@ -27,8 +27,11 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use mapkeeper_core::cell_id::CellId;
-use mapkeeper_core::hydro::{ElevationLayer, HydroKind};
-use mapkeeper_core::layer::{Bounds, CellState, Layer, MapManifest};
+use mapkeeper_core::hex::{Axial, MapBounds};
+use mapkeeper_core::hydro::{hydro_from_elevation, HydroKind, DEFAULT_LAND_ELEVATION};
+use mapkeeper_core::layer::{
+    Bounds, CellState, DenseLayer, DenseState, LayerValue, MapManifest, TERRAIN_LAYER_ID,
+};
 use mapkeeper_core::map_preset::{MapPreset, LEGACY_DEFAULT_RADIUS, hex_cell_count, parse_map_preset};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
@@ -193,6 +196,12 @@ fn read_map_bounds(world_path: &Path) -> (i32, bool) {
     match manifest.bounds {
         Bounds::HexRadius { radius } => (radius.max(0), false),
     }
+}
+
+/// scale-layers (D-46): map bounds as the cell-index domain for dense layers.
+fn map_bounds(world_path: &Path) -> MapBounds {
+    let (radius, _) = read_map_bounds(world_path);
+    MapBounds::new(radius)
 }
 
 fn bounds_response(radius: i32) -> MapBoundsResponse {
@@ -607,27 +616,21 @@ async fn put_profile(
     Json(profile).into_response()
 }
 
-// --- Map state: terrain layer (Hex Map Model Foundation, D-36) ------------
+// --- Map state layers (Hex Map Model Foundation D-36; scale-layers D-46) ---
 // Map state lives under `map/layers/`, separate from author `profiles/`.
-// The server is a filesystem adapter (D-20): it reads/writes the layer file
-// and delegates the unknown/none/value model to mapkeeper-core.
+// scale-layers (D-46): on-disk truth is now the dense, index-addressed
+// `DenseLayer` (migrate-on-read from the old sparse v1). The server projects
+// dense -> sparse for the HTTP responses/requests the current web still
+// consumes, so this adapter change is byte-compatible for the browser (the web
+// switch to dense/generic is the next slice). FS stays here (D-20); index and
+// model live in core.
 
-fn terrain_layer_path(world_path: &Path) -> PathBuf {
-    world_path.join("map").join("layers").join("terrain.json")
+fn layer_file_path(world_path: &Path, layer_id: &str) -> PathBuf {
+    world_path.join("map").join("layers").join(format!("{layer_id}.json"))
 }
 
-/// Load the terrain layer from disk, or a fresh empty layer if the file does
-/// not exist yet (worlds scaffolded before D-36, or a never-painted world).
-fn read_terrain_layer(world_path: &Path) -> Result<Layer, String> {
-    let path = terrain_layer_path(world_path);
-    match std::fs::read_to_string(&path) {
-        Ok(raw) => Layer::from_json(&raw).map_err(|e| e.to_string()),
-        Err(_) => Ok(Layer::terrain()),
-    }
-}
-
-fn write_terrain_layer(world_path: &Path, layer: &Layer) -> Result<(), String> {
-    let path = terrain_layer_path(world_path);
+fn write_dense_layer(world_path: &Path, layer: &DenseLayer) -> Result<(), String> {
+    let path = layer_file_path(world_path, &layer.layer_id);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -635,15 +638,52 @@ fn write_terrain_layer(world_path: &Path, layer: &Layer) -> Result<(), String> {
     std::fs::write(&path, body).map_err(|e| e.to_string())
 }
 
+fn read_terrain_dense(world_path: &Path, bounds: &MapBounds) -> DenseLayer {
+    let raw = std::fs::read_to_string(layer_file_path(world_path, TERRAIN_LAYER_ID)).ok();
+    DenseLayer::categorical_from_disk(raw.as_deref(), TERRAIN_LAYER_ID, bounds)
+}
+
+fn read_elevation_dense(world_path: &Path, bounds: &MapBounds) -> DenseLayer {
+    let raw = std::fs::read_to_string(layer_file_path(world_path, "elevation")).ok();
+    DenseLayer::elevation_from_disk(raw.as_deref(), bounds)
+}
+
+fn cellstate_to_dense(state: CellState) -> DenseState {
+    match state {
+        CellState::Unknown => DenseState::Unknown,
+        CellState::None => DenseState::None,
+        CellState::Value { value } => DenseState::Value(LayerValue::Text(value)),
+    }
+}
+
+fn dense_to_cellstate(state: DenseState) -> CellState {
+    match state {
+        DenseState::Unknown => CellState::Unknown,
+        DenseState::None => CellState::None,
+        DenseState::Value(LayerValue::Text(v)) => CellState::Value { value: v },
+        DenseState::Value(LayerValue::Int(i)) => CellState::Value { value: i.to_string() },
+    }
+}
+
+/// Keep default-land sparse (old semantics): painting the default elevation
+/// clears the cell rather than storing it.
+fn set_dense_elevation(dense: &mut DenseLayer, index: usize, elevation: i16) {
+    if elevation == DEFAULT_LAND_ELEVATION {
+        dense.set(index, DenseState::Unknown);
+    } else {
+        dense.set(index, DenseState::Value(LayerValue::Int(elevation as i32)));
+    }
+}
+
 async fn get_terrain_layer(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
         return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
     };
-    match read_terrain_layer(&active.path) {
-        Ok(layer) => Json(layer).into_response(),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
-    }
+    let bounds = map_bounds(&active.path);
+    let dense = read_terrain_dense(&active.path, &bounds);
+    // Project back to the sparse shape the current web/CLI consume.
+    Json(dense.to_sparse_layer(&bounds, &active.id)).into_response()
 }
 
 async fn put_cell_terrain(
@@ -655,41 +695,16 @@ async fn put_cell_terrain(
     let Some(active) = guard.active.as_ref() else {
         return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
     };
-    let cell_id = CellId::new(&active.id, q, r).to_string();
-
-    let mut layer = match read_terrain_layer(&active.path) {
-        Ok(layer) => layer,
-        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+    let bounds = map_bounds(&active.path);
+    let Some(index) = bounds.index_of(Axial::new(q, r)) else {
+        return (StatusCode::BAD_REQUEST, "cell out of map bounds").into_response();
     };
-    layer.set(cell_id.clone(), new_state);
-    if let Err(err) = write_terrain_layer(&active.path, &layer) {
+    let mut dense = read_terrain_dense(&active.path, &bounds);
+    dense.set(index, cellstate_to_dense(new_state));
+    if let Err(err) = write_dense_layer(&active.path, &dense) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
-    // Echo back the resolved state for this cell.
-    Json(layer.state(&cell_id)).into_response()
-}
-
-// --- Elevation layer: hydro derives from threshold (before rivers) ---------
-
-fn elevation_layer_path(world_path: &Path) -> PathBuf {
-    world_path.join("map").join("layers").join("elevation.json")
-}
-
-fn read_elevation_layer(world_path: &Path) -> Result<ElevationLayer, String> {
-    let path = elevation_layer_path(world_path);
-    match std::fs::read_to_string(&path) {
-        Ok(raw) => ElevationLayer::from_json(&raw).map_err(|e| e.to_string()),
-        Err(_) => Ok(ElevationLayer::new()),
-    }
-}
-
-fn write_elevation_layer(world_path: &Path, layer: &ElevationLayer) -> Result<(), String> {
-    let path = elevation_layer_path(world_path);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let body = layer.to_json_pretty().map_err(|e| e.to_string())?;
-    std::fs::write(&path, body).map_err(|e| e.to_string())
+    Json(dense_to_cellstate(dense.state(index))).into_response()
 }
 
 async fn get_elevation_layer(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
@@ -697,10 +712,10 @@ async fn get_elevation_layer(State(state): State<Arc<Mutex<AppState>>>) -> impl 
     let Some(active) = guard.active.as_ref() else {
         return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
     };
-    match read_elevation_layer(&active.path) {
-        Ok(layer) => Json(layer).into_response(),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
-    }
+    let bounds = map_bounds(&active.path);
+    let dense = read_elevation_dense(&active.path, &bounds);
+    // Project to the sparse ElevationLayer shape the current web consumes.
+    Json(dense.to_sparse_elevation(&bounds, &active.id)).into_response()
 }
 
 async fn put_cell_elevation(
@@ -712,21 +727,17 @@ async fn put_cell_elevation(
     let Some(active) = guard.active.as_ref() else {
         return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
     };
-    let cell_id = CellId::new(&active.id, q, r).to_string();
-
-    let mut layer = match read_elevation_layer(&active.path) {
-        Ok(layer) => layer,
-        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+    let bounds = map_bounds(&active.path);
+    let Some(index) = bounds.index_of(Axial::new(q, r)) else {
+        return (StatusCode::BAD_REQUEST, "cell out of map bounds").into_response();
     };
-    layer.set(cell_id.clone(), new_elevation);
-    if let Err(err) = write_elevation_layer(&active.path, &layer) {
+    let mut dense = read_elevation_dense(&active.path, &bounds);
+    set_dense_elevation(&mut dense, index, new_elevation);
+    if let Err(err) = write_dense_layer(&active.path, &dense) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
-    Json(ElevationCellState {
-        elevation: layer.elevation(&cell_id),
-        hydro: layer.hydro(&cell_id),
-    })
-    .into_response()
+    let elevation = dense.int_or(index, DEFAULT_LAND_ELEVATION as i32) as i16;
+    Json(ElevationCellState { elevation, hydro: hydro_from_elevation(elevation) }).into_response()
 }
 
 async fn put_elevation_batch(
@@ -740,16 +751,14 @@ async fn put_elevation_batch(
     if updates.is_empty() {
         return StatusCode::NO_CONTENT.into_response();
     }
-
-    let mut layer = match read_elevation_layer(&active.path) {
-        Ok(layer) => layer,
-        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
-    };
+    let bounds = map_bounds(&active.path);
+    let mut dense = read_elevation_dense(&active.path, &bounds);
     for item in updates {
-        let cell_id = CellId::new(&active.id, item.q, item.r).to_string();
-        layer.set(cell_id, item.elevation);
+        if let Some(index) = bounds.index_of(Axial::new(item.q, item.r)) {
+            set_dense_elevation(&mut dense, index, item.elevation);
+        }
     }
-    if let Err(err) = write_elevation_layer(&active.path, &layer) {
+    if let Err(err) = write_dense_layer(&active.path, &dense) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
     StatusCode::NO_CONTENT.into_response()

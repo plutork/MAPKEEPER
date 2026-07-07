@@ -1971,8 +1971,10 @@ dependencies = [
  "assert_cmd",
  "clap",
  "mapkeeper-core",
+ "serde",
  "serde_json",
  "tempfile",
+ "toml 0.8.2",
 ]
 
 [[package]]

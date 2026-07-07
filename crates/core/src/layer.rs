@@ -402,6 +402,82 @@ impl DenseLayer {
         }
         dense
     }
+
+    /// Project this dense categorical layer back to the sparse [`Layer`] shape
+    /// (schema v1) — used to keep the HTTP/CLI contract byte-compatible while
+    /// storage moves to dense (adapters slice). `world_id` rebuilds `cell_id`
+    /// strings from indices via `bounds`.
+    pub fn to_sparse_layer(&self, bounds: &crate::hex::MapBounds, world_id: &str) -> Layer {
+        let mut sparse = Layer::new(self.layer_id.clone(), ValueType::Categorical);
+        for index in 0..self.cell_count {
+            let Some(cell) = bounds.from_index(index) else { continue };
+            let cell_id = crate::cell_id::CellId::new(world_id, cell.q, cell.r).to_string();
+            match self.state(index) {
+                DenseState::Value(LayerValue::Text(v)) => sparse.set(cell_id, CellState::value(v)),
+                DenseState::None => sparse.set(cell_id, CellState::None),
+                _ => {}
+            }
+        }
+        sparse
+    }
+
+    /// Project this dense integer layer back to the sparse
+    /// [`crate::hydro::ElevationLayer`] shape (schema v1). Cells resolving to
+    /// the default land elevation stay sparse (matches the old semantics).
+    pub fn to_sparse_elevation(
+        &self,
+        bounds: &crate::hex::MapBounds,
+        world_id: &str,
+    ) -> crate::hydro::ElevationLayer {
+        let mut sparse = crate::hydro::ElevationLayer::new();
+        for index in 0..self.cell_count {
+            let Some(cell) = bounds.from_index(index) else { continue };
+            if let DenseState::Value(LayerValue::Int(v)) = self.state(index) {
+                let cell_id = crate::cell_id::CellId::new(world_id, cell.q, cell.r).to_string();
+                sparse.set(cell_id, v as i16); // ElevationLayer::set drops default land
+            }
+        }
+        sparse
+    }
+
+    /// Migrate-on-read for a categorical layer: parse raw file contents as dense
+    /// (v2) if possible, else as sparse (v1) and migrate, else start empty.
+    /// `raw == None` means the file does not exist yet.
+    pub fn categorical_from_disk(
+        raw: Option<&str>,
+        layer_id: &str,
+        bounds: &crate::hex::MapBounds,
+    ) -> DenseLayer {
+        match raw {
+            None => DenseLayer::new_categorical(layer_id, bounds.len()),
+            Some(raw) => {
+                if let Ok(dense) = DenseLayer::from_json(raw) {
+                    return dense;
+                }
+                if let Ok(sparse) = Layer::from_json(raw) {
+                    return DenseLayer::from_sparse_layer(&sparse, bounds);
+                }
+                DenseLayer::new_categorical(layer_id, bounds.len())
+            }
+        }
+    }
+
+    /// Migrate-on-read for the integer elevation layer (see
+    /// [`Self::categorical_from_disk`]).
+    pub fn elevation_from_disk(raw: Option<&str>, bounds: &crate::hex::MapBounds) -> DenseLayer {
+        match raw {
+            None => DenseLayer::new_integer(crate::hydro::ELEVATION_LAYER_ID, bounds.len()),
+            Some(raw) => {
+                if let Ok(dense) = DenseLayer::from_json(raw) {
+                    return dense;
+                }
+                if let Ok(sparse) = crate::hydro::ElevationLayer::from_json(raw) {
+                    return DenseLayer::from_sparse_elevation(&sparse, bounds);
+                }
+                DenseLayer::new_integer(crate::hydro::ELEVATION_LAYER_ID, bounds.len())
+            }
+        }
+    }
 }
 
 /// Resolve a `cell_id` string to its dense index within `bounds`.
@@ -583,5 +659,52 @@ mod tests {
         let dense = DenseLayer::from_sparse_layer(&sparse, &bounds);
         // nothing landed in-bounds
         assert!((0..dense.len()).all(|i| dense.state(i) == DenseState::Unknown));
+    }
+
+    #[test]
+    fn terrain_sparse_dense_roundtrip_projection() {
+        let bounds = MapBounds::new(2);
+        let mut sparse = Layer::terrain();
+        sparse.set("main.hex.q0.r0", CellState::value("forest"));
+        sparse.set("main.hex.q-1.r1", CellState::None);
+
+        let dense = DenseLayer::from_sparse_layer(&sparse, &bounds);
+        let back = dense.to_sparse_layer(&bounds, "main");
+        assert_eq!(back, sparse);
+    }
+
+    #[test]
+    fn elevation_sparse_dense_roundtrip_projection() {
+        use crate::hydro::ElevationLayer;
+        let bounds = MapBounds::new(2);
+        let mut sparse = ElevationLayer::new();
+        sparse.set("main.hex.q0.r0", -3);
+        sparse.set("main.hex.q1.r-1", 7);
+
+        let dense = DenseLayer::from_sparse_elevation(&sparse, &bounds);
+        let back = dense.to_sparse_elevation(&bounds, "main");
+        assert_eq!(back, sparse);
+    }
+
+    #[test]
+    fn from_disk_reads_dense_and_migrates_sparse() {
+        let bounds = MapBounds::new(2);
+
+        // None => empty dense.
+        let empty = DenseLayer::categorical_from_disk(None, "terrain", &bounds);
+        assert_eq!(empty.len(), bounds.len());
+
+        // Sparse v1 JSON migrates.
+        let mut sparse = Layer::terrain();
+        sparse.set("main.hex.q0.r0", CellState::value("water"));
+        let v1 = sparse.to_json_pretty().unwrap();
+        let migrated = DenseLayer::categorical_from_disk(Some(&v1), "terrain", &bounds);
+        let i0 = bounds.index_of(crate::hex::Axial::new(0, 0)).unwrap();
+        assert_eq!(migrated.state(i0), DenseState::Value(LayerValue::Text("water".into())));
+
+        // Dense v2 JSON is read back as-is.
+        let v2 = migrated.to_json_pretty().unwrap();
+        let reread = DenseLayer::categorical_from_disk(Some(&v2), "terrain", &bounds);
+        assert_eq!(reread, migrated);
     }
 }

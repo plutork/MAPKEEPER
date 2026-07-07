@@ -2,6 +2,8 @@
 //! Covers `init` → `profile set`/`get`/`list` end to end against a real
 //! temp world folder — not just the JSON Schema in isolation.
 
+use std::fs;
+
 use assert_cmd::Command;
 use tempfile::{tempdir, TempDir};
 
@@ -193,6 +195,109 @@ fn terrain_edit_leaves_profile_untouched() {
     assert!(profile.contains("\"display_name\": \"Old mill\""));
     assert!(!profile.contains("forest"));
     assert!(!profile.contains("terrain"));
+}
+
+/// Generic `layer` command (scale-layers, D-46) over an arbitrary dense layer.
+#[test]
+fn layer_generic_set_get_list_clear_round_trip() {
+    let dir = tempdir().unwrap();
+    let world = dir.path();
+
+    mapkeeper().arg("init").arg("gen").arg("--path").arg(world).assert().success();
+
+    mapkeeper()
+        .args(["layer", "set", "biome", "gen.hex.q0.r0", "--value", "swamp"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+
+    let get = mapkeeper()
+        .args(["layer", "get", "biome", "gen.hex.q0.r0"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&get.get_output().stdout).to_string();
+    assert!(stdout.contains("\"state\": \"value\""));
+    assert!(stdout.contains("\"value\": \"swamp\""));
+
+    let list = mapkeeper()
+        .args(["layer", "list", "biome"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&list.get_output().stdout).to_string();
+    assert!(stdout.contains("gen.hex.q0.r0\tswamp"));
+
+    mapkeeper()
+        .args(["layer", "clear", "biome", "gen.hex.q0.r0"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let get = mapkeeper()
+        .args(["layer", "get", "biome", "gen.hex.q0.r0"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&get.get_output().stdout).to_string();
+    assert!(stdout.contains("\"state\": \"unknown\""));
+}
+
+/// An old sparse v1 layer file is migrated on read and rewritten dense (v2).
+#[test]
+fn terrain_v1_sparse_migrates_on_read_and_rewrites_dense() {
+    let dir = tempdir().unwrap();
+    let world = dir.path();
+
+    mapkeeper().arg("init").arg("world").arg("--path").arg(world).assert().success();
+
+    let layers_dir = world.join("map").join("layers");
+    fs::create_dir_all(&layers_dir).unwrap();
+    let v1 = r#"{
+  "schema_version": 1,
+  "layer_id": "terrain",
+  "value_type": "categorical",
+  "cells": {
+    "world.hex.q0.r0": { "state": "value", "value": "forest" },
+    "world.hex.q1.r0": { "state": "none" }
+  }
+}"#;
+    fs::write(layers_dir.join("terrain.json"), v1).unwrap();
+
+    // Read migrates the sparse file transparently.
+    let get = mapkeeper()
+        .args(["terrain", "get", "world.hex.q0.r0"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&get.get_output().stdout).to_string();
+    assert!(stdout.contains("\"value\": \"forest\""));
+
+    let get = mapkeeper()
+        .args(["terrain", "get", "world.hex.q1.r0"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&get.get_output().stdout).to_string();
+    assert!(stdout.contains("\"state\": \"none\""));
+
+    // Any write rewrites the file in the dense (v2) shape.
+    mapkeeper()
+        .args(["terrain", "set", "world.hex.q2.r0", "--value", "hill"])
+        .arg("--world")
+        .arg(world)
+        .assert()
+        .success();
+    let on_disk = fs::read_to_string(layers_dir.join("terrain.json")).unwrap();
+    assert!(on_disk.contains("\"schema_version\": 2"));
+    assert!(on_disk.contains("\"states\""));
+    assert!(!on_disk.contains("\"cells\""));
 }
 
 #[test]
