@@ -1269,6 +1269,7 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
             state_mut.paint_flush_scheduled = false;
             state_mut.paint_flush_in_flight = false;
             state_mut.legacy_map = map.legacy_map;
+            reset_view_on_world_open(&mut state_mut);
             set_world_label(&format!(
                 "{} · {} cells",
                 map.world_id, map.bounds.cell_count
@@ -1875,6 +1876,7 @@ fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
             state_mut.paint_moved = false;
             state_mut.paint_last_cell = None;
             state_mut.show_grid = false;
+            reset_view_on_world_open(&mut state_mut);
             state_mut.legacy_map = false;
             set_drawer_open(false);
             clear_inspect_selection();
@@ -2110,6 +2112,15 @@ fn apply_elevation_brush_intent(s: &mut AppState) {
     s.color_mode = ColorMode::Elevation;
     s.show_elevation_labels = true;
     // Peaks stay author-controlled — Raise/Lower does not force them on.
+}
+
+/// View defaults when a world opens (elevation dogfood; D-51 grid off on large maps).
+fn reset_view_on_world_open(s: &mut AppState) {
+    s.color_mode = ColorMode::Elevation;
+    s.show_elevation_labels = true;
+    s.show_peaks = false;
+    s.show_grid = s.map_bounds.len() <= elevation_view::OVERLAY_LOD_MAX_VISIBLE;
+    deactivate_paint_brush(s);
 }
 
 /// Map a brush to absolute target elevation. `Inspect` / Raise / Lower write nothing here.
