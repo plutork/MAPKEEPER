@@ -41,4 +41,5 @@ features = [
     "Node",
     "NodeList",
     "Performance",
+    "Window",
 ]

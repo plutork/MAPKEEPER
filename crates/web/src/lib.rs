@@ -134,7 +134,81 @@ fn redraw_and_sample(state: &Rc<RefCell<AppState>>) {
     let mut s = state.borrow_mut();
     s.perf.redraw_ms = Some(ms);
     s.perf.drawn_cells = Some(drawn);
+    s.last_draw_snapshot = Some(draw_snapshot(&s));
     set_text("view-perf", &s.perf.view_line());
+}
+
+// perf-100k--raf-redraw-coalesce: at most one full redraw per animation frame.
+#[derive(Clone, Copy, PartialEq)]
+struct DrawSnapshot {
+    zoom: f64,
+    pan_x: f64,
+    pan_y: f64,
+    selected: Option<(i32, i32)>,
+    show_grid: bool,
+    hover_cell: Option<(i32, i32)>,
+    content_rev: u64,
+}
+
+fn draw_snapshot(s: &AppState) -> DrawSnapshot {
+    DrawSnapshot {
+        zoom: s.zoom,
+        pan_x: s.pan_x,
+        pan_y: s.pan_y,
+        selected: s.selected,
+        show_grid: s.show_grid,
+        hover_cell: s.hover_cell,
+        content_rev: s.content_rev,
+    }
+}
+
+fn bump_content_rev(s: &mut AppState) {
+    s.content_rev = s.content_rev.wrapping_add(1);
+}
+
+fn schedule_redraw(state: Rc<RefCell<AppState>>) {
+    {
+        let mut s = state.borrow_mut();
+        s.redraw_dirty = true;
+        if s.redraw_raf_pending {
+            return;
+        }
+        s.redraw_raf_pending = true;
+    }
+
+    let state_cb = state.clone();
+    let closure = Closure::once(move || {
+        flush_scheduled_redraw(state_cb);
+    });
+    let _ = window()
+        .request_animation_frame(closure.as_ref().unchecked_ref())
+        .expect("request_animation_frame");
+    closure.forget();
+}
+
+fn flush_scheduled_redraw(state: Rc<RefCell<AppState>>) {
+    let should_draw = {
+        let mut s = state.borrow_mut();
+        s.redraw_raf_pending = false;
+        if !s.redraw_dirty {
+            false
+        } else {
+            let snap = draw_snapshot(&s);
+            if s.last_draw_snapshot == Some(snap) {
+                s.redraw_dirty = false;
+                false
+            } else {
+                s.redraw_dirty = false;
+                true
+            }
+        }
+    };
+    if should_draw {
+        redraw_and_sample(&state);
+    }
+    if state.borrow().redraw_dirty {
+        schedule_redraw(state);
+    }
 }
 
 #[derive(Deserialize)]
@@ -272,6 +346,11 @@ struct AppState {
     /// Step 0 perf samples (perf-100k--measurement-hooks).
     perf: PerfMetrics,
     perf_timers: PerfTimers,
+    /// Visual revision — bumps when elevation/cells change (perf-100k--raf-redraw-coalesce).
+    content_rev: u64,
+    last_draw_snapshot: Option<DrawSnapshot>,
+    redraw_dirty: bool,
+    redraw_raf_pending: bool,
 }
 
 #[wasm_bindgen(start)]
@@ -307,6 +386,10 @@ pub fn start() {
         path_touched: false,
         perf: PerfMetrics::default(),
         perf_timers: PerfTimers::default(),
+        content_rev: 0,
+        last_draw_snapshot: None,
+        redraw_dirty: false,
+        redraw_raf_pending: false,
     }));
 
     redraw(&state.borrow());
@@ -867,6 +950,7 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
         if let Ok(map) = resp.json::<MapResponse>().await {
             let mut state_mut = state.borrow_mut();
             state_mut.cells = map.cells.into_iter().map(|c| ((c.q, c.r), c.display_name)).collect();
+            bump_content_rev(&mut state_mut);
             state_mut.map_bounds = MapBounds::new(
                 map.bounds.width.max(1),
                 map.bounds.height.max(1),
@@ -904,6 +988,7 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
         if let Some(t0) = s.perf_timers.open_start.take() {
             s.perf.open_ms = Some(perf_now() - t0);
         }
+        s.last_draw_snapshot = Some(draw_snapshot(&s));
     }
     perf_emit(&state.borrow().perf);
 }
@@ -927,6 +1012,7 @@ async fn load_elevation(state: &Rc<RefCell<AppState>>) {
     let mirror_ms = perf_now() - mirror_start;
     let mut state_mut = state.borrow_mut();
     state_mut.elevation = adopted;
+    bump_content_rev(&mut state_mut);
     state_mut.perf.layer_fetch_ms = Some(fetch_ms);
     state_mut.perf.layer_parse_or_decode_ms = Some(parse_ms);
     state_mut.perf.client_mirror_ms = Some(mirror_ms);
@@ -966,9 +1052,10 @@ fn queue_paint_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), new_eleva
             set_elevation_cell(&mut s.elevation, map_bounds, *q, *r, new_elevation);
             s.pending_paints.insert((*q, *r), new_elevation);
         }
+        bump_content_rev(&mut s);
         painted
     };
-    redraw_and_sample(&state);
+    schedule_redraw(state.clone());
     if !painted_cells.is_empty() {
         set_text("status", "Autosave pending…");
         schedule_paint_flush(state);
@@ -1131,7 +1218,7 @@ fn attach_pan_drag(state: Rc<RefCell<AppState>>) {
             }
         }
         if redraw_now {
-            redraw_and_sample(&move_state);
+            schedule_redraw(move_state.clone());
         }
     });
     let _ = window().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
@@ -1253,7 +1340,7 @@ fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
             }
         };
         if changed {
-            redraw_and_sample(&move_state);
+            schedule_redraw(move_state.clone());
         }
     });
     let _ = canvas().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
@@ -1271,7 +1358,7 @@ fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
             }
         };
         if changed {
-            redraw_and_sample(&leave_state);
+            schedule_redraw(leave_state.clone());
         }
     });
     let _ = canvas().add_event_listener_with_callback("mouseleave", on_leave.as_ref().unchecked_ref());
@@ -1315,7 +1402,7 @@ fn attach_wheel_zoom(state: Rc<RefCell<AppState>>) {
         s.pan_x = new_ox - base_ox;
         s.pan_y = new_oy - base_oy;
         drop(s);
-        redraw_and_sample(&state);
+        schedule_redraw(state.clone());
     });
     let _ = canvas().add_event_listener_with_callback("wheel", closure.as_ref().unchecked_ref());
     closure.forget();
@@ -1372,8 +1459,12 @@ fn attach_save_click(state: Rc<RefCell<AppState>>) {
                 .await;
             match sent {
                 Ok(resp) if resp.ok() => {
-                    state.borrow_mut().cells.insert((q, r), display_name);
-                    redraw_and_sample(&state);
+                    {
+                        let mut s = state.borrow_mut();
+                        s.cells.insert((q, r), display_name);
+                        bump_content_rev(&mut s);
+                    }
+                    schedule_redraw(state.clone());
                     set_text("status", "Saved.");
                 }
                 _ => set_text("status", "Save failed."),
@@ -1393,7 +1484,7 @@ fn attach_close_click(state: Rc<RefCell<AppState>>) {
         state.borrow_mut().selected = None;
         set_drawer_open(false);
         clear_inspect_selection();
-        redraw_and_sample(&state);
+        schedule_redraw(state.clone());
     });
     document()
         .get_element_by_id("close")
@@ -1578,7 +1669,7 @@ fn attach_generate_click(state: Rc<RefCell<AppState>>) {
 /// fit-to-window). Cheap — one redraw per resize event.
 fn attach_window_resize(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
-        redraw_and_sample(&state);
+        schedule_redraw(state.clone());
     });
     let _ = window().add_event_listener_with_callback("resize", closure.as_ref().unchecked_ref());
     closure.forget();
@@ -1623,7 +1714,7 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                     s.show_grid
                 };
                 button.set_text_content(Some(if show_grid { "Cells: On" } else { "Cells: Off" }));
-                redraw_and_sample(&state);
+                schedule_redraw(state.clone());
             }
             return;
         }
