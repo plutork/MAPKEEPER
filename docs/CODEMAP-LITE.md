@@ -8,7 +8,7 @@ Use this first, then open only the needed files.
 
 - Core rules, ids, geometry, profile model -> `crates/core/src/`
 - Spatial contract (distance/ring/range/bounds) -> `crates/core/src/hex.rs`
-- Map size presets (Small/Medium/Large/Epic -> hex-radius) -> `crates/core/src/map_preset.rs`
+- Map size presets (Small/Medium/Large/Epic/Grand/World -> hex-radius) -> `crates/core/src/map_preset.rs`
 - Map state model (dense layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
 - Cell index (`(q,r) <-> linear index`, `MapBounds::index_of`/`from_index`/`len`) -> `crates/core/src/hex.rs`
 - Dense typed-layer model (index-addressed, palette categorical + integer; `read_or_empty`; generic wire `WireCellState`/`LayerCellWrite`) -> `crates/core/src/layer.rs` (`DenseLayer`)

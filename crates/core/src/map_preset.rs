@@ -3,13 +3,15 @@
 //! Author-facing presets map to a `hex-radius` stored in `map/manifest.json`.
 //! Canvas/viewport is separate (pan/zoom — roadmap 4.2 Slice 2).
 
-/// Wizard presets exposed before viewport culling ships.
+/// Author-facing map size presets for create/generate wizards (D-40, D-48).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MapPreset {
     Small,
     Medium,
     Large,
     Epic,
+    Grand,
+    World,
 }
 
 impl MapPreset {
@@ -19,6 +21,8 @@ impl MapPreset {
             MapPreset::Medium => "medium",
             MapPreset::Large => "large",
             MapPreset::Epic => "epic",
+            MapPreset::Grand => "grand",
+            MapPreset::World => "world",
         }
     }
 
@@ -29,6 +33,9 @@ impl MapPreset {
             MapPreset::Large => 50,
             // viewport-pan-zoom-culling: Epic preset unlock (~30K cells).
             MapPreset::Epic => 100,
+            // map-presets-50k-100k (D-48): extend ladder toward D-46 ~100k ceiling.
+            MapPreset::Grand => 129,
+            MapPreset::World => 182,
         }
     }
 
@@ -43,12 +50,21 @@ impl MapPreset {
             MapPreset::Medium => "Medium (~1,027 cells)",
             MapPreset::Large => "Large (~7,651 cells)",
             MapPreset::Epic => "Epic (~30,301 cells)",
+            MapPreset::Grand => "Grand (~50,311 cells)",
+            MapPreset::World => "World (~99,919 cells)",
         }
     }
 
     /// Presets allowed in create/generate wizards.
     pub fn wizard_presets() -> &'static [MapPreset] {
-        &[MapPreset::Small, MapPreset::Medium, MapPreset::Large, MapPreset::Epic]
+        &[
+            MapPreset::Small,
+            MapPreset::Medium,
+            MapPreset::Large,
+            MapPreset::Epic,
+            MapPreset::Grand,
+            MapPreset::World,
+        ]
     }
 }
 
@@ -58,6 +74,8 @@ pub fn parse_map_preset(raw: &str) -> Option<MapPreset> {
         "medium" | "m" => Some(MapPreset::Medium),
         "large" | "l" => Some(MapPreset::Large),
         "epic" | "e" => Some(MapPreset::Epic),
+        "grand" | "g" => Some(MapPreset::Grand),
+        "world" | "w" => Some(MapPreset::World),
         _ => None,
     }
 }
@@ -84,6 +102,8 @@ mod tests {
         assert_eq!(MapPreset::Medium.approx_cell_count(), 1027);
         assert_eq!(MapPreset::Large.approx_cell_count(), 7651);
         assert_eq!(MapPreset::Epic.approx_cell_count(), 30301);
+        assert_eq!(MapPreset::Grand.approx_cell_count(), 50311);
+        assert_eq!(MapPreset::World.approx_cell_count(), 99919);
     }
 
     #[test]
@@ -91,5 +111,7 @@ mod tests {
         assert_eq!(parse_map_preset("large"), Some(MapPreset::Large));
         assert_eq!(parse_map_preset("M"), Some(MapPreset::Medium));
         assert_eq!(parse_map_preset("epic"), Some(MapPreset::Epic));
+        assert_eq!(parse_map_preset("grand"), Some(MapPreset::Grand));
+        assert_eq!(parse_map_preset("W"), Some(MapPreset::World));
     }
 }
