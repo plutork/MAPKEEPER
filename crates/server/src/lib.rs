@@ -141,6 +141,32 @@ struct DeleteProjectInput {
     path: String,
 }
 
+#[derive(Deserialize)]
+struct OpenFixtureInput {
+    slug: String,
+}
+
+#[derive(Serialize)]
+struct FixtureWorldInfo {
+    slug: String,
+    label: String,
+}
+
+#[derive(Serialize)]
+struct FixtureWorldsResponse {
+    available: bool,
+    worlds: Vec<FixtureWorldInfo>,
+}
+
+/// river-dogfood-fixture-worlds: slug -> Home button label.
+const FIXTURE_WORLD_LABELS: &[(&str, &str)] = &[
+    ("coastal-slope", "Coastal slope"),
+    ("mountain-ridge", "Mountain ridge"),
+    ("enclosed-basin", "Enclosed basin"),
+    ("gentle-plain", "Gentle plain"),
+    ("dual-watershed", "Dual watershed"),
+];
+
 fn read_manifest_id(world_path: &Path) -> Result<String> {
     let manifest_path = world_path.join("mapkeeper.toml");
     let raw = std::fs::read_to_string(&manifest_path).with_context(|| {
@@ -283,6 +309,91 @@ fn default_worlds_root_path() -> String {
     "MAPKEEPER Worlds".to_string()
 }
 
+fn default_worlds_root() -> PathBuf {
+    PathBuf::from(default_worlds_root_path())
+}
+
+fn is_valid_fixture_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug.len() <= 64
+        && slug
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Locate `fixtures/worlds` for river dogfood (dev / repo checkout).
+fn fixture_worlds_root() -> Option<PathBuf> {
+    if let Ok(raw) = std::env::var("MAPKEEPER_FIXTURE_WORLDS") {
+        let path = PathBuf::from(raw);
+        if path.is_dir() {
+            return Some(path);
+        }
+    }
+    let mut dir = std::env::current_dir().ok()?;
+    for _ in 0..8 {
+        let candidate = dir.join("fixtures").join("worlds");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    None
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_all(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+fn list_fixture_worlds() -> FixtureWorldsResponse {
+    let Some(root) = fixture_worlds_root() else {
+        return FixtureWorldsResponse { available: false, worlds: Vec::new() };
+    };
+    let mut worlds = Vec::new();
+    for (slug, label) in FIXTURE_WORLD_LABELS {
+        let path = root.join(slug);
+        if path.join("mapkeeper.toml").is_file() {
+            worlds.push(FixtureWorldInfo { slug: (*slug).to_string(), label: (*label).to_string() });
+        }
+    }
+    FixtureWorldsResponse {
+        available: !worlds.is_empty(),
+        worlds,
+    }
+}
+
+fn import_fixture_world(slug: &str) -> Result<PathBuf> {
+    if !is_valid_fixture_slug(slug) {
+        anyhow::bail!("invalid fixture slug");
+    }
+    let root = fixture_worlds_root().context("fixture worlds not found (run from MAPKEEPER repo or set MAPKEEPER_FIXTURE_WORLDS)")?;
+    let src = root.join(slug);
+    if !src.join("mapkeeper.toml").is_file() {
+        anyhow::bail!("unknown fixture world: {slug}");
+    }
+    let dest = default_worlds_root().join(format!("fixture-{slug}"));
+    if !dest.join("mapkeeper.toml").exists() {
+        std::fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")))?;
+        if dest.exists() {
+            std::fs::remove_dir_all(&dest).context("replacing incomplete fixture import")?;
+        }
+        copy_dir_all(&src, &dest)?;
+    }
+    Ok(normalize_world_path(&dest))
+}
+
 /// Build the router + `AppState`, without binding a socket — split out so
 /// callers (desktop shell) can bind first and read back the OS-assigned
 /// port before starting to serve.
@@ -302,6 +413,8 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         .route("/api/projects/forget", axum::routing::post(forget_project))
         .route("/api/projects/delete", axum::routing::post(delete_project))
         .route("/api/projects/close", axum::routing::post(close_project))
+        .route("/api/fixture-worlds", get(list_fixture_worlds_handler))
+        .route("/api/fixture-worlds/open", axum::routing::post(open_fixture_world))
         .route("/api/map", get(get_map))
         .route("/api/cells/:q/:r/profile", get(get_profile).put(put_profile))
         // scale-layers (D-46): generic layer API by id (dense). Replaces the old
@@ -439,6 +552,33 @@ async fn open_project(
     Json(input): Json<OpenProjectInput>,
 ) -> impl IntoResponse {
     let path = normalize_world_path(Path::new(&input.path));
+    let id = match read_manifest_id(&path) {
+        Ok(id) => id,
+        Err(err) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
+    };
+
+    let mut file = load_projects();
+    file.upsert(ProjectEntry { id: id.clone(), path: path.display().to_string() });
+    if let Err(err) = save_projects(&file) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    state.lock().unwrap().active = Some(ActiveWorld { path: path.clone(), id: id.clone() });
+    Json(ProjectEntry { id, path: path.display().to_string() }).into_response()
+}
+
+async fn list_fixture_worlds_handler() -> impl IntoResponse {
+    Json(list_fixture_worlds()).into_response()
+}
+
+async fn open_fixture_world(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(input): Json<OpenFixtureInput>,
+) -> impl IntoResponse {
+    let path = match import_fixture_world(&input.slug) {
+        Ok(path) => path,
+        Err(err) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
+    };
     let id = match read_manifest_id(&path) {
         Ok(id) => id,
         Err(err) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),

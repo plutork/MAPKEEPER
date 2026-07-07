@@ -341,6 +341,23 @@ struct OpenProjectInput<'a> {
     path: &'a str,
 }
 
+#[derive(Deserialize)]
+struct FixtureWorldInfo {
+    slug: String,
+    label: String,
+}
+
+#[derive(Deserialize)]
+struct FixtureWorldsResponse {
+    available: bool,
+    worlds: Vec<FixtureWorldInfo>,
+}
+
+#[derive(Serialize)]
+struct OpenFixtureInput<'a> {
+    slug: &'a str,
+}
+
 #[derive(Serialize)]
 struct ForgetProjectInput<'a> {
     path: &'a str,
@@ -482,6 +499,7 @@ pub fn start() {
     attach_generate_click(state.clone());
     attach_preset_warn_handlers();
     attach_project_list_click(state.clone());
+    attach_fixture_worlds_click(state.clone());
     attach_dock_click(state.clone());
     attach_escape_key();
     attach_pan_drag(state.clone());
@@ -1052,6 +1070,7 @@ async fn refresh_projects(state: Rc<RefCell<AppState>>) {
     }
     refresh_suggested_path(&state);
     render_project_list(&data.projects);
+    wasm_bindgen_futures::spawn_local(refresh_fixture_worlds());
 
     if let Some(active) = data.active {
         let _ = active;
@@ -1116,6 +1135,94 @@ fn render_project_list(projects: &[ProjectStatus]) {
         ));
     }
     list.set_inner_html(&html);
+}
+
+async fn refresh_fixture_worlds() {
+    let Ok(resp) = gloo_net::http::Request::get("/api/fixture-worlds").send().await else {
+        return;
+    };
+    let Ok(data) = resp.json::<FixtureWorldsResponse>().await else {
+        return;
+    };
+    render_fixture_worlds(&data);
+}
+
+fn render_fixture_worlds(data: &FixtureWorldsResponse) {
+    let document = document();
+    let Some(card) = document.get_element_by_id("fixture-worlds-card") else {
+        return;
+    };
+    let Some(list) = document.get_element_by_id("fixture-world-list") else {
+        return;
+    };
+    let unavailable = document.get_element_by_id("fixture-unavailable");
+
+    if !data.available || data.worlds.is_empty() {
+        let _ = card.class_list().add_1("unavailable");
+        list.set_inner_html("");
+        if let Some(note) = unavailable {
+            let _ = note.class_list().remove_1("hidden");
+        }
+        return;
+    }
+
+    let _ = card.class_list().remove_1("unavailable");
+    if let Some(note) = unavailable {
+        let _ = note.class_list().add_1("hidden");
+    }
+
+    let mut html = String::new();
+    for w in &data.worlds {
+        html.push_str(&format!(
+            "<button class=\"fixture-btn\" data-slug=\"{slug}\" type=\"button\">{label}</button>",
+            slug = html_escape(&w.slug),
+            label = html_escape(&w.label),
+        ));
+    }
+    list.set_inner_html(&html);
+}
+
+fn attach_fixture_worlds_click(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+        let Some(target) = event.target() else { return };
+        let Ok(btn) = target.dyn_into::<web_sys::HtmlElement>() else { return };
+        if !btn.class_list().contains("fixture-btn") {
+            return;
+        }
+        let slug = btn.get_attribute("data-slug").unwrap_or_default();
+        if slug.is_empty() {
+            return;
+        }
+        let state = state.clone();
+        set_text("fixture-status", "Opening…");
+        wasm_bindgen_futures::spawn_local(async move {
+            let body = OpenFixtureInput { slug: &slug };
+            let sent = gloo_net::http::Request::post("/api/fixture-worlds/open").json(&body);
+            let sent = match sent {
+                Ok(req) => req.send().await,
+                Err(err) => {
+                    set_text("fixture-status", &format!("Error: {err}"));
+                    return;
+                }
+            };
+            match sent {
+                Ok(resp) if resp.ok() => {
+                    set_text("fixture-status", "");
+                    show_view("editor");
+                    wasm_bindgen_futures::spawn_local(load_map(state));
+                }
+                Ok(resp) => {
+                    let msg = resp.text().await.unwrap_or_else(|_| "open failed".to_string());
+                    set_text("fixture-status", &msg);
+                }
+                Err(err) => set_text("fixture-status", &format!("Error: {err}")),
+            }
+        });
+    });
+    if let Ok(Some(list)) = document().query_selector("#fixture-world-list") {
+        let _ = list.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+    }
+    closure.forget();
 }
 
 fn html_escape(s: &str) -> String {

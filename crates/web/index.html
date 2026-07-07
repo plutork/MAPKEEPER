@@ -239,6 +239,29 @@
   #project-list li.manage-open .manage-row { display: flex; }
   #project-empty { color: #666f7a; font-size: 13px; display: none; }
   #project-empty.visible { display: block; }
+  .fixture-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .fixture-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: #243044;
+    color: #dce8f8;
+    border: 1px solid #3a4f6b;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .fixture-btn:hover { background: #2c3a52; }
+  #fixture-status { font-size: 12px; color: #d97757; min-height: 16px; margin-top: 8px; }
+  #fixture-worlds-card.unavailable { opacity: 0.72; }
+  #fixture-unavailable.hidden { display: none; }
   #home input, #home select {
     display: block;
     width: 100%;
@@ -343,13 +366,15 @@
         </div>
       </article>
 
-      <article class="home-card disabled">
+      <article class="home-card unavailable" id="fixture-worlds-card">
         <div class="card-head">
-          <h2>Community worlds</h2>
-          <span class="badge">planned</span>
+          <h2>River test maps</h2>
+          <span class="badge">dev</span>
         </div>
-        <p class="card-sub">coming later</p>
-        <p class="card-note">Shared worlds catalog will be available in a later release.</p>
+        <p class="card-sub">Curated elevation presets — copied to your worlds folder on first open.</p>
+        <div id="fixture-world-list" class="fixture-grid"></div>
+        <p id="fixture-unavailable" class="card-note">Available when running from a MAPKEEPER repo checkout.</p>
+        <div id="fixture-status"></div>
       </article>
     </div>
   </div>

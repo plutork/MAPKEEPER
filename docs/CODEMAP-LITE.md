@@ -26,6 +26,7 @@ Use this first, then open only the needed files.
 - Desktop shell (Tauri wrapper, native dialog bridge) -> `crates/desktop/src/`
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
 - River dogfood fixture worlds (Small elevation presets) -> `fixtures/worlds/` (`river-dogfood-fixture-worlds`)
+- Home «River test maps» card + `/api/fixture-worlds` import/open -> `crates/server/src/lib.rs`, `crates/web/index.html`
 - World scaffold source -> `toolchain/template/world/`
 - CI/build behavior -> `.github/workflows/`
 

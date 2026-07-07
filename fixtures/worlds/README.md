@@ -32,6 +32,10 @@ cargo run -p mapkeeper -- server --world "fixtures/worlds/coastal-slope"
 
 Or copy a folder to `Documents/MAPKEEPER Worlds/` and open via Home.
 
+**Home UI:** when the server runs from a repo checkout, the right card
+**River test maps** lists all five presets — first open copies into
+`Documents/MAPKEEPER Worlds/fixture-<slug>` and jumps into the editor.
+
 ## Validation
 
 `fixtures/validate_schema.py` checks every world's manifest and elevation layer.
