@@ -54,7 +54,7 @@ struct InitArgs {
     /// Target folder for the world project (created if missing).
     #[arg(long, default_value = ".")]
     path: PathBuf,
-    /// Map size preset: small (~127), medium (~1K), large (~8K cells).
+    /// Map size preset: small (~127), medium (~1K), large (~8K), epic (~30K cells).
     #[arg(long)]
     map_preset: Option<String>,
 }
@@ -199,7 +199,7 @@ fn cmd_init(args: InitArgs) -> Result<()> {
         None => MapPreset::Small,
         Some(raw) => parse_map_preset(raw).ok_or_else(|| {
             anyhow::anyhow!(
-                "invalid map preset '{raw}': use small, medium, or large"
+                "invalid map preset '{raw}': use small, medium, large, or epic"
             )
         })?,
     };

@@ -8,7 +8,7 @@ Use this first, then open only the needed files.
 
 - Core rules, ids, geometry, profile model -> `crates/core/src/`
 - Spatial contract (distance/ring/range/bounds) -> `crates/core/src/hex.rs`
-- Map size presets (Small/Medium/Large -> hex-radius) -> `crates/core/src/map_preset.rs`
+- Map size presets (Small/Medium/Large/Epic -> hex-radius) -> `crates/core/src/map_preset.rs`
 - Map state model (layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
 - Elevation/hydro threshold model (`elevation <= 0 => water`) -> `crates/core/src/hydro.rs`
 - HTTP API, world file I/O, launcher endpoints -> `crates/server/src/`

@@ -9,6 +9,7 @@ pub enum MapPreset {
     Small,
     Medium,
     Large,
+    Epic,
 }
 
 impl MapPreset {
@@ -17,6 +18,7 @@ impl MapPreset {
             MapPreset::Small => "small",
             MapPreset::Medium => "medium",
             MapPreset::Large => "large",
+            MapPreset::Epic => "epic",
         }
     }
 
@@ -25,6 +27,8 @@ impl MapPreset {
             MapPreset::Small => 6,
             MapPreset::Medium => 18,
             MapPreset::Large => 50,
+            // viewport-pan-zoom-culling: Epic preset unlock (~30K cells).
+            MapPreset::Epic => 100,
         }
     }
 
@@ -38,12 +42,13 @@ impl MapPreset {
             MapPreset::Small => "Small (~127 cells)",
             MapPreset::Medium => "Medium (~1,027 cells)",
             MapPreset::Large => "Large (~7,651 cells)",
+            MapPreset::Epic => "Epic (~30,301 cells)",
         }
     }
 
-    /// Presets allowed in create/generate wizards (Epic deferred until viewport).
+    /// Presets allowed in create/generate wizards.
     pub fn wizard_presets() -> &'static [MapPreset] {
-        &[MapPreset::Small, MapPreset::Medium, MapPreset::Large]
+        &[MapPreset::Small, MapPreset::Medium, MapPreset::Large, MapPreset::Epic]
     }
 }
 
@@ -52,6 +57,7 @@ pub fn parse_map_preset(raw: &str) -> Option<MapPreset> {
         "small" | "s" => Some(MapPreset::Small),
         "medium" | "m" => Some(MapPreset::Medium),
         "large" | "l" => Some(MapPreset::Large),
+        "epic" | "e" => Some(MapPreset::Epic),
         _ => None,
     }
 }
@@ -77,12 +83,13 @@ mod tests {
         assert_eq!(MapPreset::Small.approx_cell_count(), 127);
         assert_eq!(MapPreset::Medium.approx_cell_count(), 1027);
         assert_eq!(MapPreset::Large.approx_cell_count(), 7651);
+        assert_eq!(MapPreset::Epic.approx_cell_count(), 30301);
     }
 
     #[test]
     fn parse_preset_ids() {
         assert_eq!(parse_map_preset("large"), Some(MapPreset::Large));
         assert_eq!(parse_map_preset("M"), Some(MapPreset::Medium));
-        assert_eq!(parse_map_preset("epic"), None);
+        assert_eq!(parse_map_preset("epic"), Some(MapPreset::Epic));
     }
 }
