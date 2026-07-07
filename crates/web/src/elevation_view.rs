@@ -77,15 +77,16 @@ pub fn set_fill_rgb(ctx: &CanvasRenderingContext2d, rgb: (u8, u8, u8), buf: &mut
 }
 
 pub fn draw_mountain_glyph(ctx: &CanvasRenderingContext2d, cx: f64, cy: f64, hex_size: f64) {
-    let h = (hex_size * 0.45).clamp(4.0, 14.0);
-    let w = h * 0.9;
+    // elevation-authoring-v2: large silhouette — ~cell fill, not a tiny marker.
+    let h = (hex_size * 0.78).clamp(10.0, 56.0);
+    let w = h * 1.05;
     ctx.set_fill_style_str("#e8e0d0");
-    ctx.set_stroke_style_str("#4a3828");
-    ctx.set_line_width(1.0);
+    ctx.set_stroke_style_str("#3a2e22");
+    ctx.set_line_width((hex_size * 0.04).clamp(1.0, 2.5));
     ctx.begin_path();
-    ctx.move_to(cx, cy - h * 0.5);
-    ctx.line_to(cx + w * 0.5, cy + h * 0.35);
-    ctx.line_to(cx - w * 0.5, cy + h * 0.35);
+    ctx.move_to(cx, cy - h * 0.46);
+    ctx.line_to(cx + w * 0.5, cy + h * 0.38);
+    ctx.line_to(cx - w * 0.5, cy + h * 0.38);
     ctx.close_path();
     ctx.fill();
     ctx.stroke();
@@ -97,11 +98,17 @@ pub fn draw_elevation_label(
     cy: f64,
     hex_size: f64,
     elevation: i32,
+    below_center: bool,
 ) {
-    let font_px = (hex_size * 0.38).clamp(7.0, 13.0);
+    let font_px = (hex_size * 0.32).clamp(7.0, 12.0);
     ctx.set_font(&format!("{font_px}px system-ui,sans-serif"));
     ctx.set_fill_style_str("#f0f4f8");
     ctx.set_text_align("center");
     ctx.set_text_baseline("middle");
-    let _ = ctx.fill_text(&elevation.to_string(), cx, cy);
+    let y = if below_center {
+        cy + hex_size * 0.28
+    } else {
+        cy
+    };
+    let _ = ctx.fill_text(&elevation.to_string(), cx, y);
 }

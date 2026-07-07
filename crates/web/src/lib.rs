@@ -42,8 +42,12 @@ const MAX_BRUSH_RADIUS: i32 = 3;
 const GRID_STROKE_CELL_THRESHOLD: usize = 10_000;
 // perf-100k--canvas-lod-grid-markers: hide profile dots when zoomed out.
 const PROFILE_MARKER_MIN_ZOOM: f64 = 1.0;
-/// Fill inset so adjacent hex fills leave a thin grid gap.
-const HEX_GAP: f64 = 0.92;
+// view-cells-seamless-v1: fill scales — On = edge-to-edge; Off = overlap seamless map.
+const FILL_SCALE_GRID_ON: f64 = 1.0;
+const FILL_SCALE_GRID_OFF: f64 = 1.04;
+const GRID_LINE_WIDTH: f64 = 1.0;
+/// Brush hover preview inset (unchanged from legacy HEX_GAP).
+const BRUSH_PREVIEW_GAP: f64 = 0.92;
 /// Breathing room (px) between the map and the canvas edge.
 const CANVAS_PAD: f64 = 20.0;
 /// Default land elevation when a cell is unknown/none (hydro projection).
@@ -93,13 +97,21 @@ fn show_profile_markers(zoom: f64) -> bool {
     zoom >= PROFILE_MARKER_MIN_ZOOM
 }
 
-fn grid_status_label(show_grid: bool, visible_cells: usize) -> &'static str {
+fn grid_lines_stats_label(show_grid: bool, visible_cells: usize) -> &'static str {
     if !show_grid {
-        "Off"
+        "lines Off"
     } else if visible_cells > GRID_STROKE_CELL_THRESHOLD {
-        "Auto-off"
+        "lines Auto-off"
     } else {
-        "On"
+        "lines On"
+    }
+}
+
+fn grid_lines_toggle_label(show_grid: bool) -> &'static str {
+    if show_grid {
+        "Grid lines: On"
+    } else {
+        "Grid lines: Off"
     }
 }
 
@@ -367,6 +379,8 @@ struct AppState {
     /// Index-addressed elevation layer — primary render cache (perf-100k--web-dense-client).
     elevation: DenseLayer,
     brush: Brush,
+    /// Last non-Inspect brush — restored when reopening Terrain tab.
+    last_paint_brush: Brush,
     selected: Option<(i32, i32)>,
     /// Hex bounds from `map/manifest.json` (via `/api/map`).
     map_bounds: MapBounds,
@@ -423,6 +437,7 @@ pub fn start() {
         cells: HashMap::new(),
         elevation: fresh_elevation_layer(initial_bounds),
         brush: Brush::Inspect,
+        last_paint_brush: Brush::SetLand,
         selected: None,
         map_bounds: initial_bounds,
         zoom: 1.0,
@@ -445,7 +460,7 @@ pub fn start() {
         paint_flush_scheduled: false,
         paint_flush_in_flight: false,
         hover_cell: None,
-        show_grid: true,
+        show_grid: false,
         suppress_next_click: false,
         legacy_map: false,
         default_worlds_root: None,
@@ -572,6 +587,24 @@ fn set_dock_tab(tab: &str) {
     }
 }
 
+fn clear_pointer_interaction(s: &mut AppState) {
+    s.drag_active = false;
+    s.drag_moved = false;
+    s.paint_active = false;
+    s.paint_moved = false;
+    s.paint_last_cell = None;
+    s.suppress_next_click = false;
+}
+
+fn apply_paint_brush(s: &mut AppState, brush: Brush) {
+    if !matches!(brush, Brush::Inspect) {
+        s.last_paint_brush = brush.clone();
+    }
+    s.brush = brush;
+    s.hover_cell = None;
+    clear_pointer_interaction(s);
+}
+
 fn sync_dock_rail_for_brush(brush: &Brush) {
     let terrain_active = !matches!(brush, Brush::Inspect);
     if let Some(rail) = document().get_element_by_id("dock-rail") {
@@ -667,7 +700,7 @@ fn draw_preview_boundary(state: &AppState, ctx: &CanvasRenderingContext2d, size:
             continue;
         }
         let (x, y) = axial.to_pixel(size);
-        let corners = hex_corners(ox + x, oy + y, size * HEX_GAP * 0.98);
+        let corners = hex_corners(ox + x, oy + y, size * BRUSH_PREVIEW_GAP * 0.98);
         ctx.begin_path();
         ctx.move_to(corners[0].0, corners[0].1);
         for corner in &corners[1..] {
@@ -843,6 +876,11 @@ fn redraw(state: &AppState) -> usize {
     let (q_min, q_max, r_min, r_max) = visible_scan_bounds(width, height, size, ox, oy, bounds);
     let visible_cells = count_visible_in_bounds(q_min, q_max, r_min, r_max, bounds);
     let stroke_grid = stroke_grid_enabled(state.show_grid, visible_cells);
+    let fill_scale = if state.show_grid {
+        FILL_SCALE_GRID_ON
+    } else {
+        FILL_SCALE_GRID_OFF
+    };
     let draw_profile_dots = show_profile_markers(state.zoom);
     let overlay_lod = overlays_lod_ok(visible_cells, state.zoom);
     let draw_labels = state.show_elevation_labels && overlay_lod;
@@ -859,7 +897,7 @@ fn redraw(state: &AppState) -> usize {
             }
             let (x, y) = cell.to_pixel(size);
             let (cx, cy) = (ox + x, oy + y);
-            let corners = hex_corners(cx, cy, size * HEX_GAP);
+            let corners = hex_corners(cx, cy, size * fill_scale);
 
             ctx.begin_path();
             ctx.move_to(corners[0].0, corners[0].1);
@@ -883,9 +921,13 @@ fn redraw(state: &AppState) -> usize {
                 }
             }
             ctx.fill();
-            if selected || stroke_grid {
-                ctx.set_line_width(if selected { 3.0 } else { 1.0 });
-                ctx.set_stroke_style_str(if selected { "#9fe3c4" } else { "#3a424b" });
+            if selected {
+                ctx.set_line_width(3.0);
+                ctx.set_stroke_style_str("#9fe3c4");
+                ctx.stroke();
+            } else if stroke_grid {
+                ctx.set_line_width(GRID_LINE_WIDTH);
+                ctx.set_stroke_style_str("#3a424b");
                 ctx.stroke();
             }
 
@@ -893,7 +935,8 @@ fn redraw(state: &AppState) -> usize {
                 draw_mountain_glyph(&ctx, cx, cy, size);
             }
             if draw_labels {
-                draw_elevation_label(&ctx, cx, cy, size, elevation);
+                let label_below = draw_peaks && elevation > MOUNTAIN_THRESHOLD;
+                draw_elevation_label(&ctx, cx, cy, size, elevation, label_below);
             }
 
             // Profile-presence marker — a separate layer from terrain, so both
@@ -921,7 +964,7 @@ fn redraw(state: &AppState) -> usize {
             state.zoom,
             drawn_cells,
             bounds.len(),
-            grid_status_label(state.show_grid, visible_cells),
+            grid_lines_stats_label(state.show_grid, visible_cells),
             labels_status_label(state.show_elevation_labels, visible_cells, state.zoom),
             peaks_status_label(
                 state.show_peaks,
@@ -933,7 +976,7 @@ fn redraw(state: &AppState) -> usize {
         ),
     );
     draw_preview_boundary(state, &ctx, size, ox, oy);
-    set_text("toggle-grid", if state.show_grid { "Cells: On" } else { "Cells: Off" });
+    set_text("toggle-grid", grid_lines_toggle_label(state.show_grid));
     set_text(
         "toggle-color-mode",
         if state.color_mode == ColorMode::Elevation {
@@ -1701,7 +1744,7 @@ fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
             state_mut.paint_active = false;
             state_mut.paint_moved = false;
             state_mut.paint_last_cell = None;
-            state_mut.show_grid = true;
+            state_mut.show_grid = false;
             state_mut.legacy_map = false;
             set_drawer_open(false);
             clear_inspect_selection();
@@ -1936,7 +1979,7 @@ fn sync_falloff_active(falloff_even: bool, brush_radius: i32) {
 fn apply_elevation_brush_intent(s: &mut AppState) {
     s.color_mode = ColorMode::Elevation;
     s.show_elevation_labels = true;
-    s.show_peaks = true;
+    // Peaks stay author-controlled — Raise/Lower does not force them on.
 }
 
 /// Map a brush to absolute target elevation. `Inspect` / Raise / Lower write nothing here.
@@ -1974,7 +2017,7 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                         s.show_grid = !s.show_grid;
                         s.show_grid
                     };
-                    button.set_text_content(Some(if show_grid { "Cells: On" } else { "Cells: Off" }));
+                    button.set_text_content(Some(grid_lines_toggle_label(show_grid)));
                     schedule_redraw(state.clone());
                 }
                 "color-mode" => {
@@ -1984,19 +2027,23 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                     } else {
                         ColorMode::Hydro
                     };
-                    if s.color_mode == ColorMode::Elevation {
-                        s.show_peaks = true;
-                    }
                     drop(s);
                     schedule_redraw(state.clone());
                 }
                 "elevation-labels" => {
-                    state.borrow_mut().show_elevation_labels =
-                        !state.borrow().show_elevation_labels;
+                    let show = {
+                        let s = state.borrow();
+                        !s.show_elevation_labels
+                    };
+                    state.borrow_mut().show_elevation_labels = show;
                     schedule_redraw(state.clone());
                 }
                 "peaks" => {
-                    state.borrow_mut().show_peaks = !state.borrow().show_peaks;
+                    let show = {
+                        let s = state.borrow();
+                        !s.show_peaks
+                    };
+                    state.borrow_mut().show_peaks = show;
                     schedule_redraw(state.clone());
                 }
                 _ => {}
@@ -2046,19 +2093,30 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
         if let Ok(Some(button)) = target.closest("[data-dock]") {
             let Some(tab) = button.get_attribute("data-dock") else { return };
             toggle_dock_tab(&tab);
-            if tab == "inspect" {
-                let brush = Brush::Inspect;
-                {
-                    let mut s = state.borrow_mut();
-                    s.brush = brush.clone();
-                    s.hover_cell = None;
-                    s.paint_active = false;
-                    s.paint_moved = false;
-                    s.paint_last_cell = None;
-                    s.suppress_next_click = false;
+            let brush = {
+                let mut s = state.borrow_mut();
+                clear_pointer_interaction(&mut s);
+                match tab.as_str() {
+                    "inspect" => {
+                        s.brush = Brush::Inspect;
+                        s.hover_cell = None;
+                        Brush::Inspect
+                    }
+                    "terrain" => {
+                        if matches!(s.brush, Brush::Inspect) {
+                            s.brush = s.last_paint_brush.clone();
+                        }
+                        s.hover_cell = None;
+                        s.brush.clone()
+                    }
+                    _ => s.brush.clone(),
                 }
+            };
+            if tab == "inspect" || tab == "terrain" {
                 sync_dock_rail_for_brush(&brush);
-                sync_brush_swatch_active(&brush);
+                if tab == "terrain" {
+                    sync_brush_swatch_active(&brush);
+                }
             }
             return;
         }
@@ -2075,15 +2133,10 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
         };
         {
             let mut s = state.borrow_mut();
-            s.brush = brush.clone();
+            apply_paint_brush(&mut s, brush.clone());
             if matches!(brush, Brush::Raise | Brush::Lower) {
                 apply_elevation_brush_intent(&mut s);
             }
-            s.hover_cell = None;
-            s.paint_active = false;
-            s.paint_moved = false;
-            s.paint_last_cell = None;
-            s.suppress_next_click = false;
         }
         open_dock_tab("terrain");
         sync_dock_rail_for_brush(&brush);
