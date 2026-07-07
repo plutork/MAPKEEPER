@@ -605,6 +605,29 @@ fn apply_paint_brush(s: &mut AppState, brush: Brush) {
     clear_pointer_interaction(s);
 }
 
+fn active_dock_tab() -> Option<String> {
+    document()
+        .get_element_by_id("dock-rail")
+        .and_then(|rail| {
+            rail.query_selector("[data-dock].active")
+                .ok()
+                .flatten()
+                .and_then(|el| el.get_attribute("data-dock"))
+        })
+}
+
+/// tool-dock-brush-deselect-v1: leave paint mode — pan / inspect on canvas.
+fn deactivate_paint_brush(s: &mut AppState) {
+    s.brush = Brush::Inspect;
+    s.hover_cell = None;
+    clear_pointer_interaction(s);
+}
+
+fn sync_paint_tool_ui(brush: &Brush) {
+    sync_dock_rail_for_brush(brush);
+    sync_brush_swatch_active(brush);
+}
+
 fn sync_dock_rail_for_brush(brush: &Brush) {
     let terrain_active = !matches!(brush, Brush::Inspect);
     if let Some(rail) = document().get_element_by_id("dock-rail") {
@@ -2092,31 +2115,50 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
 
         if let Ok(Some(button)) = target.closest("[data-dock]") {
             let Some(tab) = button.get_attribute("data-dock") else { return };
+            let current = active_dock_tab();
+            let drawer_open = drawer_is_open();
+            // tool-dock-brush-deselect-v1 (variant A): repeat Terrain deselects brush, drawer stays.
+            let terrain_deselect = tab == "terrain"
+                && current.as_deref() == Some("terrain")
+                && drawer_open
+                && brush_paints(&state.borrow().brush);
+            if terrain_deselect {
+                {
+                    let mut s = state.borrow_mut();
+                    deactivate_paint_brush(&mut s);
+                }
+                sync_paint_tool_ui(&Brush::Inspect);
+                schedule_redraw(state.clone());
+                return;
+            }
+
             toggle_dock_tab(&tab);
-            let brush = {
-                let mut s = state.borrow_mut();
-                clear_pointer_interaction(&mut s);
-                match tab.as_str() {
-                    "inspect" => {
-                        s.brush = Brush::Inspect;
-                        s.hover_cell = None;
-                        Brush::Inspect
+
+            match tab.as_str() {
+                "inspect" | "view" | "world" => {
+                    {
+                        let mut s = state.borrow_mut();
+                        deactivate_paint_brush(&mut s);
                     }
-                    "terrain" => {
+                    sync_paint_tool_ui(&Brush::Inspect);
+                    schedule_redraw(state.clone());
+                }
+                "terrain" => {
+                    let brush = {
+                        let mut s = state.borrow_mut();
+                        clear_pointer_interaction(&mut s);
                         if matches!(s.brush, Brush::Inspect) {
                             s.brush = s.last_paint_brush.clone();
                         }
                         s.hover_cell = None;
                         s.brush.clone()
+                    };
+                    sync_paint_tool_ui(&brush);
+                    if brush_paints(&brush) {
+                        schedule_redraw(state.clone());
                     }
-                    _ => s.brush.clone(),
                 }
-            };
-            if tab == "inspect" || tab == "terrain" {
-                sync_dock_rail_for_brush(&brush);
-                if tab == "terrain" {
-                    sync_brush_swatch_active(&brush);
-                }
+                _ => {}
             }
             return;
         }
@@ -2139,8 +2181,7 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
             }
         }
         open_dock_tab("terrain");
-        sync_dock_rail_for_brush(&brush);
-        sync_brush_swatch_active(&brush);
+        sync_paint_tool_ui(&brush);
         if matches!(brush, Brush::Raise | Brush::Lower) {
             sync_falloff_active(state.borrow().falloff_even, state.borrow().brush_radius);
             sync_brush_step_active(state.borrow().brush_step);
