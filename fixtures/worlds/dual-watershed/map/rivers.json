@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "rivers": [
+    {
+      "id": 1,
+      "cells": [
+        4,
+        5,
+        6,
+        7
+      ],
+      "source": 4,
+      "mouth": 7,
+      "parent": 1,
+      "basin": 1
+    },
+    {
+      "id": 2,
+      "cells": [
+        33,
+        34,
+        35,
+        21
+      ],
+      "source": 33,
+      "mouth": 21,
+      "parent": 2,
+      "basin": 2
+    },
+    {
+      "id": 3,
+      "cells": [
+        50,
+        49,
+        35
+      ],
+      "source": 50,
+      "mouth": 35,
+      "parent": 2,
+      "basin": 2
+    },
+    {
+      "id": 6,
+      "cells": [
+        11,
+        12
+      ],
+      "source": 11,
+      "mouth": 12,
+      "parent": 6,
+      "basin": 6
+    },
+    {
+      "id": 9,
+      "cells": [
+        62,
+        76,
+        90
+      ],
+      "source": 62,
+      "mouth": 90,
+      "parent": 10,
+      "basin": 10
+    },
+    {
+      "id": 10,
+      "cells": [
+        89,
+        90,
+        104
+      ],
+      "source": 89,
+      "mouth": 104,
+      "parent": 10,
+      "basin": 10
+    },
+    {
+      "id": 11,
+      "cells": [
+        22,
+        21
+      ],
+      "source": 22,
+      "mouth": 21,
+      "parent": 2,
+      "basin": 2
+    },
+    {
+      "id": 12,
+      "cells": [
+        77,
+        91,
+        104
+      ],
+      "source": 77,
+      "mouth": 104,
+      "parent": 10,
+      "basin": 10
+    },
+    {
+      "id": 13,
+      "cells": [
+        106,
+        105
+      ],
+      "source": 106,
+      "mouth": 105,
+      "parent": 13,
+      "basin": 13
+    },
+    {
+      "id": 16,
+      "cells": [
+        103,
+        104
+      ],
+      "source": 103,
+      "mouth": 104,
+      "parent": 12,
+      "basin": 10
+    }
+  ],
+  "next_id": 17
+}
