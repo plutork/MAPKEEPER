@@ -37,6 +37,7 @@ use mapkeeper_core::rivers::{
     append_cell, create_river, delete_river, pop_last_cell, sync_river_id_layer, cell_index,
     RiverCatalog, RiverError, RIVER_CATALOG_FILE,
 };
+use mapkeeper_core::build_state::{self, BUILD_STEP_LAND_SILHOUETTE};
 use mapkeeper_core::map_preset::{legacy_default_bounds, parse_map_preset, rect_cell_count, MapPreset};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
@@ -114,6 +115,10 @@ struct ProjectStatus {
     valid: bool,
     /// `true` if `map/manifest.json` is missing — editor uses default Small bounds.
     legacy_map: bool,
+    /// Build wizard draft (`[build] status = "draft"` in mapkeeper.toml).
+    build_draft: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    build_step: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -130,6 +135,16 @@ struct CreateProjectInput {
     /// `small` | `medium` | `large` — defaults to small.
     #[serde(default)]
     map_preset: Option<String>,
+    /// When true, seed `[build]` draft for wizard flow (home-build-draft-v1).
+    #[serde(default)]
+    build_wizard: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct BuildStateInput {
+    status: String,
+    #[serde(default)]
+    step: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -419,6 +434,7 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         .route("/api/projects/forget", axum::routing::post(forget_project))
         .route("/api/projects/delete", axum::routing::post(delete_project))
         .route("/api/projects/close", axum::routing::post(close_project))
+        .route("/api/build", axum::routing::put(put_build_state))
         .route("/api/fixture-worlds", get(list_fixture_worlds_handler))
         .route("/api/fixture-worlds/open", axum::routing::post(open_fixture_world))
         .route("/api/map", get(get_map))
@@ -482,7 +498,22 @@ async fn list_projects(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoRe
             let world_path = Path::new(&p.path);
             let valid = world_path.join("mapkeeper.toml").exists();
             let legacy_map = valid && legacy_map_folder(world_path);
-            ProjectStatus { id: p.id, path: p.path, valid, legacy_map }
+            let (build_draft, build_step) = if valid {
+                match build_state::read_build(world_path) {
+                    Some(b) if build_state::is_draft(&b) => (true, Some(b.step)),
+                    _ => (false, None),
+                }
+            } else {
+                (false, None)
+            };
+            ProjectStatus {
+                id: p.id,
+                path: p.path,
+                valid,
+                legacy_map,
+                build_draft,
+                build_step,
+            }
         })
         .collect();
     let active = state.lock().unwrap().active.as_ref().map(|a| ProjectEntry {
@@ -536,7 +567,10 @@ async fn create_project(
             return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
         }
     }
-    if let Err(err) = std::fs::write(&manifest, world::manifest_toml(&input.id)) {
+    if let Err(err) = std::fs::write(
+        &manifest,
+        build_state::manifest_toml_with_build(&input.id, input.build_wizard == Some(true)),
+    ) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
@@ -669,6 +703,32 @@ async fn delete_project(
 async fn close_project(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
     state.lock().unwrap().active = None;
     StatusCode::NO_CONTENT
+}
+
+/// home-build-draft-v1: persist or clear `[build]` on the active world.
+async fn put_build_state(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(input): Json<BuildStateInput>,
+) -> impl IntoResponse {
+    let world_path = {
+        let guard = state.lock().unwrap();
+        let Some(active) = guard.active.as_ref() else {
+            return (StatusCode::CONFLICT, "no active world").into_response();
+        };
+        active.path.clone()
+    };
+    let result = match input.status.as_str() {
+        "draft" => {
+            let step = input.step.unwrap_or(BUILD_STEP_LAND_SILHOUETTE);
+            build_state::write_build_draft(&world_path, step)
+        }
+        "complete" => build_state::clear_build(&world_path),
+        _ => return (StatusCode::BAD_REQUEST, "status must be draft or complete").into_response(),
+    };
+    match result {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+    }
 }
 
 async fn get_map(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {

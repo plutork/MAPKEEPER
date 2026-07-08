@@ -321,6 +321,8 @@ struct ProjectStatus {
     path: String,
     valid: bool,
     legacy_map: bool,
+    build_draft: bool,
+    build_step: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -331,32 +333,23 @@ struct ProjectsResponse {
 }
 
 #[derive(Serialize)]
+struct BuildStateInput {
+    status: &'static str,
+    step: u32,
+}
+
+#[derive(Serialize)]
 struct CreateProjectInput<'a> {
     id: &'a str,
     path: &'a str,
     map_preset: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    build_wizard: Option<bool>,
 }
 
 #[derive(Serialize)]
 struct OpenProjectInput<'a> {
     path: &'a str,
-}
-
-#[derive(Deserialize)]
-struct FixtureWorldInfo {
-    slug: String,
-    label: String,
-}
-
-#[derive(Deserialize)]
-struct FixtureWorldsResponse {
-    available: bool,
-    worlds: Vec<FixtureWorldInfo>,
-}
-
-#[derive(Serialize)]
-struct OpenFixtureInput<'a> {
-    slug: &'a str,
 }
 
 #[derive(Serialize)]
@@ -516,7 +509,6 @@ pub fn start() {
     attach_generate_rivers_click(state.clone());
     attach_preset_warn_handlers();
     attach_project_list_click(state.clone());
-    attach_fixture_worlds_click(state.clone());
     attach_dock_click(state.clone());
     attach_escape_key();
     attach_pan_drag(state.clone());
@@ -902,7 +894,29 @@ fn show_view(name: &str) {
     }
 }
 
-// world-pipeline--land-silhouette-v1 shell (D-57): fullscreen build wizard chrome.
+fn build_step_label(step: u32) -> &'static str {
+    match step {
+        3 => "Step 3 · Land silhouette",
+        _ => "Build in progress",
+    }
+}
+
+// home-build-draft-v1: persist wizard draft on active world.
+async fn persist_build_draft(step: u32) -> bool {
+    let body = BuildStateInput {
+        status: "draft",
+        step,
+    };
+    let Ok(resp) = gloo_net::http::Request::put("/api/build")
+        .json(&body)
+        .expect("serializing build state")
+        .send()
+        .await
+    else {
+        return false;
+    };
+    resp.ok()
+}
 fn set_wizard_active(active: bool) {
     let Some(editor) = document().get_element_by_id("editor") else {
         return;
@@ -954,7 +968,11 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 flush_pending_paints(state).await;
-                set_wizard_status("Draft saved.");
+                if persist_build_draft(3).await {
+                    set_wizard_status("Draft saved.");
+                } else {
+                    set_wizard_status("Could not save draft.");
+                }
             });
         });
         document()
@@ -1032,6 +1050,13 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
 }
 
 async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
+    if document()
+        .get_element_by_id("editor")
+        .is_some_and(|el| el.class_list().contains("wizard-active"))
+    {
+        let _ = persist_build_draft(3).await;
+    }
+    close_build_wizard();
     let _ = gloo_net::http::Request::post("/api/projects/close").send().await;
     let mut state_mut = state.borrow_mut();
     state_mut.cells.clear();
@@ -1325,7 +1350,6 @@ async fn refresh_projects(state: Rc<RefCell<AppState>>) {
     }
     refresh_suggested_path(&state);
     render_project_list(&data.projects);
-    wasm_bindgen_futures::spawn_local(refresh_fixture_worlds());
 
     if let Some(active) = data.active {
         let _ = active;
@@ -1362,9 +1386,11 @@ fn render_project_list(projects: &[ProjectStatus]) {
             ""
         };
         let actions = if p.valid {
+            let draft_attr = if p.build_draft { "1" } else { "0" };
             format!(
-                "<button class=\"open-btn\" data-path=\"{path}\" type=\"button\">Open</button><button class=\"manage-btn\" type=\"button\">Manage</button>",
-                path = html_escape(&p.path)
+                "<button class=\"open-btn\" data-path=\"{path}\" data-build-draft=\"{draft_attr}\" type=\"button\">Open</button><button class=\"manage-btn\" type=\"button\">Manage</button>",
+                path = html_escape(&p.path),
+                draft_attr = draft_attr
             )
         } else {
             format!(
@@ -1380,104 +1406,31 @@ fn render_project_list(projects: &[ProjectStatus]) {
         } else {
             String::new()
         };
+        let draft_badge = if p.build_draft {
+            "<span class=\"badge draft-badge\">Draft</span>"
+        } else {
+            ""
+        };
+        let build_hint = if p.build_draft {
+            format!(
+                "<div class=\"build-hint\">{}</div>",
+                build_step_label(p.build_step.unwrap_or(3))
+            )
+        } else {
+            String::new()
+        };
         html.push_str(&format!(
-            "<li data-path=\"{path}\"><div class=\"main-row\"><div class=\"info\"><span class=\"id\">{id}</span><span class=\"path\">{path}</span>{missing}</div><div class=\"actions\">{actions}</div></div>{manage_row}</li>",
+            "<li data-path=\"{path}\"><div class=\"main-row\"><div class=\"info\"><span class=\"id\">{id}</span>{draft_badge}{build_hint}<span class=\"path\">{path}</span>{missing}</div><div class=\"actions\">{actions}</div></div>{manage_row}</li>",
             id = html_escape(&p.id),
             path = html_escape(&p.path),
+            draft_badge = draft_badge,
+            build_hint = build_hint,
             missing = missing,
             actions = actions,
             manage_row = manage_row,
         ));
     }
     list.set_inner_html(&html);
-}
-
-async fn refresh_fixture_worlds() {
-    let Ok(resp) = gloo_net::http::Request::get("/api/fixture-worlds").send().await else {
-        return;
-    };
-    let Ok(data) = resp.json::<FixtureWorldsResponse>().await else {
-        return;
-    };
-    render_fixture_worlds(&data);
-}
-
-fn render_fixture_worlds(data: &FixtureWorldsResponse) {
-    let document = document();
-    let Some(card) = document.get_element_by_id("fixture-worlds-card") else {
-        return;
-    };
-    let Some(list) = document.get_element_by_id("fixture-world-list") else {
-        return;
-    };
-    let unavailable = document.get_element_by_id("fixture-unavailable");
-
-    if !data.available || data.worlds.is_empty() {
-        let _ = card.class_list().add_1("unavailable");
-        list.set_inner_html("");
-        if let Some(note) = unavailable {
-            let _ = note.class_list().remove_1("hidden");
-        }
-        return;
-    }
-
-    let _ = card.class_list().remove_1("unavailable");
-    if let Some(note) = unavailable {
-        let _ = note.class_list().add_1("hidden");
-    }
-
-    let mut html = String::new();
-    for w in &data.worlds {
-        html.push_str(&format!(
-            "<button class=\"fixture-btn\" data-slug=\"{slug}\" type=\"button\">{label}</button>",
-            slug = html_escape(&w.slug),
-            label = html_escape(&w.label),
-        ));
-    }
-    list.set_inner_html(&html);
-}
-
-fn attach_fixture_worlds_click(state: Rc<RefCell<AppState>>) {
-    let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
-        let Some(target) = event.target() else { return };
-        let Ok(btn) = target.dyn_into::<web_sys::HtmlElement>() else { return };
-        if !btn.class_list().contains("fixture-btn") {
-            return;
-        }
-        let slug = btn.get_attribute("data-slug").unwrap_or_default();
-        if slug.is_empty() {
-            return;
-        }
-        let state = state.clone();
-        set_text("fixture-status", "Opening…");
-        wasm_bindgen_futures::spawn_local(async move {
-            let body = OpenFixtureInput { slug: &slug };
-            let sent = gloo_net::http::Request::post("/api/fixture-worlds/open").json(&body);
-            let sent = match sent {
-                Ok(req) => req.send().await,
-                Err(err) => {
-                    set_text("fixture-status", &format!("Error: {err}"));
-                    return;
-                }
-            };
-            match sent {
-                Ok(resp) if resp.ok() => {
-                    set_text("fixture-status", "");
-                    show_view("editor");
-                    wasm_bindgen_futures::spawn_local(load_map(state));
-                }
-                Ok(resp) => {
-                    let msg = resp.text().await.unwrap_or_else(|_| "open failed".to_string());
-                    set_text("fixture-status", &msg);
-                }
-                Err(err) => set_text("fixture-status", &format!("Error: {err}")),
-            }
-        });
-    });
-    if let Ok(Some(list)) = document().query_selector("#fixture-world-list") {
-        let _ = list.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
-    }
-    closure.forget();
 }
 
 fn html_escape(s: &str) -> String {
@@ -2359,7 +2312,12 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
         let state = state.clone();
         set_text("home-status", "Creating…");
         wasm_bindgen_futures::spawn_local(async move {
-            let body = CreateProjectInput { id: &id, path: &path, map_preset: &preset };
+            let body = CreateProjectInput {
+                id: &id,
+                path: &path,
+                map_preset: &preset,
+                build_wizard: None,
+            };
             let sent = gloo_net::http::Request::post("/api/projects").json(&body);
             let sent = match sent {
                 Ok(req) => req.send().await,
@@ -2420,7 +2378,12 @@ fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
         let state = state.clone();
         set_text("generate-status", "Creating…");
         wasm_bindgen_futures::spawn_local(async move {
-            let body = CreateProjectInput { id: &id, path: &path, map_preset: &preset };
+            let body = CreateProjectInput {
+                id: &id,
+                path: &path,
+                map_preset: &preset,
+                build_wizard: Some(true),
+            };
             let sent = gloo_net::http::Request::post("/api/projects").json(&body);
             let sent = match sent {
                 Ok(req) => req.send().await,
@@ -2931,6 +2894,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
 
         let Ok(Some(button)) = target.closest(".open-btn") else { return };
         let Some(path) = button.get_attribute("data-path") else { return };
+        let resume_wizard = button.get_attribute("data-build-draft").as_deref() == Some("1");
 
         let state = state.clone();
         set_text("home-status", "Opening…");
@@ -2947,9 +2911,13 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
             match sent {
                 Ok(resp) if resp.ok() => {
                     set_text("home-status", "");
-                    close_build_wizard();
                     show_view("editor");
-                    wasm_bindgen_futures::spawn_local(load_map(state));
+                    load_map(state.clone()).await;
+                    if resume_wizard {
+                        open_build_wizard();
+                    } else {
+                        close_build_wizard();
+                    }
                 }
                 Ok(resp) => {
                     let msg = resp.text().await.unwrap_or_else(|_| "open failed".to_string());

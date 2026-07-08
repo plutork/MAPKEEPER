@@ -157,7 +157,7 @@
   .brand .sub { color: #8a8f98; font-size: 12px; margin: 6px 0 0; }
   .cards-grid {
     display: grid;
-    grid-template-columns: minmax(180px, 0.82fr) minmax(520px, 1.7fr) minmax(180px, 0.82fr);
+    grid-template-columns: minmax(280px, 1.2fr) minmax(280px, 1.2fr) minmax(160px, 0.65fr);
     gap: 14px;
     align-items: stretch;
   }
@@ -172,6 +172,9 @@
   }
   .home-card.active {
     border-color: #3a4a58;
+    min-height: 470px;
+  }
+  .home-card.build-card {
     min-height: 470px;
   }
   .home-card.emphasis {
@@ -202,6 +205,16 @@
     color: #c7d4e7;
     border: 1px solid #424c5e;
     white-space: nowrap;
+  }
+  .badge.draft-badge {
+    background: #2e4038;
+    color: #9fe3c4;
+    border-color: #4a6a58;
+  }
+  .build-hint {
+    font-size: 11px;
+    color: #8a8f98;
+    margin-top: 2px;
   }
   .card-sub {
     margin: 0 0 10px;
@@ -239,29 +252,6 @@
   #project-list li.manage-open .manage-row { display: flex; }
   #project-empty { color: #666f7a; font-size: 13px; display: none; }
   #project-empty.visible { display: block; }
-  .fixture-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 4px;
-  }
-  .fixture-btn {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: #243044;
-    color: #dce8f8;
-    border: 1px solid #3a4f6b;
-    border-radius: 6px;
-    padding: 8px 10px;
-    font: inherit;
-    font-size: 13px;
-    cursor: pointer;
-  }
-  .fixture-btn:hover { background: #2c3a52; }
-  #fixture-status { font-size: 12px; color: #d97757; min-height: 16px; margin-top: 8px; }
-  #fixture-worlds-card.unavailable { opacity: 0.72; }
-  #fixture-unavailable.hidden { display: none; }
   #home input, #home select {
     display: block;
     width: 100%;
@@ -489,7 +479,7 @@
     </header>
 
     <div class="cards-grid">
-      <article class="home-card emphasis">
+      <article class="home-card emphasis build-card">
         <div class="card-head">
           <h2>Build World</h2>
         </div>
@@ -548,15 +538,13 @@
         </div>
       </article>
 
-      <article class="home-card unavailable" id="fixture-worlds-card">
+      <article class="home-card disabled unavailable" id="community-worlds-card">
         <div class="card-head">
-          <h2>River test maps</h2>
-          <span class="badge">dev</span>
+          <h2>Community worlds</h2>
+          <span class="badge">soon</span>
         </div>
-        <p class="card-sub">Curated elevation presets — copied to your worlds folder on first open.</p>
-        <div id="fixture-world-list" class="fixture-grid"></div>
-        <p id="fixture-unavailable" class="card-note">Available when running from a MAPKEEPER repo checkout.</p>
-        <div id="fixture-status"></div>
+        <p class="card-sub">Browse and import shared worlds from the community.</p>
+        <p class="card-note">Coming later — not available in this version.</p>
       </article>
     </div>
   </div>

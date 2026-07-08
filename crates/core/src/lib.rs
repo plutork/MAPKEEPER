@@ -1,6 +1,7 @@
 //! Platform-neutral rules: cell_id, hex geometry, profile + validation model.
 //! No filesystem, UI, Tauri, or browser assumptions — see `server`/`cli`/`web` for I/O.
 
+pub mod build_state;
 pub mod cell_id;
 pub mod hex;
 pub mod hydro;
