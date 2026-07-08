@@ -422,6 +422,20 @@
   }
   .wiz-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .wiz-btn-row.hidden { display: none; }
+  .wiz-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid #2a2f36;
+  }
+  .wiz-section:first-of-type {
+    padding-top: 0;
+    border-top: 0;
+  }
+  .wiz-section .wiz-label {
+    color: #9aa4b1;
+  }
   .wiz-style-btn {
     padding: 8px 10px;
     font-size: 12px;
@@ -483,7 +497,6 @@
     opacity: 0.42;
     cursor: not-allowed;
   }
-  #wiz-finish { background: #2f6b4f; color: #e9fff2; }
   #wiz-save-draft { background: #2a3f4f; color: #dce8f8; }
   #wiz-worlds { background: #2a2f36; color: #eee; }
 </style>
@@ -672,7 +685,6 @@
         <span class="wiz-crumb">Geo &rsaquo; Land silhouette</span>
         <span class="wiz-spacer"></span>
         <span id="wizard-status"></span>
-        <button id="wiz-finish" type="button" disabled title="Available after you accept the land silhouette">Finish / Open Editor</button>
       </header>
       <nav class="wiz-left" aria-label="Build steps">
         <div class="wiz-group expanded">
@@ -695,26 +707,26 @@
       </nav>
       <aside class="wiz-right">
         <h2>Land silhouette</h2>
-        <p class="wiz-hint">Pick the overall landmass layout and coastline character. Then generate A/B/C variants below and accept one.</p>
-        <p class="wiz-label">Style</p>
-        <div class="wiz-btn-row" id="wiz-styles">
-          <button class="wiz-style-btn active" type="button" data-wiz-style="continent">One continent</button>
-          <button class="wiz-style-btn" type="button" data-wiz-style="archipelago">Archipelago</button>
-          <button class="wiz-style-btn" type="button" data-wiz-style="dual">Two landmasses</button>
-          <button class="wiz-style-btn" type="button" data-wiz-style="island">Island</button>
-        </div>
-        <p class="wiz-label">Character</p>
-        <div class="wiz-btn-row" id="wiz-chars">
-          <button class="wiz-style-btn active" type="button" data-wiz-char="smooth">Smooth shores</button>
-          <button class="wiz-style-btn" type="button" data-wiz-char="jagged">Jagged shores</button>
-        </div>
-        <p class="wiz-hint" id="wiz-right-note">Generate A/B/C, accept the best silhouette, then optionally edit land and ocean cells.</p>
-        <p class="wiz-label">Edit brush</p>
-        <div class="wiz-btn-row hidden" id="wiz-edit-brushes">
-          <button id="wiz-edit-land" class="wiz-style-btn active" type="button" data-wiz-edit-brush="land">Land</button>
-          <button id="wiz-edit-ocean" class="wiz-style-btn" type="button" data-wiz-edit-brush="ocean">Ocean</button>
-        </div>
-        <footer class="wiz-bottom">
+        <p class="wiz-hint">Follow blocks 1 to 4: set parameters, generate variants, accept/edit, then continue.</p>
+
+        <section class="wiz-section">
+          <p class="wiz-label">1. Generation parameters</p>
+          <p class="wiz-label">Style</p>
+          <div class="wiz-btn-row" id="wiz-styles">
+            <button class="wiz-style-btn active" type="button" data-wiz-style="continent">One continent</button>
+            <button class="wiz-style-btn" type="button" data-wiz-style="archipelago">Archipelago</button>
+            <button class="wiz-style-btn" type="button" data-wiz-style="dual">Two landmasses</button>
+            <button class="wiz-style-btn" type="button" data-wiz-style="island">Island</button>
+          </div>
+          <p class="wiz-label">Character</p>
+          <div class="wiz-btn-row" id="wiz-chars">
+            <button class="wiz-style-btn active" type="button" data-wiz-char="smooth">Smooth shores</button>
+            <button class="wiz-style-btn" type="button" data-wiz-char="jagged">Jagged shores</button>
+          </div>
+        </section>
+
+        <section class="wiz-section">
+          <p class="wiz-label">2. Generation controls</p>
           <div class="wiz-btn-row wiz-bottom-variants">
             <span class="wiz-label">Variants</span>
             <div id="wiz-variants" class="wiz-btn-row">
@@ -723,13 +735,32 @@
               <button id="wiz-variant-c" class="wiz-variant-btn" type="button" data-wiz-variant="C">C</button>
             </div>
           </div>
-          <div class="wiz-btn-row wiz-bottom-actions">
+          <div class="wiz-btn-row">
             <button id="wiz-regenerate" class="wiz-action-btn" type="button">Regenerate</button>
+          </div>
+        </section>
+
+        <section class="wiz-section">
+          <p class="wiz-label">3. Accept or Edit</p>
+          <div class="wiz-btn-row wiz-bottom-actions">
             <button id="wiz-accept" class="wiz-action-btn" type="button">Accept</button>
             <button id="wiz-edit" class="wiz-action-btn wiz-disabled" type="button" disabled>Edit</button>
+          </div>
+          <p class="wiz-label">Edit brush</p>
+          <div class="wiz-btn-row hidden" id="wiz-edit-brushes">
+            <button id="wiz-edit-land" class="wiz-style-btn active" type="button" data-wiz-edit-brush="land">Land</button>
+            <button id="wiz-edit-ocean" class="wiz-style-btn" type="button" data-wiz-edit-brush="ocean">Ocean</button>
+          </div>
+        </section>
+
+        <section class="wiz-section">
+          <p class="wiz-label">4. Next step</p>
+          <div class="wiz-btn-row wiz-bottom-actions">
             <button id="wiz-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
           </div>
-        </footer>
+          <p class="wiz-hint" id="wiz-right-note">Generate A/B/C, accept one, optionally edit, then continue.</p>
+        </section>
+
       </aside>
     </div>
   </div>

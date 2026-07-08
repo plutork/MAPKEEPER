@@ -970,7 +970,7 @@ fn set_wizard_active(active: bool) {
     if active {
         let _ = editor.class_list().add_1("wizard-active");
         set_drawer_open(false);
-        set_wizard_status("Step 3: generate and accept a land silhouette.");
+        set_wizard_status("Step 3 flow: 1) parameters, 2) generate, 3) accept/edit, 4) continue.");
     } else {
         let _ = editor.class_list().remove_1("wizard-active");
         set_wizard_status("");
@@ -1053,7 +1053,6 @@ fn sync_wizard_actions(state: &AppState) {
     set_button_disabled("wiz-accept", false);
     set_button_disabled("wiz-edit", !state.wizard_accepted);
     set_button_disabled("wiz-continue", !state.wizard_accepted);
-    set_button_disabled("wiz-finish", !state.wizard_accepted);
     sync_wizard_variant_buttons(&state.wizard_variant);
     sync_wizard_edit_mode_ui(state.wizard_edit_mode, &state.wizard_edit_brush);
 }
@@ -1202,7 +1201,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 wiz_toggle_style_group("wiz-chars", "data-wiz-char", &el);
                 state.borrow_mut().wizard_character = character;
             }
-            set_wizard_status("Style updated. Generate to preview.");
+            set_wizard_status("Parameters updated. Use Generation controls.");
         });
         for id in ["wiz-styles", "wiz-chars"] {
             if let Ok(Some(root)) = document().query_selector(&format!("#{id}")) {
@@ -1278,7 +1277,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 s.wizard_edit_mode = false;
                 sync_wizard_actions(&s);
             }
-            set_wizard_status("Silhouette accepted. You can Edit or Finish.");
+            set_wizard_status("Silhouette accepted. You can Edit or Continue.");
         });
         document()
             .get_element_by_id("wiz-accept")
@@ -1341,8 +1340,8 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Continue/Finish both close the build draft for this world.
-    for id in ["wiz-continue", "wiz-finish"] {
+    // Continue closes step 3 draft and exits wizard v1.
+    for id in ["wiz-continue"] {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
             let accepted = state.borrow().wizard_accepted;
