@@ -510,6 +510,7 @@ pub fn start() {
     attach_switch_world_click(state.clone());
     attach_create_click(state.clone());
     attach_generate_click(state.clone());
+    attach_generate_rivers_click(state.clone());
     attach_preset_warn_handlers();
     attach_project_list_click(state.clone());
     attach_fixture_worlds_click(state.clone());
@@ -533,6 +534,15 @@ fn window() -> web_sys::Window {
 
 fn document() -> web_sys::Document {
     window().document().expect("no document")
+}
+
+/// Click target may be a text node inside a button — walk up to the element.
+fn click_target_element(event: &web_sys::MouseEvent) -> Option<web_sys::Element> {
+    let target = event.target()?;
+    if let Ok(el) = target.clone().dyn_into::<web_sys::Element>() {
+        return Some(el);
+    }
+    target.dyn_into::<web_sys::Node>().ok()?.parent_element()
 }
 
 fn canvas() -> HtmlCanvasElement {
@@ -788,13 +798,23 @@ fn draw_rivers(state: &AppState, ctx: &CanvasRenderingContext2d, size: f64, ox: 
     if state.rivers.rivers.is_empty() {
         return;
     }
-    ctx.set_line_width(2.0);
     ctx.set_stroke_style_str("#4da6ff");
+    ctx.set_fill_style_str("#4da6ff");
+    ctx.set_line_width(2.0);
     ctx.set_line_cap("round");
     ctx.set_line_join("round");
     let bounds = state.map_bounds;
+    let dot_r = (size * 0.12).clamp(2.0, 6.0);
     for river in &state.rivers.rivers {
-        if river.cells.len() < 2 {
+        if river.cells.is_empty() {
+            continue;
+        }
+        if river.cells.len() == 1 {
+            let Some(cell) = bounds.from_index(river.cells[0]) else { continue };
+            let (x, y) = cell.to_pixel(size);
+            ctx.begin_path();
+            let _ = ctx.arc(ox + x, oy + y, dot_r, 0.0, std::f64::consts::TAU);
+            ctx.fill();
             continue;
         }
         ctx.begin_path();
@@ -1534,6 +1554,7 @@ async fn post_river_pop(state: Rc<RefCell<AppState>>) {
 }
 
 async fn post_river_generate(state: Rc<RefCell<AppState>>) {
+    set_text("river-status", "Generating rivers…");
     let Ok(resp) = gloo_net::http::Request::post("/api/rivers/generate").send().await else {
         set_text("river-status", "Generate failed (network)");
         return;
@@ -1554,6 +1575,13 @@ async fn post_river_generate(state: Rc<RefCell<AppState>>) {
         bump_content_rev(&mut s);
         sync_river_status(&s);
     }
+    set_text(
+        "river-status",
+        &format!(
+            "Generated {} river(s)",
+            state.borrow().rivers.rivers.len()
+        ),
+    );
     schedule_redraw(state);
 }
 
@@ -2224,6 +2252,19 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
 }
 
 /// "Generate" on Home — same scaffold API as Create; blank hex at chosen preset (D-40).
+fn attach_generate_rivers_click(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut()>::new(move || {
+        set_text("river-status", "Generating rivers…");
+        wasm_bindgen_futures::spawn_local(post_river_generate(state.clone()));
+    });
+    document()
+        .get_element_by_id("generate-rivers")
+        .expect("missing #generate-rivers")
+        .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+        .expect("attaching generate-rivers handler");
+    closure.forget();
+}
+
 fn attach_generate_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
         let id = input("generate-id").value();
@@ -2388,7 +2429,7 @@ fn brush_paints(brush: &Brush) -> bool {
 /// Tool dock: rail tabs toggle drawers; hydro swatches set the active brush.
 fn attach_dock_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else { return };
+        let Some(target) = click_target_element(&event) else { return };
 
         if let Ok(Some(button)) = target.closest("[data-view-toggle]") {
             let Some(kind) = button.get_attribute("data-view-toggle") else { return };
@@ -2547,16 +2588,6 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                 }
                 "undo" => {
                     wasm_bindgen_futures::spawn_local(post_river_pop(state.clone()));
-                }
-                "generate" => {
-                    let ok = window()
-                        .confirm_with_message(
-                            "Replace all rivers on this map? Hand-drawn rivers will be removed.",
-                        )
-                        .unwrap_or(false);
-                    if ok {
-                        wasm_bindgen_futures::spawn_local(post_river_generate(state.clone()));
-                    }
                 }
                 _ => {}
             }
