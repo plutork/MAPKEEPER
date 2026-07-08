@@ -1044,6 +1044,29 @@ fn sync_wizard_variant_labels(compare_set: &str) {
     }
 }
 
+fn sync_wizard_compare_set_buttons(active: &str) {
+    let Ok(Some(root)) = document().query_selector("#wiz-compare-sets") else {
+        return;
+    };
+    if let Ok(list) = root.query_selector_all("[data-wiz-compare]") {
+        for i in 0..list.length() {
+            if let Some(node) = list.item(i) {
+                if let Ok(el) = node.dyn_into::<web_sys::Element>() {
+                    let is_active = el
+                        .get_attribute("data-wiz-compare")
+                        .as_deref()
+                        == Some(active);
+                    if is_active {
+                        let _ = el.class_list().add_1("active");
+                    } else {
+                        let _ = el.class_list().remove_1("active");
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn sync_wizard_edit_mode_ui(edit_mode: bool, brush: &str) {
     if let Some(row) = document().get_element_by_id("wiz-edit-brushes") {
         if edit_mode {
@@ -1069,6 +1092,7 @@ fn sync_wizard_actions(state: &AppState) {
     set_button_disabled("wiz-accept", false);
     set_button_disabled("wiz-edit", !state.wizard_accepted);
     set_button_disabled("wiz-continue", !state.wizard_accepted);
+    sync_wizard_compare_set_buttons(&state.wizard_compare_set);
     sync_wizard_variant_labels(&state.wizard_compare_set);
     sync_wizard_variant_buttons(&state.wizard_variant);
     sync_wizard_edit_mode_ui(state.wizard_edit_mode, &state.wizard_edit_brush);

@@ -198,11 +198,12 @@ fn is_land(
         }
         LayoutClass::Archipelago => archipelago_islands(nx, ny, cell, seed, roughness, 6),
         LayoutClass::ContinentAndIslands => {
-            // Main landmass + a few satellite islands (step3-geo-variant-classes-v1).
-            let main = island_metric(nx * 0.92, ny * 1.05, 0.62 + roughness * 0.55 * noise);
-            let sats = archipelago_islands(nx, ny, cell, seed ^ 0xC0FF_EE11, roughness, 4)
-                && (nx * nx + ny * ny).sqrt() > 0.48;
-            main || sats
+            // Readable main mass + a few mid-size satellites (not 1-hex dust).
+            let main = island_metric(nx + 0.10, ny * 0.95, 0.56 + roughness * 0.45 * noise);
+            let sat1 = island_metric(nx - 0.78, ny + 0.28, 0.20 + roughness * 0.28 * noise);
+            let sat2 = island_metric(nx - 0.70, ny - 0.48, 0.17 + roughness * 0.25 * noise);
+            let sat3 = island_metric(nx + 0.78, ny - 0.22, 0.15 + roughness * 0.22 * noise);
+            main || sat1 || sat2 || sat3
         }
         LayoutClass::Mediterranean => {
             // Land ring / basin: outer land, enclosed water → inland_sea after mark.
@@ -445,5 +446,40 @@ mod tests {
             count_kind(&layer, LAND_MASK_INLAND_SEA) > 0,
             "mediterranean should enclose inland_sea"
         );
+    }
+
+    #[test]
+    fn continent_and_islands_has_separated_land() {
+        let bounds = MapBounds::new(36, 20);
+        let layer = generate_land_mask(
+            &bounds,
+            LayoutClass::ContinentAndIslands,
+            ShoreCharacter::Smooth,
+            19,
+        );
+        let land = count_kind(&layer, LAND_MASK_LAND);
+        let ocean = count_kind(&layer, LAND_MASK_OCEAN) + count_kind(&layer, LAND_MASK_INLAND_SEA);
+        assert!(land > 40, "main continent should be substantial, got {land}");
+        assert!(ocean > 20, "ocean should remain between masses");
+        // At least one land cell near the left edge (satellite zone).
+        let mut left_land = false;
+        for index in 0..bounds.len() {
+            let Some(cell) = bounds.from_index(index) else {
+                continue;
+            };
+            let (x, _) = cell.to_pixel(1.0);
+            let (max_x, _) = half_extent(&bounds);
+            if x / max_x > -0.55 {
+                continue;
+            }
+            if matches!(
+                layer.state(index),
+                DenseState::Value(LayerValue::Text(ref t)) if t == LAND_MASK_LAND
+            ) {
+                left_land = true;
+                break;
+            }
+        }
+        assert!(left_land, "expected satellite land on the far side");
     }
 }
