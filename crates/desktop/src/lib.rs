@@ -70,6 +70,8 @@ pub fn run() {
                 WebviewUrl::External(url.parse().expect("embedded server URL is always valid")),
             )
             .title("mapkeeper")
+            // desktop-maximized-default-launch: start in maximized mode.
+            .maximized(true)
             .inner_size(1100.0, 720.0)
             .min_inner_size(720.0, 480.0)
             .build()
