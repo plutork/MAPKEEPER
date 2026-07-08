@@ -711,14 +711,13 @@
 
         <section class="wiz-section">
           <p class="wiz-label">1. Generation parameters</p>
-          <p class="wiz-label">Style</p>
-          <div class="wiz-btn-row" id="wiz-styles">
-            <button class="wiz-style-btn active" type="button" data-wiz-style="continent">One continent</button>
-            <button class="wiz-style-btn" type="button" data-wiz-style="archipelago">Archipelago</button>
-            <button class="wiz-style-btn" type="button" data-wiz-style="dual">Two landmasses</button>
-            <button class="wiz-style-btn" type="button" data-wiz-style="island">Island</button>
+          <p class="wiz-label">Compare set</p>
+          <div class="wiz-btn-row" id="wiz-compare-sets">
+            <button class="wiz-style-btn active" type="button" data-wiz-compare="macro">Macro shapes</button>
+            <button class="wiz-style-btn" type="button" data-wiz-compare="coastal">Coastal shapes</button>
           </div>
-          <p class="wiz-label">Character</p>
+          <p class="wiz-hint">A/B/C compare three different layout classes — not three seeds of one style.</p>
+          <p class="wiz-label">Shore character</p>
           <div class="wiz-btn-row" id="wiz-chars">
             <button class="wiz-style-btn active" type="button" data-wiz-char="smooth">Smooth shores</button>
             <button class="wiz-style-btn" type="button" data-wiz-char="jagged">Jagged shores</button>
@@ -728,11 +727,11 @@
         <section class="wiz-section">
           <p class="wiz-label">2. Generation controls</p>
           <div class="wiz-btn-row wiz-bottom-variants">
-            <span class="wiz-label">Variants</span>
+            <span class="wiz-label">Layout variants</span>
             <div id="wiz-variants" class="wiz-btn-row">
-              <button id="wiz-variant-a" class="wiz-variant-btn active" type="button" data-wiz-variant="A">A</button>
-              <button id="wiz-variant-b" class="wiz-variant-btn" type="button" data-wiz-variant="B">B</button>
-              <button id="wiz-variant-c" class="wiz-variant-btn" type="button" data-wiz-variant="C">C</button>
+              <button id="wiz-variant-a" class="wiz-variant-btn active" type="button" data-wiz-variant="A">A · Pangea</button>
+              <button id="wiz-variant-b" class="wiz-variant-btn" type="button" data-wiz-variant="B">B · Continents</button>
+              <button id="wiz-variant-c" class="wiz-variant-btn" type="button" data-wiz-variant="C">C · Archipelago</button>
             </div>
           </div>
           <div class="wiz-btn-row">

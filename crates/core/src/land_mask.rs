@@ -1,7 +1,10 @@
-//! Step 3 world pipeline foundation: land silhouette (`land_mask`) generators.
+//! Step 3 world pipeline: land silhouette (`land_mask`) generators.
 //!
 //! `land_mask` is a categorical dense layer (`ocean` | `land` | `inland_sea`)
 //! used as land/water source of truth for the build wizard.
+//!
+//! Layout classes (D-62 / `step3-geo-variant-classes-v1`): macro land/water
+//! arrangement only — not elevation or geology.
 
 use crate::hex::{Axial, MapBounds};
 use crate::layer::{DenseLayer, DenseState, LayerValue};
@@ -11,24 +14,92 @@ pub const LAND_MASK_OCEAN: &str = "ocean";
 pub const LAND_MASK_LAND: &str = "land";
 pub const LAND_MASK_INLAND_SEA: &str = "inland_sea";
 
+/// Macro silhouette layout (D-62). Shore character is orthogonal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SilhouetteStyle {
-    Continent,
+pub enum LayoutClass {
+    Pangea,
+    Continents,
     Archipelago,
-    Dual,
     Island,
+    ContinentAndIslands,
+    Mediterranean,
 }
 
-impl SilhouetteStyle {
-    pub fn parse(raw: &str) -> SilhouetteStyle {
+impl LayoutClass {
+    pub fn parse(raw: &str) -> LayoutClass {
         match raw.trim().to_ascii_lowercase().as_str() {
-            "archipelago" => SilhouetteStyle::Archipelago,
-            "dual" | "two-landmasses" => SilhouetteStyle::Dual,
-            "island" => SilhouetteStyle::Island,
-            _ => SilhouetteStyle::Continent,
+            "continents" | "dual" | "two-landmasses" => LayoutClass::Continents,
+            "archipelago" => LayoutClass::Archipelago,
+            "island" => LayoutClass::Island,
+            "continent_and_islands" | "continent-and-islands" => LayoutClass::ContinentAndIslands,
+            "mediterranean" => LayoutClass::Mediterranean,
+            // legacy "continent" + default
+            _ => LayoutClass::Pangea,
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            LayoutClass::Pangea => "pangea",
+            LayoutClass::Continents => "continents",
+            LayoutClass::Archipelago => "archipelago",
+            LayoutClass::Island => "island",
+            LayoutClass::ContinentAndIslands => "continent_and_islands",
+            LayoutClass::Mediterranean => "mediterranean",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            LayoutClass::Pangea => "Pangea",
+            LayoutClass::Continents => "Continents",
+            LayoutClass::Archipelago => "Archipelago",
+            LayoutClass::Island => "Island",
+            LayoutClass::ContinentAndIslands => "Continent + islands",
+            LayoutClass::Mediterranean => "Mediterranean",
         }
     }
 }
+
+/// A/B/C compare sets: three different layout classes (not seeds of one style).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutCompareSet {
+    /// A=pangea · B=continents · C=archipelago
+    Macro,
+    /// A=island · B=continent_and_islands · C=mediterranean
+    Coastal,
+}
+
+impl LayoutCompareSet {
+    pub fn parse(raw: &str) -> LayoutCompareSet {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "coastal" => LayoutCompareSet::Coastal,
+            _ => LayoutCompareSet::Macro,
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            LayoutCompareSet::Macro => "macro",
+            LayoutCompareSet::Coastal => "coastal",
+        }
+    }
+
+    pub fn class_for_variant(self, variant: char) -> LayoutClass {
+        let v = variant.to_ascii_uppercase();
+        match (self, v) {
+            (LayoutCompareSet::Macro, 'B') => LayoutClass::Continents,
+            (LayoutCompareSet::Macro, 'C') => LayoutClass::Archipelago,
+            (LayoutCompareSet::Macro, _) => LayoutClass::Pangea,
+            (LayoutCompareSet::Coastal, 'B') => LayoutClass::ContinentAndIslands,
+            (LayoutCompareSet::Coastal, 'C') => LayoutClass::Mediterranean,
+            (LayoutCompareSet::Coastal, _) => LayoutClass::Island,
+        }
+    }
+}
+
+/// Backward-compatible alias used by older call sites.
+pub type SilhouetteStyle = LayoutClass;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShoreCharacter {
@@ -45,10 +116,10 @@ impl ShoreCharacter {
     }
 }
 
-/// Generate a silhouette layer for the provided style/character and seed.
+/// Generate a silhouette layer for the provided layout class / shore / seed.
 pub fn generate_land_mask(
     bounds: &MapBounds,
-    style: SilhouetteStyle,
+    style: LayoutClass,
     character: ShoreCharacter,
     seed: u64,
 ) -> DenseLayer {
@@ -101,55 +172,76 @@ pub fn normalize_kind(raw: &str) -> &'static str {
 }
 
 fn is_land(
-    style: SilhouetteStyle,
+    style: LayoutClass,
     nx: f64,
     ny: f64,
     cell: Axial,
     seed: u64,
     roughness: f64,
 ) -> bool {
-    let distance = (nx * nx + ny * ny).sqrt();
     let noise = octave_noise(cell, seed);
     match style {
-        SilhouetteStyle::Continent => {
+        LayoutClass::Pangea => {
+            let distance = (nx * nx + ny * ny).sqrt();
             let threshold = 0.84 + roughness * noise;
             distance < threshold
         }
-        SilhouetteStyle::Island => {
+        LayoutClass::Island => {
+            let distance = (nx * nx + ny * ny).sqrt();
             let threshold = 0.57 + roughness * 0.8 * noise;
             distance < threshold
         }
-        SilhouetteStyle::Dual => {
+        LayoutClass::Continents => {
             let left = island_metric(nx + 0.52, ny, 0.53 + roughness * 0.6 * noise);
             let right = island_metric(nx - 0.52, ny, 0.53 + roughness * 0.6 * noise);
             left || right
         }
-        SilhouetteStyle::Archipelago => {
-            let mut islands = false;
-            let count = 6;
-            let angle_seed = hash_noise(seed ^ 0xA13F, cell.q, cell.r);
-            for i in 0..count {
-                let ang = ((i as f64) / (count as f64) + angle_seed * 0.05) * std::f64::consts::TAU;
-                let radius = 0.15 + 0.62 * ((i as f64 + 1.0) / (count as f64 + 1.0));
-                let cx = ang.cos() * radius;
-                let cy = ang.sin() * radius * 0.74;
-                let local = hash_noise(
-                    seed ^ (i as u64 * 0x9E37),
-                    cell.q + i as i32,
-                    cell.r - i as i32,
-                );
-                if island_metric(
-                    nx - cx,
-                    ny - cy,
-                    0.24 + roughness * 0.8 * local + (if i % 2 == 0 { 0.06 } else { 0.0 }),
-                ) {
-                    islands = true;
-                    break;
-                }
-            }
-            islands
+        LayoutClass::Archipelago => archipelago_islands(nx, ny, cell, seed, roughness, 6),
+        LayoutClass::ContinentAndIslands => {
+            // Main landmass + a few satellite islands (step3-geo-variant-classes-v1).
+            let main = island_metric(nx * 0.92, ny * 1.05, 0.62 + roughness * 0.55 * noise);
+            let sats = archipelago_islands(nx, ny, cell, seed ^ 0xC0FF_EE11, roughness, 4)
+                && (nx * nx + ny * ny).sqrt() > 0.48;
+            main || sats
+        }
+        LayoutClass::Mediterranean => {
+            // Land ring / basin: outer land, enclosed water → inland_sea after mark.
+            let distance = (nx * nx + ny * ny * 1.15).sqrt();
+            let outer = 0.88 + roughness * 0.55 * noise;
+            let inner = 0.38 + roughness * 0.35 * noise;
+            distance < outer && distance > inner
         }
     }
+}
+
+fn archipelago_islands(
+    nx: f64,
+    ny: f64,
+    cell: Axial,
+    seed: u64,
+    roughness: f64,
+    count: usize,
+) -> bool {
+    let angle_seed = hash_noise(seed ^ 0xA13F, cell.q, cell.r);
+    for i in 0..count {
+        let ang = ((i as f64) / (count as f64) + angle_seed * 0.05) * std::f64::consts::TAU;
+        let radius = 0.15 + 0.62 * ((i as f64 + 1.0) / (count as f64 + 1.0));
+        let cx = ang.cos() * radius;
+        let cy = ang.sin() * radius * 0.74;
+        let local = hash_noise(
+            seed ^ (i as u64 * 0x9E37),
+            cell.q + i as i32,
+            cell.r - i as i32,
+        );
+        if island_metric(
+            nx - cx,
+            ny - cy,
+            0.24 + roughness * 0.8 * local + (if i % 2 == 0 { 0.06 } else { 0.0 }),
+        ) {
+            return true;
+        }
+    }
+    false
 }
 
 fn island_metric(dx: f64, dy: f64, radius: f64) -> bool {
@@ -241,12 +333,23 @@ fn hash_noise(seed: u64, q: i32, r: i32) -> f64 {
 mod tests {
     use super::*;
 
+    fn count_kind(layer: &DenseLayer, kind: &str) -> usize {
+        (0..layer.len())
+            .filter(|&i| {
+                matches!(
+                    layer.state(i),
+                    DenseState::Value(LayerValue::Text(ref t)) if t == kind
+                )
+            })
+            .count()
+    }
+
     #[test]
     fn generate_keeps_bounds_length() {
         let bounds = MapBounds::new(14, 8);
         let layer = generate_land_mask(
             &bounds,
-            SilhouetteStyle::Continent,
+            LayoutClass::Pangea,
             ShoreCharacter::Smooth,
             42,
         );
@@ -276,5 +379,71 @@ mod tests {
         assert_eq!(normalize_kind("land"), LAND_MASK_LAND);
         assert_eq!(normalize_kind("inland_sea"), LAND_MASK_INLAND_SEA);
         assert_eq!(normalize_kind("mystery"), LAND_MASK_OCEAN);
+    }
+
+    #[test]
+    fn parse_layout_aliases() {
+        assert_eq!(LayoutClass::parse("continent"), LayoutClass::Pangea);
+        assert_eq!(LayoutClass::parse("pangea"), LayoutClass::Pangea);
+        assert_eq!(LayoutClass::parse("dual"), LayoutClass::Continents);
+        assert_eq!(
+            LayoutClass::parse("continent_and_islands"),
+            LayoutClass::ContinentAndIslands
+        );
+    }
+
+    #[test]
+    fn compare_set_maps_distinct_classes() {
+        let macro_set = LayoutCompareSet::Macro;
+        assert_ne!(
+            macro_set.class_for_variant('A'),
+            macro_set.class_for_variant('B')
+        );
+        assert_ne!(
+            macro_set.class_for_variant('B'),
+            macro_set.class_for_variant('C')
+        );
+        let coastal = LayoutCompareSet::Coastal;
+        assert_eq!(coastal.class_for_variant('A'), LayoutClass::Island);
+        assert_eq!(
+            coastal.class_for_variant('B'),
+            LayoutClass::ContinentAndIslands
+        );
+        assert_eq!(coastal.class_for_variant('C'), LayoutClass::Mediterranean);
+    }
+
+    #[test]
+    fn all_layout_classes_produce_land() {
+        let bounds = MapBounds::new(24, 14);
+        for class in [
+            LayoutClass::Pangea,
+            LayoutClass::Continents,
+            LayoutClass::Archipelago,
+            LayoutClass::Island,
+            LayoutClass::ContinentAndIslands,
+            LayoutClass::Mediterranean,
+        ] {
+            let layer = generate_land_mask(&bounds, class, ShoreCharacter::Smooth, 7);
+            assert!(
+                count_kind(&layer, LAND_MASK_LAND) > 0,
+                "{} should produce land",
+                class.id()
+            );
+        }
+    }
+
+    #[test]
+    fn mediterranean_marks_inland_sea() {
+        let bounds = MapBounds::new(28, 16);
+        let layer = generate_land_mask(
+            &bounds,
+            LayoutClass::Mediterranean,
+            ShoreCharacter::Smooth,
+            11,
+        );
+        assert!(
+            count_kind(&layer, LAND_MASK_INLAND_SEA) > 0,
+            "mediterranean should enclose inland_sea"
+        );
     }
 }

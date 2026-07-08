@@ -341,7 +341,7 @@ struct BuildStateInput {
 
 #[derive(Serialize)]
 struct WizardLandMaskGenerateInput<'a> {
-    style: &'a str,
+    compare_set: &'a str,
     character: &'a str,
     variant: &'a str,
     regenerate_nonce: u32,
@@ -463,7 +463,7 @@ struct AppState {
     last_draw_snapshot: Option<DrawSnapshot>,
     redraw_dirty: bool,
     redraw_raf_pending: bool,
-    wizard_style: String,
+    wizard_compare_set: String,
     wizard_character: String,
     wizard_variant: String,
     wizard_regenerate_nonce: u32,
@@ -519,7 +519,7 @@ pub fn start() {
         last_draw_snapshot: None,
         redraw_dirty: false,
         redraw_raf_pending: false,
-        wizard_style: "continent".to_string(),
+        wizard_compare_set: "macro".to_string(),
         wizard_character: "smooth".to_string(),
         wizard_variant: "A".to_string(),
         wizard_regenerate_nonce: 0,
@@ -1028,6 +1028,22 @@ fn sync_wizard_variant_buttons(active: &str) {
     }
 }
 
+fn sync_wizard_variant_labels(compare_set: &str) {
+    let (a, b, c) = match compare_set {
+        "coastal" => ("A · Island", "B · Continent + islands", "C · Mediterranean"),
+        _ => ("A · Pangea", "B · Continents", "C · Archipelago"),
+    };
+    for (id, label) in [
+        ("wiz-variant-a", a),
+        ("wiz-variant-b", b),
+        ("wiz-variant-c", c),
+    ] {
+        if let Some(el) = document().get_element_by_id(id) {
+            el.set_text_content(Some(label));
+        }
+    }
+}
+
 fn sync_wizard_edit_mode_ui(edit_mode: bool, brush: &str) {
     if let Some(row) = document().get_element_by_id("wiz-edit-brushes") {
         if edit_mode {
@@ -1053,22 +1069,23 @@ fn sync_wizard_actions(state: &AppState) {
     set_button_disabled("wiz-accept", false);
     set_button_disabled("wiz-edit", !state.wizard_accepted);
     set_button_disabled("wiz-continue", !state.wizard_accepted);
+    sync_wizard_variant_labels(&state.wizard_compare_set);
     sync_wizard_variant_buttons(&state.wizard_variant);
     sync_wizard_edit_mode_ui(state.wizard_edit_mode, &state.wizard_edit_brush);
 }
 
 async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
-    let (style, character, variant, nonce) = {
+    let (compare_set, character, variant, nonce) = {
         let s = state.borrow();
         (
-            s.wizard_style.clone(),
+            s.wizard_compare_set.clone(),
             s.wizard_character.clone(),
             s.wizard_variant.clone(),
             s.wizard_regenerate_nonce,
         )
     };
     let body = WizardLandMaskGenerateInput {
-        style: &style,
+        compare_set: &compare_set,
         character: &character,
         variant: &variant,
         regenerate_nonce: nonce,
@@ -1181,7 +1198,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Style / character selection.
+    // Compare-set + shore character (block 1).
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
@@ -1194,16 +1211,27 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             if !el.class_list().contains("wiz-style-btn") {
                 return;
             }
-            if let Some(style) = el.get_attribute("data-wiz-style") {
-                wiz_toggle_style_group("wiz-styles", "data-wiz-style", &el);
-                state.borrow_mut().wizard_style = style;
-            } else if let Some(character) = el.get_attribute("data-wiz-char") {
+            if let Some(compare) = el.get_attribute("data-wiz-compare") {
+                wiz_toggle_style_group("wiz-compare-sets", "data-wiz-compare", &el);
+                {
+                    let mut s = state.borrow_mut();
+                    s.wizard_compare_set = compare;
+                    s.wizard_variant = "A".to_string();
+                    s.wizard_accepted = false;
+                    s.wizard_edit_mode = false;
+                    sync_wizard_actions(&s);
+                }
+                set_wizard_status("Compare set updated. Generating A…");
+                wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
+                return;
+            }
+            if let Some(character) = el.get_attribute("data-wiz-char") {
                 wiz_toggle_style_group("wiz-chars", "data-wiz-char", &el);
                 state.borrow_mut().wizard_character = character;
+                set_wizard_status("Shore updated. Regenerate or pick a layout variant.");
             }
-            set_wizard_status("Parameters updated. Use Generation controls.");
         });
-        for id in ["wiz-styles", "wiz-chars"] {
+        for id in ["wiz-compare-sets", "wiz-chars"] {
             if let Ok(Some(root)) = document().query_selector(&format!("#{id}")) {
                 let _ = root
                     .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
