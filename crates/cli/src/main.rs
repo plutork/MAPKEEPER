@@ -18,6 +18,7 @@ use mapkeeper_core::layer::{
     Bounds, DenseLayer, DenseState, LayerValue, MapManifest, ValueType, TERRAIN_LAYER_ID,
     RIVER_ID_LAYER_ID,
 };
+use mapkeeper_core::river_flux::generate_with_owners;
 use mapkeeper_core::rivers::{
     append_cell, create_river, delete_river, pop_last_cell, sync_river_id_layer,
     RiverCatalog, RIVER_CATALOG_FILE,
@@ -237,6 +238,11 @@ enum RiversAction {
         #[arg(long)]
         river_id: u32,
     },
+    /// Generate rivers from elevation (replace all).
+    Generate {
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -285,6 +291,7 @@ fn main() -> Result<()> {
             }
             RiversAction::Pop { world, river_id } => cmd_rivers_pop(&world, river_id),
             RiversAction::Delete { world, river_id } => cmd_rivers_delete(&world, river_id),
+            RiversAction::Generate { world } => cmd_rivers_generate(&world),
         },
     }
 }
@@ -750,6 +757,17 @@ fn persist_rivers(world: &Path, catalog: &RiverCatalog, bounds: &MapBounds) -> R
     write_dense_layer(world, &layer)
 }
 
+fn persist_generated_rivers(
+    world: &Path,
+    catalog: &RiverCatalog,
+    owners: &[u32],
+    bounds: &MapBounds,
+) -> Result<()> {
+    write_river_catalog(world, catalog)?;
+    let layer = mapkeeper_core::river_flux::sync_river_id_from_owners(owners, bounds);
+    write_dense_layer(world, &layer)
+}
+
 fn cmd_rivers_list(world: &Path) -> Result<()> {
     let catalog = read_river_catalog(world);
     println!("{}", catalog.to_json_pretty()?);
@@ -785,6 +803,15 @@ fn cmd_rivers_delete(world: &Path, river_id: u32) -> Result<()> {
     let mut catalog = read_river_catalog(world);
     delete_river(&mut catalog, river_id).map_err(|e| anyhow::anyhow!(e.to_string()))?;
     persist_rivers(world, &catalog, &bounds)?;
+    println!("{}", catalog.to_json_pretty()?);
+    Ok(())
+}
+
+fn cmd_rivers_generate(world: &Path) -> Result<()> {
+    let bounds = read_bounds(world);
+    let elevation = read_elevation_dense(world, &bounds);
+    let (catalog, owners) = generate_with_owners(&elevation, &bounds);
+    persist_generated_rivers(world, &catalog, &owners, &bounds)?;
     println!("{}", catalog.to_json_pretty()?);
     Ok(())
 }

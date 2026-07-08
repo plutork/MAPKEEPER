@@ -1533,6 +1533,30 @@ async fn post_river_pop(state: Rc<RefCell<AppState>>) {
     schedule_redraw(state);
 }
 
+async fn post_river_generate(state: Rc<RefCell<AppState>>) {
+    let Ok(resp) = gloo_net::http::Request::post("/api/rivers/generate").send().await else {
+        set_text("river-status", "Generate failed (network)");
+        return;
+    };
+    if !resp.ok() {
+        let msg = resp.text().await.unwrap_or_else(|_| "Generate rejected".into());
+        set_text("river-status", &msg);
+        return;
+    }
+    let Ok(catalog) = resp.json::<RiverCatalog>().await else {
+        set_text("river-status", "Generate failed (parse)");
+        return;
+    };
+    {
+        let mut s = state.borrow_mut();
+        s.rivers = catalog;
+        s.active_river_id = None;
+        bump_content_rev(&mut s);
+        sync_river_status(&s);
+    }
+    schedule_redraw(state);
+}
+
 fn cell_from_mouse_event(state: &Rc<RefCell<AppState>>, event: &web_sys::MouseEvent) -> Option<(i32, i32)> {
     let canvas = canvas();
     let rect = canvas.get_bounding_client_rect();
@@ -2523,6 +2547,16 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                 }
                 "undo" => {
                     wasm_bindgen_futures::spawn_local(post_river_pop(state.clone()));
+                }
+                "generate" => {
+                    let ok = window()
+                        .confirm_with_message(
+                            "Replace all rivers on this map? Hand-drawn rivers will be removed.",
+                        )
+                        .unwrap_or(false);
+                    if ok {
+                        wasm_bindgen_futures::spawn_local(post_river_generate(state.clone()));
+                    }
                 }
                 _ => {}
             }

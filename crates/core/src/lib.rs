@@ -8,5 +8,6 @@ pub mod layer;
 pub mod map_preset;
 pub mod profile;
 pub mod projects;
+pub mod river_flux;
 pub mod rivers;
 pub mod world;

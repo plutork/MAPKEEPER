@@ -32,6 +32,7 @@ use mapkeeper_core::layer::{
     Bounds, DenseLayer, LayerCellWrite, MapManifest, ValueType, WireCellState, ELEVATION_LAYER_ID,
     RIVER_ID_LAYER_ID,
 };
+use mapkeeper_core::river_flux::{generate_with_owners, sync_river_id_from_owners};
 use mapkeeper_core::rivers::{
     append_cell, create_river, delete_river, pop_last_cell, sync_river_id_layer, cell_index,
     RiverCatalog, RiverError, RIVER_CATALOG_FILE,
@@ -433,6 +434,7 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         .route("/api/rivers/append", axum::routing::post(append_river_cell))
         .route("/api/rivers/:id/pop", axum::routing::post(pop_river_cell))
         .route("/api/rivers/:id", axum::routing::delete(delete_river_handler))
+        .route("/api/rivers/generate", axum::routing::post(generate_rivers_handler))
         .with_state(state)
         .fallback_service(ServeDir::new(&config.web_dist)))
 }
@@ -883,6 +885,17 @@ fn persist_rivers(world_path: &Path, catalog: &RiverCatalog, bounds: &MapBounds)
     write_dense_layer(world_path, &layer)
 }
 
+fn persist_generated_rivers(
+    world_path: &Path,
+    catalog: &RiverCatalog,
+    owners: &[u32],
+    bounds: &MapBounds,
+) -> Result<(), String> {
+    write_river_catalog(world_path, catalog)?;
+    let layer = sync_river_id_from_owners(owners, bounds);
+    write_dense_layer(world_path, &layer)
+}
+
 fn river_error_status(err: RiverError) -> (StatusCode, String) {
     (StatusCode::BAD_REQUEST, err.to_string())
 }
@@ -979,6 +992,21 @@ async fn delete_river_handler(
         return river_error_status(err).into_response();
     }
     if let Err(err) = persist_rivers(&active.path, &catalog, &bounds) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    Json(catalog).into_response()
+}
+
+/// rivers-auto-from-elevation-v1 (D-55): replace-all catalog from elevation flux.
+async fn generate_rivers_handler(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    let bounds = map_bounds(&active.path);
+    let elevation = read_dense_layer(&active.path, ELEVATION_LAYER_ID, &bounds);
+    let (catalog, owners) = generate_with_owners(&elevation, &bounds);
+    if let Err(err) = persist_generated_rivers(&active.path, &catalog, &owners, &bounds) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
     Json(catalog).into_response()

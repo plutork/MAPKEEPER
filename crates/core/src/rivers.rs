@@ -16,6 +16,16 @@ pub const RIVER_CATALOG_FILE: &str = "rivers.json";
 pub struct River {
     pub id: u32,
     pub cells: Vec<usize>,
+    #[serde(default)]
+    pub source: usize,
+    #[serde(default)]
+    pub mouth: usize,
+    /// Main stem id; equals `id` when this river is the stem (D-55).
+    #[serde(default)]
+    pub parent: u32,
+    /// River-system root id (D-55).
+    #[serde(default)]
+    pub basin: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
@@ -121,6 +131,10 @@ pub fn create_river(
     catalog.rivers.push(River {
         id,
         cells: vec![index],
+        source: index,
+        mouth: index,
+        parent: id,
+        basin: id,
         name: None,
     });
     Ok(id)
@@ -154,6 +168,7 @@ pub fn append_cell(
         return Err(RiverError::NotNeighbor);
     }
     catalog.rivers[pos].cells.push(index);
+    catalog.rivers[pos].mouth = index;
     Ok(())
 }
 

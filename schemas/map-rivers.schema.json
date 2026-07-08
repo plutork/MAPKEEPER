@@ -32,6 +32,22 @@
               "minimum": 0
             }
           },
+          "source": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mouth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "parent": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "basin": {
+            "type": "integer",
+            "minimum": 0
+          },
           "name": {
             "type": "string"
           }
