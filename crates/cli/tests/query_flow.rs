@@ -12,7 +12,8 @@ use tempfile::{tempdir, TempDir};
 /// dir so running these tests never touches the real launcher's project list.
 fn mapkeeper() -> Command {
     let mut cmd = Command::cargo_bin("mapkeeper").unwrap();
-    cmd.env("APPDATA", fake_home().path()).env("HOME", fake_home().path());
+    cmd.env("APPDATA", fake_home().path())
+        .env("HOME", fake_home().path());
     cmd
 }
 
@@ -170,7 +171,13 @@ fn terrain_edit_leaves_profile_untouched() {
     let dir = tempdir().unwrap();
     let world = dir.path();
 
-    mapkeeper().arg("init").arg("sep").arg("--path").arg(world).assert().success();
+    mapkeeper()
+        .arg("init")
+        .arg("sep")
+        .arg("--path")
+        .arg(world)
+        .assert()
+        .success();
 
     mapkeeper()
         .args(["profile", "set", "sep.hex.q0.r0", "--title", "Old mill"])
@@ -203,7 +210,13 @@ fn layer_generic_set_get_list_clear_round_trip() {
     let dir = tempdir().unwrap();
     let world = dir.path();
 
-    mapkeeper().arg("init").arg("gen").arg("--path").arg(world).assert().success();
+    mapkeeper()
+        .arg("init")
+        .arg("gen")
+        .arg("--path")
+        .arg(world)
+        .assert()
+        .success();
 
     mapkeeper()
         .args(["layer", "set", "biome", "gen.hex.q0.r0", "--value", "swamp"])
@@ -254,7 +267,13 @@ fn first_terrain_write_creates_dense_layer_file() {
     let dir = tempdir().unwrap();
     let world = dir.path();
 
-    mapkeeper().arg("init").arg("world").arg("--path").arg(world).assert().success();
+    mapkeeper()
+        .arg("init")
+        .arg("world")
+        .arg("--path")
+        .arg(world)
+        .assert()
+        .success();
 
     let layer_file = world.join("map").join("layers").join("terrain.json");
     assert!(!layer_file.exists(), "scaffold must not ship a layer file");

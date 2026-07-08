@@ -13,19 +13,22 @@ use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::hex::{Axial, MapBounds};
-use mapkeeper_core::hydro::{filled_elevation_layer, hydro_from_elevation, DEFAULT_LAND_ELEVATION, ELEVATION_LAYER_ID, OCEAN_ELEVATION};
-use mapkeeper_core::layer::{
-    Bounds, DenseLayer, DenseState, LayerValue, MapManifest, ValueType, TERRAIN_LAYER_ID,
-    RIVER_ID_LAYER_ID,
+use mapkeeper_core::hydro::{
+    filled_elevation_layer, hydro_from_elevation, DEFAULT_LAND_ELEVATION, ELEVATION_LAYER_ID,
+    OCEAN_ELEVATION,
 };
-use mapkeeper_core::river_flux::generate_with_owners;
-use mapkeeper_core::rivers::{
-    append_cell, create_river, delete_river, pop_last_cell, sync_river_id_layer,
-    RiverCatalog, RIVER_CATALOG_FILE,
+use mapkeeper_core::layer::{
+    Bounds, DenseLayer, DenseState, LayerValue, MapManifest, ValueType, RIVER_ID_LAYER_ID,
+    TERRAIN_LAYER_ID,
 };
 use mapkeeper_core::map_preset::{legacy_default_bounds, parse_map_preset, MapPreset};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
+use mapkeeper_core::river_flux::generate_with_owners;
+use mapkeeper_core::rivers::{
+    append_cell, create_river, delete_river, pop_last_cell, sync_river_id_layer, RiverCatalog,
+    RIVER_CATALOG_FILE,
+};
 use mapkeeper_core::world;
 use serde::Deserialize;
 
@@ -252,43 +255,62 @@ fn main() -> Result<()> {
         Command::Profile { action } => match action {
             ProfileAction::Get { cell_id, world } => cmd_profile_get(&world, &cell_id),
             ProfileAction::List { world } => cmd_profile_list(&world),
-            ProfileAction::Set { cell_id, world, title, notes } => {
-                cmd_profile_set(&world, &cell_id, &title, &notes)
-            }
+            ProfileAction::Set {
+                cell_id,
+                world,
+                title,
+                notes,
+            } => cmd_profile_set(&world, &cell_id, &title, &notes),
         },
         Command::Terrain { action } => match action {
             TerrainAction::Get { cell_id, world } => cmd_terrain_get(&world, &cell_id),
             TerrainAction::List { world } => cmd_terrain_list(&world),
-            TerrainAction::Set { cell_id, world, value, none } => {
-                cmd_terrain_set(&world, &cell_id, value, none)
-            }
+            TerrainAction::Set {
+                cell_id,
+                world,
+                value,
+                none,
+            } => cmd_terrain_set(&world, &cell_id, value, none),
             TerrainAction::Clear { cell_id, world } => cmd_terrain_clear(&world, &cell_id),
         },
         Command::Elevation { action } => match action {
             ElevationAction::Get { cell_id, world } => cmd_elevation_get(&world, &cell_id),
             ElevationAction::List { world } => cmd_elevation_list(&world),
-            ElevationAction::Set { cell_id, world, value } => {
-                cmd_elevation_set(&world, &cell_id, value)
-            }
+            ElevationAction::Set {
+                cell_id,
+                world,
+                value,
+            } => cmd_elevation_set(&world, &cell_id, value),
             ElevationAction::Clear { cell_id, world } => cmd_elevation_clear(&world, &cell_id),
         },
         Command::Layer { action } => match action {
-            LayerAction::Get { layer_id, cell_id, world } => {
-                cmd_layer_get(&world, &layer_id, &cell_id)
-            }
+            LayerAction::Get {
+                layer_id,
+                cell_id,
+                world,
+            } => cmd_layer_get(&world, &layer_id, &cell_id),
             LayerAction::List { layer_id, world } => cmd_layer_list(&world, &layer_id),
-            LayerAction::Set { layer_id, cell_id, world, value, int, none } => {
-                cmd_layer_set(&world, &layer_id, &cell_id, value, int, none)
-            }
-            LayerAction::Clear { layer_id, cell_id, world } => {
-                cmd_layer_clear(&world, &layer_id, &cell_id)
-            }
+            LayerAction::Set {
+                layer_id,
+                cell_id,
+                world,
+                value,
+                int,
+                none,
+            } => cmd_layer_set(&world, &layer_id, &cell_id, value, int, none),
+            LayerAction::Clear {
+                layer_id,
+                cell_id,
+                world,
+            } => cmd_layer_clear(&world, &layer_id, &cell_id),
         },
         Command::Rivers { action } => match action {
             RiversAction::List { world } => cmd_rivers_list(&world),
-            RiversAction::Append { cell_id, world, river_id } => {
-                cmd_rivers_append(&world, &cell_id, river_id)
-            }
+            RiversAction::Append {
+                cell_id,
+                world,
+                river_id,
+            } => cmd_rivers_append(&world, &cell_id, river_id),
             RiversAction::Pop { world, river_id } => cmd_rivers_pop(&world, river_id),
             RiversAction::Delete { world, river_id } => cmd_rivers_delete(&world, river_id),
             RiversAction::Generate { world } => cmd_rivers_generate(&world),
@@ -310,7 +332,10 @@ fn cmd_init(args: InitArgs) -> Result<()> {
     }
     let manifest = args.path.join("mapkeeper.toml");
     if manifest.exists() {
-        bail!("{} already has a mapkeeper.toml — not overwriting", args.path.display());
+        bail!(
+            "{} already has a mapkeeper.toml — not overwriting",
+            args.path.display()
+        );
     }
     write_scaffold_files(&args.path)?;
     let preset = match args.map_preset.as_deref() {
@@ -373,7 +398,9 @@ fn write_initial_ocean_elevation(world_path: &Path, preset: MapPreset) -> Result
 
 fn projects_path() -> PathBuf {
     let appdata = std::env::var("APPDATA").ok();
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok();
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok();
     PathBuf::from(projects_file_path(appdata.as_deref(), home.as_deref()))
 }
 
@@ -384,7 +411,10 @@ fn register_project(world_id: &str, path: &Path) -> Result<()> {
         Ok(raw) => ProjectsFile::parse(&raw),
         Err(_) => ProjectsFile::default(),
     };
-    file.upsert(ProjectEntry { id: world_id.to_string(), path: abs_path.display().to_string() });
+    file.upsert(ProjectEntry {
+        id: world_id.to_string(),
+        path: abs_path.display().to_string(),
+    });
     if let Some(parent) = list_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -453,7 +483,10 @@ fn cmd_profile_set(world: &Path, cell_id: &str, title: &str, notes: &str) -> Res
 // cell_id strings stay the external identity; the linear index is internal.
 
 fn layer_file_path(world: &Path, layer_id: &str) -> PathBuf {
-    world.join("map").join("layers").join(format!("{layer_id}.json"))
+    world
+        .join("map")
+        .join("layers")
+        .join(format!("{layer_id}.json"))
 }
 
 /// Map bounds from `map/manifest.json` (missing => legacy Small default).
@@ -521,7 +554,12 @@ fn read_elevation_dense(world: &Path, bounds: &MapBounds) -> DenseLayer {
 /// Read any layer file into dense form, or an empty typed layer if absent.
 fn read_dense_layer(world: &Path, layer_id: &str, bounds: &MapBounds) -> DenseLayer {
     let raw = fs::read_to_string(layer_file_path(world, layer_id)).ok();
-    DenseLayer::read_or_empty(raw.as_deref(), layer_id, default_value_type(layer_id), bounds)
+    DenseLayer::read_or_empty(
+        raw.as_deref(),
+        layer_id,
+        default_value_type(layer_id),
+        bounds,
+    )
 }
 
 /// Keep default-land sparse (old semantics): default elevation clears the cell.
@@ -572,7 +610,10 @@ fn cmd_terrain_get(world: &Path, cell_id: &str) -> Result<()> {
     let bounds = read_bounds(world);
     let index = cell_index(&bounds, cell_id)?;
     let dense = read_terrain_dense(world, &bounds);
-    println!("{}", serde_json::to_string_pretty(&state_json(&dense.state(index)))?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&state_json(&dense.state(index)))?
+    );
     Ok(())
 }
 
@@ -660,7 +701,10 @@ fn cmd_layer_get(world: &Path, layer_id: &str, cell_id: &str) -> Result<()> {
     let bounds = read_bounds(world);
     let index = cell_index(&bounds, cell_id)?;
     let dense = read_dense_layer(world, layer_id, &bounds);
-    println!("{}", serde_json::to_string_pretty(&state_json(&dense.state(index)))?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&state_json(&dense.state(index)))?
+    );
     Ok(())
 }
 
@@ -702,7 +746,8 @@ fn cmd_layer_set(
     if let DenseState::Value(ref v) = state {
         let ok = matches!(
             (v, dense.value_type),
-            (LayerValue::Text(_), ValueType::Categorical) | (LayerValue::Int(_), ValueType::Integer)
+            (LayerValue::Text(_), ValueType::Categorical)
+                | (LayerValue::Int(_), ValueType::Integer)
         );
         if !ok {
             bail!(
@@ -779,9 +824,11 @@ fn cmd_rivers_append(world: &Path, cell_id: &str, river_id: Option<u32>) -> Resu
     let index = cell_index(&bounds, cell_id)?;
     let mut catalog = read_river_catalog(world);
     match river_id {
-        Some(id) => append_cell(&mut catalog, &bounds, id, index).map_err(|e| anyhow::anyhow!(e.to_string()))?,
+        Some(id) => append_cell(&mut catalog, &bounds, id, index)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?,
         None => {
-            create_river(&mut catalog, &bounds, index).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            create_river(&mut catalog, &bounds, index)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
     }
     persist_rivers(world, &catalog, &bounds)?;

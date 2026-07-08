@@ -92,7 +92,11 @@ pub fn river_at_cell(catalog: &RiverCatalog, index: usize) -> Option<u32> {
         .map(|r| r.id)
 }
 
-fn cell_occupied_by_other(catalog: &RiverCatalog, index: usize, except: Option<u32>) -> Option<u32> {
+fn cell_occupied_by_other(
+    catalog: &RiverCatalog,
+    index: usize,
+    except: Option<u32>,
+) -> Option<u32> {
     catalog.rivers.iter().find_map(|r| {
         if except == Some(r.id) {
             return None;
@@ -249,7 +253,10 @@ mod tests {
         let b = bounds.index_of(Axial::new(3, 0)).unwrap();
         let mut catalog = RiverCatalog::default();
         let id = create_river(&mut catalog, &bounds, a).unwrap();
-        assert_eq!(append_cell(&mut catalog, &bounds, id, b), Err(RiverError::NotNeighbor));
+        assert_eq!(
+            append_cell(&mut catalog, &bounds, id, b),
+            Err(RiverError::NotNeighbor)
+        );
     }
 
     #[test]
@@ -309,7 +316,12 @@ mod tests {
         let mut current = start;
         for _ in 0..6 {
             let next = neighbors(&bounds, current)
-                .filter(|n| bounds.from_index(*n).map(|c| c.q < bounds.from_index(current).unwrap().q).unwrap_or(false))
+                .filter(|n| {
+                    bounds
+                        .from_index(*n)
+                        .map(|c| c.q < bounds.from_index(current).unwrap().q)
+                        .unwrap_or(false)
+                })
                 .min_by_key(|n| bounds.from_index(*n).unwrap().q)
                 .expect("west neighbor");
             chain.push(next);

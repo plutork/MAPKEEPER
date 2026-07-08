@@ -80,7 +80,10 @@ mod tests {
 
     #[test]
     fn above_sea_level_is_land() {
-        assert_eq!(hydro_from_elevation(DEFAULT_LAND_ELEVATION), HydroKind::Land);
+        assert_eq!(
+            hydro_from_elevation(DEFAULT_LAND_ELEVATION),
+            HydroKind::Land
+        );
         assert_eq!(hydro_from_elevation(9), HydroKind::Land);
     }
 

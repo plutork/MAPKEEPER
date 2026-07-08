@@ -21,7 +21,10 @@ pub fn generate_rivers_from_elevation(elevation: &DenseLayer, bounds: &MapBounds
 }
 
 /// Run generation and return catalog + per-cell owners for layer sync.
-pub fn generate_with_owners(elevation: &DenseLayer, bounds: &MapBounds) -> (RiverCatalog, Vec<u32>) {
+pub fn generate_with_owners(
+    elevation: &DenseLayer,
+    bounds: &MapBounds,
+) -> (RiverCatalog, Vec<u32>) {
     let n = bounds.len();
     if n == 0 {
         return (RiverCatalog::default(), Vec::new());
@@ -314,7 +317,10 @@ mod tests {
             }
         }
         let catalog = generate_rivers_from_elevation(&elev, &bounds);
-        let has_tributary = catalog.rivers.iter().any(|r| r.parent != r.id && r.parent != 0);
+        let has_tributary = catalog
+            .rivers
+            .iter()
+            .any(|r| r.parent != r.id && r.parent != 0);
         assert!(
             has_tributary || catalog.rivers.len() >= 2,
             "expected confluence or multiple rivers, got {}",
@@ -335,7 +341,15 @@ mod tests {
         paths.insert(2, vec![3]);
 
         flow_down(
-            3, 20, 1, &heights, &mut flux, &mut owner, &mut conf, &mut paths, &mut parents,
+            3,
+            20,
+            1,
+            &heights,
+            &mut flux,
+            &mut owner,
+            &mut conf,
+            &mut paths,
+            &mut parents,
         );
 
         assert_eq!(parents.get(&2), Some(&1));

@@ -20,7 +20,10 @@ use tauri_plugin_dialog::DialogExt;
 /// own build output so `cargo run -p mapkeeper-desktop` works without
 /// installing anything first (still requires `crates/web/build.ps1` once).
 fn resolve_web_dist(app: &tauri::AppHandle) -> PathBuf {
-    if let Ok(resource_path) = app.path().resolve("dist", tauri::path::BaseDirectory::Resource) {
+    if let Ok(resource_path) = app
+        .path()
+        .resolve("dist", tauri::path::BaseDirectory::Resource)
+    {
         if resource_path.exists() {
             return resource_path;
         }
@@ -45,14 +48,20 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let web_dist = resolve_web_dist(&handle);
-            let config = mapkeeper_server::ServerConfig { world: None, port: 0, web_dist };
+            let config = mapkeeper_server::ServerConfig {
+                world: None,
+                port: 0,
+                web_dist,
+            };
 
             // Bind synchronously (fast — just opens a TCP listener) so the
             // window can be created on the main thread below; only the
             // long-running `axum::serve` loop is spawned to the background.
             let (listener, router) = tauri::async_runtime::block_on(mapkeeper_server::bind(config))
                 .expect("failed to bind embedded mapkeeper-server");
-            let addr = listener.local_addr().expect("bound listener has a local address");
+            let addr = listener
+                .local_addr()
+                .expect("bound listener has a local address");
             let url = format!("http://{addr}");
 
             WebviewWindowBuilder::new(

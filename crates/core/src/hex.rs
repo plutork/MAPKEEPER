@@ -33,7 +33,10 @@ impl Axial {
         // Start at one corner (radius steps along direction 4), then walk the
         // six edges, radius steps each — standard hex-ring traversal.
         const DIRECTIONS: [(i32, i32); 6] = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)];
-        let mut cell = Axial::new(self.q + DIRECTIONS[4].0 * radius, self.r + DIRECTIONS[4].1 * radius);
+        let mut cell = Axial::new(
+            self.q + DIRECTIONS[4].0 * radius,
+            self.r + DIRECTIONS[4].1 * radius,
+        );
         let mut out = Vec::with_capacity((6 * radius) as usize);
         for dir in DIRECTIONS {
             for _ in 0..radius {

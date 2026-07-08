@@ -77,7 +77,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mk-build-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("mapkeeper.toml"), manifest_toml_with_build("test", true)).unwrap();
+        fs::write(
+            dir.join("mapkeeper.toml"),
+            manifest_toml_with_build("test", true),
+        )
+        .unwrap();
         let b = read_build(&dir).unwrap();
         assert!(is_draft(&b));
         assert_eq!(b.step, BUILD_STEP_LAND_SILHOUETTE);

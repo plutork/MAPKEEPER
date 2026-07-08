@@ -12,8 +12,15 @@
 /// Relative directories created for a new world project. `.cursor/commands`
 /// is included so `SCAFFOLD_FILES`' `user.md` has somewhere to land;
 /// `map/layers` holds the machine-readable map-state layers (D-36).
-pub const SCAFFOLD_DIRS: &[&str] =
-    &["map", "map/layers", "canon", "profiles", "data", "journal", ".cursor/commands"];
+pub const SCAFFOLD_DIRS: &[&str] = &[
+    "map",
+    "map/layers",
+    "canon",
+    "profiles",
+    "data",
+    "journal",
+    ".cursor/commands",
+];
 
 /// A static scaffold file: relative path inside the world folder + contents.
 pub struct ScaffoldFile {

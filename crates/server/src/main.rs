@@ -25,5 +25,10 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    run(ServerConfig { world: args.world, port: args.port, web_dist: args.web_dist }).await
+    run(ServerConfig {
+        world: args.world,
+        port: args.port,
+        web_dist: args.web_dist,
+    })
+    .await
 }

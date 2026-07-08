@@ -10,7 +10,11 @@ pub struct CellId {
 
 impl CellId {
     pub fn new(world_id: impl Into<String>, q: i32, r: i32) -> Self {
-        Self { world_id: world_id.into(), q, r }
+        Self {
+            world_id: world_id.into(),
+            q,
+            r,
+        }
     }
 
     pub fn filename(&self) -> String {

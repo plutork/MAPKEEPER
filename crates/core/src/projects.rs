@@ -40,10 +40,16 @@ impl ProjectsFile {
 /// elsewhere. Pure function of env values so it is testable without touching real env.
 pub fn projects_file_path(appdata: Option<&str>, home: Option<&str>) -> String {
     if let Some(appdata) = appdata.filter(|s| !s.is_empty()) {
-        return format!("{}/mapkeeper/projects.json", appdata.trim_end_matches(['/', '\\']));
+        return format!(
+            "{}/mapkeeper/projects.json",
+            appdata.trim_end_matches(['/', '\\'])
+        );
     }
     let home = home.filter(|s| !s.is_empty()).unwrap_or(".");
-    format!("{}/.config/mapkeeper/projects.json", home.trim_end_matches(['/', '\\']))
+    format!(
+        "{}/.config/mapkeeper/projects.json",
+        home.trim_end_matches(['/', '\\'])
+    )
 }
 
 #[cfg(test)]
@@ -65,8 +71,14 @@ mod tests {
     #[test]
     fn upsert_replaces_by_path_not_id() {
         let mut file = ProjectsFile::default();
-        file.upsert(ProjectEntry { id: "a".into(), path: "/w".into() });
-        file.upsert(ProjectEntry { id: "renamed".into(), path: "/w".into() });
+        file.upsert(ProjectEntry {
+            id: "a".into(),
+            path: "/w".into(),
+        });
+        file.upsert(ProjectEntry {
+            id: "renamed".into(),
+            path: "/w".into(),
+        });
         assert_eq!(file.projects.len(), 1);
         assert_eq!(file.projects[0].id, "renamed");
     }
