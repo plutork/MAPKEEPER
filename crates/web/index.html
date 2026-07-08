@@ -296,7 +296,9 @@
   .native-only { display: none; }
   #path-row { display: flex; gap: 8px; align-items: flex-start; }
   #path-row input { flex: 1; }
-  #browse-folder { flex-shrink: 0; margin: 4px 0 12px; }
+  #generate-path-row { display: flex; gap: 8px; align-items: flex-start; }
+  #generate-path-row input { flex: 1; }
+  #browse-folder, #browse-generate-folder { flex-shrink: 0; margin: 4px 0 12px; }
   .preset-size-warn { font-size: 12px; min-height: 16px; margin: 4px 0 10px; }
   .preset-size-warn.preset-warn-yellow { color: #d4a72c; }
   .preset-size-warn.preset-warn-red { color: #e5534b; }
@@ -489,13 +491,16 @@
     <div class="cards-grid">
       <article class="home-card emphasis">
         <div class="card-head">
-          <h2>Собрать мир</h2>
+          <h2>Build World</h2>
         </div>
-        <p class="card-sub">Пошаговая сборка — силуэт, климат, вода… Вы принимаете каждый слой.</p>
+        <p class="card-sub">Step-by-step assembly — silhouette, climate, water&hellip; You accept each layer.</p>
         <label for="generate-id">World name</label>
         <input id="generate-id" placeholder="my-world" autocomplete="off" />
         <label for="generate-path">Folder</label>
-        <input id="generate-path" placeholder="C:\path\to\my-world" autocomplete="off" />
+        <div id="generate-path-row">
+          <input id="generate-path" placeholder="C:\path\to\my-world" autocomplete="off" />
+          <button id="browse-generate-folder" class="native-only" type="button">Browse&hellip;</button>
+        </div>
         <label for="generate-preset">Map size</label>
         <select id="generate-preset">
           <option value="small" selected>Small (~112 cells)</option>
@@ -506,7 +511,7 @@
           <option value="world">World (~99,777 cells, not stable)</option>
         </select>
         <p id="generate-preset-warn" class="preset-size-warn"></p>
-        <button id="build-start" type="button">Начать сборку</button>
+        <button id="build-start" type="button">Start build</button>
         <div id="generate-status"></div>
       </article>
 
@@ -657,51 +662,51 @@
     </aside>
     <div id="build-wizard">
       <header class="wiz-top">
-        <button id="wiz-worlds" type="button">&larr; Миры</button>
+        <button id="wiz-worlds" type="button">&larr; Worlds</button>
         <button id="wiz-save-draft" type="button">Save Draft</button>
-        <span class="wiz-crumb">Гео &rsaquo; Силуэт суши</span>
+        <span class="wiz-crumb">Geo &rsaquo; Land silhouette</span>
         <span class="wiz-spacer"></span>
         <span id="wizard-status"></span>
-        <button id="wiz-finish" type="button" disabled title="После принятия силуэта суши">Finish / Open Editor</button>
+        <button id="wiz-finish" type="button" disabled title="Available after you accept the land silhouette">Finish / Open Editor</button>
       </header>
-      <nav class="wiz-left" aria-label="Шаги сборки">
+      <nav class="wiz-left" aria-label="Build steps">
         <div class="wiz-group expanded">
-          <button type="button" class="wiz-group-head" data-wiz-group="geo">&#9660; Гео</button>
+          <button type="button" class="wiz-group-head" data-wiz-group="geo">&#9660; Geo</button>
           <ul class="wiz-steps">
-            <li class="wiz-step done">1 &middot; Размер и форма</li>
-            <li class="wiz-step done">2 &middot; Сетка</li>
-            <li class="wiz-step active">3 &middot; Силуэт суши</li>
-            <li class="wiz-step locked">4 &middot; Тектоника</li>
-            <li class="wiz-step locked">5 &middot; Высота</li>
-            <li class="wiz-step locked">6 &middot; Берега</li>
+            <li class="wiz-step done">1 &middot; Size &amp; shape</li>
+            <li class="wiz-step done">2 &middot; Grid</li>
+            <li class="wiz-step active">3 &middot; Land silhouette</li>
+            <li class="wiz-step locked">4 &middot; Tectonics</li>
+            <li class="wiz-step locked">5 &middot; Elevation</li>
+            <li class="wiz-step locked">6 &middot; Coasts</li>
           </ul>
         </div>
-        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Климат</button></div>
-        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Вода</button></div>
-        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Почвы</button></div>
-        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Жизнь</button></div>
-        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Доп</button></div>
-        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Проверка</button></div>
+        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Climate</button></div>
+        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Water</button></div>
+        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Soils</button></div>
+        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Life</button></div>
+        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Extras</button></div>
+        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Validation</button></div>
       </nav>
       <aside class="wiz-right">
-        <h2>Силуэт суши</h2>
-        <p class="wiz-hint">Выберите общую форму материков и характер береговой линии. Затем сгенерируйте варианты A/B/C внизу и примите один.</p>
-        <p class="wiz-label">Стиль</p>
+        <h2>Land silhouette</h2>
+        <p class="wiz-hint">Pick the overall landmass layout and coastline character. Then generate A/B/C variants below and accept one.</p>
+        <p class="wiz-label">Style</p>
         <div class="wiz-btn-row" id="wiz-styles">
-          <button class="wiz-style-btn active" type="button" data-wiz-style="continent">Один материк</button>
-          <button class="wiz-style-btn" type="button" data-wiz-style="archipelago">Архипелаг</button>
-          <button class="wiz-style-btn" type="button" data-wiz-style="dual">Два массива</button>
-          <button class="wiz-style-btn" type="button" data-wiz-style="island">Остров</button>
+          <button class="wiz-style-btn active" type="button" data-wiz-style="continent">One continent</button>
+          <button class="wiz-style-btn" type="button" data-wiz-style="archipelago">Archipelago</button>
+          <button class="wiz-style-btn" type="button" data-wiz-style="dual">Two landmasses</button>
+          <button class="wiz-style-btn" type="button" data-wiz-style="island">Island</button>
         </div>
-        <p class="wiz-label">Характер</p>
+        <p class="wiz-label">Character</p>
         <div class="wiz-btn-row" id="wiz-chars">
-          <button class="wiz-style-btn active" type="button" data-wiz-char="smooth">Гладкие берега</button>
-          <button class="wiz-style-btn" type="button" data-wiz-char="jagged">Изрезанные берега</button>
+          <button class="wiz-style-btn active" type="button" data-wiz-char="smooth">Smooth shores</button>
+          <button class="wiz-style-btn" type="button" data-wiz-char="jagged">Jagged shores</button>
         </div>
-        <p class="wiz-hint" id="wiz-right-note">Генерация силуэта — в следующем проходе. Сейчас можно осмотреть мастер.</p>
+        <p class="wiz-hint" id="wiz-right-note">Silhouette generation ships in the next pass. Explore the wizard layout for now.</p>
       </aside>
       <footer class="wiz-bottom">
-        <span class="wiz-label">Варианты</span>
+        <span class="wiz-label">Variants</span>
         <button class="wiz-variant-btn wiz-disabled" type="button" disabled data-wiz-stub="variant-a">A</button>
         <button class="wiz-variant-btn wiz-disabled" type="button" disabled data-wiz-stub="variant-b">B</button>
         <button class="wiz-variant-btn wiz-disabled" type="button" disabled data-wiz-stub="variant-c">C</button>

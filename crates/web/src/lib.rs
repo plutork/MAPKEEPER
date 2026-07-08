@@ -445,6 +445,7 @@ struct AppState {
     legacy_map: bool,
     default_worlds_root: Option<String>,
     path_touched: bool,
+    build_path_touched: bool,
     /// Step 0 perf samples (perf-100k--measurement-hooks).
     perf: PerfMetrics,
     perf_timers: PerfTimers,
@@ -495,6 +496,7 @@ pub fn start() {
         legacy_map: false,
         default_worlds_root: None,
         path_touched: false,
+        build_path_touched: false,
         perf: PerfMetrics::default(),
         perf_timers: PerfTimers::default(),
         content_rev: 0,
@@ -522,9 +524,11 @@ pub fn start() {
     attach_brush_hover_preview(state.clone());
     attach_wheel_zoom(state.clone());
     attach_window_resize(state.clone());
-    attach_browse_folder_click();
+    attach_browse_folder_click(state.clone());
     attach_new_id_input(state.clone());
     attach_new_path_input(state.clone());
+    attach_generate_id_input(state.clone());
+    attach_generate_path_input(state.clone());
 
     wasm_bindgen_futures::spawn_local(refresh_projects(state));
 }
@@ -906,7 +910,7 @@ fn set_wizard_active(active: bool) {
     if active {
         let _ = editor.class_list().add_1("wizard-active");
         set_drawer_open(false);
-        set_wizard_status("Осмотр мастера — генерация силуэта в следующем проходе.");
+        set_wizard_status("Explore the wizard — silhouette generation ships next.");
     } else {
         let _ = editor.class_list().remove_1("wizard-active");
         set_wizard_status("");
@@ -946,11 +950,11 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
-            set_wizard_status("Сохранение…");
+            set_wizard_status("Saving…");
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 flush_pending_paints(state).await;
-                set_wizard_status("Черновик сохранён.");
+                set_wizard_status("Draft saved.");
             });
         });
         document()
@@ -961,7 +965,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // ← Миры — close wizard and return Home (same as tool-dock switch-world).
+    // ← Worlds — close wizard and return Home (same as tool-dock switch-world).
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
@@ -990,7 +994,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             } else if let Some(_) = el.get_attribute("data-wiz-char") {
                 wiz_toggle_style_group("wiz-chars", "data-wiz-char", &el);
             }
-            set_wizard_status("Стиль выбран — генерация в следующем проходе.");
+            set_wizard_status("Style selected — generation ships in the next pass.");
         });
         for id in ["wiz-styles", "wiz-chars"] {
             if let Ok(Some(root)) = document().query_selector(&format!("#{id}")) {
@@ -1014,10 +1018,10 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             let expanded = group.class_list().contains("expanded");
             if expanded {
                 let _ = group.class_list().remove_1("expanded");
-                head.set_text_content(Some("▶ Гео"));
+                head.set_text_content(Some("▶ Geo"));
             } else {
                 let _ = group.class_list().add_1("expanded");
-                head.set_text_content(Some("▼ Гео"));
+                head.set_text_content(Some("▼ Geo"));
             }
         });
         if let Ok(Some(left)) = document().query_selector(".wiz-left") {
@@ -1489,12 +1493,17 @@ fn suggested_world_path(state: &AppState, world_id: &str) -> Option<String> {
 
 fn refresh_suggested_path(state: &Rc<RefCell<AppState>>) {
     let state_ref = state.borrow();
-    if state_ref.path_touched {
-        return;
+    if !state_ref.path_touched {
+        let id = input("new-id").value();
+        if let Some(path) = suggested_world_path(&state_ref, &id) {
+            input("new-path").set_value(&path);
+        }
     }
-    let id = input("new-id").value();
-    if let Some(path) = suggested_world_path(&state_ref, &id) {
-        input("new-path").set_value(&path);
+    if !state_ref.build_path_touched {
+        let id = input("generate-id").value();
+        if let Some(path) = suggested_world_path(&state_ref, &id) {
+            input("generate-path").set_value(&path);
+        }
     }
 }
 
@@ -2398,7 +2407,7 @@ fn attach_generate_rivers_click(state: Rc<RefCell<AppState>>) {
     closure.forget();
 }
 
-/// «Начать сборку» on Home — create world and open build wizard shell (D-57).
+/// **Start build** on Home — create world and open build wizard shell (D-57).
 fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
         let id = input("generate-id").value();
@@ -2409,7 +2418,7 @@ fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
         }
         let preset = select_value("generate-preset");
         let state = state.clone();
-        set_text("generate-status", "Создание…");
+        set_text("generate-status", "Creating…");
         wasm_bindgen_futures::spawn_local(async move {
             let body = CreateProjectInput { id: &id, path: &path, map_preset: &preset };
             let sent = gloo_net::http::Request::post("/api/projects").json(&body);
@@ -2424,6 +2433,8 @@ fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
                 Ok(resp) if resp.ok() => {
                     set_text("generate-status", "");
                     input("generate-id").set_value("");
+                    state.borrow_mut().build_path_touched = false;
+                    refresh_suggested_path(&state);
                     show_view("editor");
                     load_map(state.clone()).await;
                     open_build_wizard();
@@ -2467,6 +2478,22 @@ fn attach_new_path_input(state: Rc<RefCell<AppState>>) {
         state.borrow_mut().path_touched = true;
     });
     let _ = input("new-path").add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
+    closure.forget();
+}
+
+fn attach_generate_id_input(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+        refresh_suggested_path(&state);
+    });
+    let _ = input("generate-id").add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
+    closure.forget();
+}
+
+fn attach_generate_path_input(state: Rc<RefCell<AppState>>) {
+    let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+        state.borrow_mut().build_path_touched = true;
+    });
+    let _ = input("generate-path").add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
     closure.forget();
 }
 
@@ -2784,17 +2811,35 @@ fn attach_escape_key() {
 /// "Browse…" button, desktop shell only (roadmap 5.9, D-29) — the button is
 /// `display:none` in a plain browser tab (see `index.html`), so attaching a
 /// listener here is harmless either way; it just never fires without Tauri.
-fn attach_browse_folder_click() {
-    let Some(button) = document().get_element_by_id("browse-folder") else { return };
-    let closure = Closure::<dyn FnMut()>::new(move || {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Some(path) = pick_folder_via_tauri().await {
-                input("new-path").set_value(&path);
-            }
+fn attach_browse_folder_click(state: Rc<RefCell<AppState>>) {
+    if let Some(button) = document().get_element_by_id("browse-folder") {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let state = state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(path) = pick_folder_via_tauri().await {
+                    input("new-path").set_value(&path);
+                    state.borrow_mut().path_touched = true;
+                }
+            });
         });
-    });
-    let _ = button.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
-    closure.forget();
+        let _ = button.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        closure.forget();
+    }
+    if let Some(button) = document().get_element_by_id("browse-generate-folder") {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let state = state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(path) = pick_folder_via_tauri().await {
+                    input("generate-path").set_value(&path);
+                    state.borrow_mut().build_path_touched = true;
+                }
+            });
+        });
+        let _ = button.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        closure.forget();
+    }
 }
 
 /// Calls the `window.mapkeeperPickFolder()` bridge defined in `index.html`
