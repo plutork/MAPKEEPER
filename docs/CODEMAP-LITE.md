@@ -43,6 +43,8 @@ Use this first, then open only the needed files.
 ## Key files
 
 - Workspace members: `Cargo.toml`
+- Full symbol codemap (generated): `docs/CODEMAP.md`
+- Codemap generator script: `scripts/gen_codemap.py`
 - Core boundary entry: `crates/core/src/lib.rs`
 - Server boundary entry: `crates/server/src/lib.rs`
 - Web boundary entry: `crates/web/src/lib.rs`
