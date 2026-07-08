@@ -509,7 +509,8 @@ pub fn start() {
     attach_close_click(state.clone());
     attach_switch_world_click(state.clone());
     attach_create_click(state.clone());
-    attach_generate_click(state.clone());
+    attach_build_start_click(state.clone());
+    attach_wizard_handlers(state.clone());
     attach_generate_rivers_click(state.clone());
     attach_preset_warn_handlers();
     attach_project_list_click(state.clone());
@@ -895,6 +896,159 @@ fn show_view(name: &str) {
             }
         }
     }
+}
+
+// world-pipeline--land-silhouette-v1 shell (D-57): fullscreen build wizard chrome.
+fn set_wizard_active(active: bool) {
+    let Some(editor) = document().get_element_by_id("editor") else {
+        return;
+    };
+    if active {
+        let _ = editor.class_list().add_1("wizard-active");
+        set_drawer_open(false);
+        set_wizard_status("Осмотр мастера — генерация силуэта в следующем проходе.");
+    } else {
+        let _ = editor.class_list().remove_1("wizard-active");
+        set_wizard_status("");
+    }
+}
+
+fn open_build_wizard() {
+    set_wizard_active(true);
+}
+
+fn close_build_wizard() {
+    set_wizard_active(false);
+}
+
+fn set_wizard_status(msg: &str) {
+    set_text("wizard-status", msg);
+}
+
+fn wiz_toggle_style_group(container_id: &str, attr: &str, active: &web_sys::Element) {
+    let Ok(Some(root)) = document().query_selector(&format!("#{container_id}")) else {
+        return;
+    };
+    if let Ok(list) = root.query_selector_all(&format!("[{attr}]")) {
+        for i in 0..list.length() {
+            if let Some(node) = list.item(i) {
+                if let Ok(el) = node.dyn_into::<web_sys::Element>() {
+                    let _ = el.class_list().remove_1("active");
+                }
+            }
+        }
+    }
+    let _ = active.class_list().add_1("active");
+}
+
+fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
+    // Save Draft — flush pending paints; world already on disk from create.
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            set_wizard_status("Сохранение…");
+            let state = state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                flush_pending_paints(state).await;
+                set_wizard_status("Черновик сохранён.");
+            });
+        });
+        document()
+            .get_element_by_id("wiz-save-draft")
+            .expect("missing #wiz-save-draft")
+            .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+            .expect("wiz-save-draft");
+        closure.forget();
+    }
+
+    // ← Миры — close wizard and return Home (same as tool-dock switch-world).
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            close_build_wizard();
+            let state = state.clone();
+            wasm_bindgen_futures::spawn_local(wizard_return_home(state));
+        });
+        document()
+            .get_element_by_id("wiz-worlds")
+            .expect("missing #wiz-worlds")
+            .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+            .expect("wiz-worlds");
+        closure.forget();
+    }
+
+    // Style / character buttons — visual selection only in shell pass.
+    {
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else { return };
+            let Some(el) = click_target_element(&mouse) else { return };
+            if !el.class_list().contains("wiz-style-btn") {
+                return;
+            }
+            if let Some(_) = el.get_attribute("data-wiz-style") {
+                wiz_toggle_style_group("wiz-styles", "data-wiz-style", &el);
+            } else if let Some(_) = el.get_attribute("data-wiz-char") {
+                wiz_toggle_style_group("wiz-chars", "data-wiz-char", &el);
+            }
+            set_wizard_status("Стиль выбран — генерация в следующем проходе.");
+        });
+        for id in ["wiz-styles", "wiz-chars"] {
+            if let Ok(Some(root)) = document().query_selector(&format!("#{id}")) {
+                let _ = root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+            }
+        }
+        closure.forget();
+    }
+
+    // Geo group collapse toggle (shell: only group with steps).
+    {
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else { return };
+            let Some(head) = click_target_element(&mouse) else { return };
+            if head.get_attribute("data-wiz-group").as_deref() != Some("geo") {
+                return;
+            }
+            let Some(group) = head.closest(".wiz-group").ok().flatten() else {
+                return;
+            };
+            let expanded = group.class_list().contains("expanded");
+            if expanded {
+                let _ = group.class_list().remove_1("expanded");
+                head.set_text_content(Some("▶ Гео"));
+            } else {
+                let _ = group.class_list().add_1("expanded");
+                head.set_text_content(Some("▼ Гео"));
+            }
+        });
+        if let Ok(Some(left)) = document().query_selector(".wiz-left") {
+            let _ = left.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+}
+
+async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
+    let _ = gloo_net::http::Request::post("/api/projects/close").send().await;
+    let mut state_mut = state.borrow_mut();
+    state_mut.cells.clear();
+    state_mut.elevation = fresh_elevation_layer(state_mut.map_bounds);
+    state_mut.selected = None;
+    state_mut.map_bounds = MapPreset::Small.bounds();
+    state_mut.zoom = 1.0;
+    state_mut.pan_x = 0.0;
+    state_mut.pan_y = 0.0;
+    state_mut.paint_active = false;
+    state_mut.paint_moved = false;
+    state_mut.paint_last_cell = None;
+    state_mut.show_grid = false;
+    reset_view_on_world_open(&mut state_mut);
+    state_mut.legacy_map = false;
+    set_drawer_open(false);
+    clear_inspect_selection();
+    set_world_label("—");
+    set_text("legacy-map-note", "");
+    drop(state_mut);
+    wasm_bindgen_futures::spawn_local(refresh_projects(state));
 }
 
 /// Cell-id label shown to the author — placeholder UI, real schema is 3.2.
@@ -2128,30 +2282,9 @@ fn attach_close_click(state: Rc<RefCell<AppState>>) {
 /// and local UI state, then goes back to the Home screen.
 fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
+        close_build_wizard();
         let state = state.clone();
-        wasm_bindgen_futures::spawn_local(async move {
-            let _ = gloo_net::http::Request::post("/api/projects/close").send().await;
-            let mut state_mut = state.borrow_mut();
-            state_mut.cells.clear();
-            state_mut.elevation = fresh_elevation_layer(state_mut.map_bounds);
-            state_mut.selected = None;
-            state_mut.map_bounds = MapPreset::Small.bounds();
-            state_mut.zoom = 1.0;
-            state_mut.pan_x = 0.0;
-            state_mut.pan_y = 0.0;
-            state_mut.paint_active = false;
-            state_mut.paint_moved = false;
-            state_mut.paint_last_cell = None;
-            state_mut.show_grid = false;
-            reset_view_on_world_open(&mut state_mut);
-            state_mut.legacy_map = false;
-            set_drawer_open(false);
-            clear_inspect_selection();
-            set_world_label("—");
-            set_text("legacy-map-note", "");
-            drop(state_mut);
-            wasm_bindgen_futures::spawn_local(refresh_projects(state));
-        });
+        wasm_bindgen_futures::spawn_local(wizard_return_home(state));
     });
     document()
         .get_element_by_id("switch-world")
@@ -2265,7 +2398,8 @@ fn attach_generate_rivers_click(state: Rc<RefCell<AppState>>) {
     closure.forget();
 }
 
-fn attach_generate_click(state: Rc<RefCell<AppState>>) {
+/// «Начать сборку» on Home — create world and open build wizard shell (D-57).
+fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
         let id = input("generate-id").value();
         let path = input("generate-path").value();
@@ -2275,7 +2409,7 @@ fn attach_generate_click(state: Rc<RefCell<AppState>>) {
         }
         let preset = select_value("generate-preset");
         let state = state.clone();
-        set_text("generate-status", "Generating…");
+        set_text("generate-status", "Создание…");
         wasm_bindgen_futures::spawn_local(async move {
             let body = CreateProjectInput { id: &id, path: &path, map_preset: &preset };
             let sent = gloo_net::http::Request::post("/api/projects").json(&body);
@@ -2291,10 +2425,11 @@ fn attach_generate_click(state: Rc<RefCell<AppState>>) {
                     set_text("generate-status", "");
                     input("generate-id").set_value("");
                     show_view("editor");
-                    wasm_bindgen_futures::spawn_local(load_map(state));
+                    load_map(state.clone()).await;
+                    open_build_wizard();
                 }
                 Ok(resp) => {
-                    let msg = resp.text().await.unwrap_or_else(|_| "generate failed".to_string());
+                    let msg = resp.text().await.unwrap_or_else(|_| "create failed".to_string());
                     set_text("generate-status", &msg);
                 }
                 Err(err) => set_text("generate-status", &format!("Error: {err}")),
@@ -2302,10 +2437,10 @@ fn attach_generate_click(state: Rc<RefCell<AppState>>) {
         });
     });
     document()
-        .get_element_by_id("generate")
-        .expect("missing #generate")
+        .get_element_by_id("build-start")
+        .expect("missing #build-start")
         .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
-        .expect("attaching generate handler");
+        .expect("attaching build-start handler");
     closure.forget();
 }
 
@@ -2767,6 +2902,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
             match sent {
                 Ok(resp) if resp.ok() => {
                     set_text("home-status", "");
+                    close_build_wizard();
                     show_view("editor");
                     wasm_bindgen_futures::spawn_local(load_map(state));
                 }

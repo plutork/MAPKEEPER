@@ -300,6 +300,183 @@
   .preset-size-warn { font-size: 12px; min-height: 16px; margin: 4px 0 10px; }
   .preset-size-warn.preset-warn-yellow { color: #d4a72c; }
   .preset-size-warn.preset-warn-red { color: #e5534b; }
+
+  /* world-pipeline--land-silhouette-v1 shell (D-57) */
+  #editor.wizard-active {
+    display: grid;
+    grid-template-columns: minmax(168px, 200px) 1fr minmax(240px, 280px);
+    grid-template-rows: 48px 1fr auto;
+    grid-template-areas:
+      "wiz-top wiz-top wiz-top"
+      "wiz-left map wiz-right"
+      "wiz-bottom wiz-bottom wiz-bottom";
+    height: 100vh;
+    width: 100%;
+    position: relative;
+  }
+  #editor.wizard-active .map-wrap {
+    grid-area: map;
+    height: 100%;
+    min-height: 0;
+  }
+  #editor.wizard-active #build-wizard { display: contents; }
+  #editor.wizard-active #tool-dock { display: none !important; }
+  #editor.wizard-active #hint { display: none; }
+  #build-wizard { display: none; }
+
+  .wiz-top {
+    grid-area: wiz-top;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    background: rgba(22, 26, 29, 0.97);
+    border-bottom: 1px solid #2a2f36;
+    z-index: 25;
+    flex-wrap: wrap;
+  }
+  .wiz-top .wiz-spacer { flex: 1; }
+  .wiz-crumb {
+    font-size: 13px;
+    color: #9fe3c4;
+    font-weight: 600;
+  }
+  #wizard-status {
+    font-size: 12px;
+    color: #8a8f98;
+    min-width: 120px;
+    flex: 1;
+    text-align: right;
+  }
+  .wiz-left {
+    grid-area: wiz-left;
+    overflow-y: auto;
+    padding: 10px 8px;
+    background: rgba(22, 26, 29, 0.96);
+    border-right: 1px solid #2a2f36;
+    z-index: 25;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .wiz-group { display: flex; flex-direction: column; gap: 2px; }
+  .wiz-group-head {
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: #20242a;
+    color: #cbd3dd;
+    border: 1px solid transparent;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .wiz-group.expanded .wiz-group-head { border-color: #3a4a58; color: #eafff5; }
+  .wiz-group.locked .wiz-group-head {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #1a1f24;
+  }
+  .wiz-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 4px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .wiz-group:not(.expanded) .wiz-steps { display: none; }
+  .wiz-step {
+    font-size: 12px;
+    padding: 6px 8px;
+    border-radius: 5px;
+    color: #666f7a;
+  }
+  .wiz-step.done { color: #7fc99a; }
+  .wiz-step.active {
+    background: rgba(159, 227, 196, 0.12);
+    color: #9fe3c4;
+    font-weight: 600;
+  }
+  .wiz-step.locked { opacity: 0.45; }
+  .wiz-right {
+    grid-area: wiz-right;
+    overflow-y: auto;
+    padding: 14px;
+    background: rgba(22, 26, 29, 0.96);
+    border-left: 1px solid #2a2f36;
+    z-index: 25;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .wiz-right h2 {
+    margin: 0;
+    font-size: 15px;
+    color: #9fe3c4;
+    font-weight: 600;
+  }
+  .wiz-hint {
+    margin: 0;
+    font-size: 13px;
+    color: #8a8f98;
+    line-height: 1.45;
+  }
+  .wiz-label {
+    margin: 0;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8a8f98;
+  }
+  .wiz-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .wiz-style-btn {
+    padding: 8px 10px;
+    font-size: 12px;
+    background: #20242a;
+    color: #cbd3dd;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .wiz-style-btn.active {
+    border-color: #9fe3c4;
+    color: #eafff5;
+  }
+  .wiz-bottom {
+    grid-area: wiz-bottom;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    background: rgba(22, 26, 29, 0.97);
+    border-top: 1px solid #2a2f36;
+    z-index: 25;
+  }
+  .wiz-bottom .wiz-label { margin-right: 4px; }
+  .wiz-variant-btn {
+    min-width: 36px;
+    padding: 8px 12px;
+    background: #20242a;
+    color: #cbd3dd;
+    border: 1px solid #3a3f47;
+    border-radius: 6px;
+  }
+  .wiz-action-btn {
+    padding: 8px 14px;
+    background: #2a2f36;
+    color: #eee;
+    border-radius: 6px;
+  }
+  .wiz-action-btn.primary { background: #3ac886; color: #04140b; }
+  button:disabled, button.wiz-disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+  #wiz-finish { background: #2f6b4f; color: #e9fff2; }
+  #wiz-save-draft { background: #2a3f4f; color: #dce8f8; }
+  #wiz-worlds { background: #2a2f36; color: #eee; }
 </style>
 </head>
 <body>
@@ -312,9 +489,9 @@
     <div class="cards-grid">
       <article class="home-card emphasis">
         <div class="card-head">
-          <h2>Generate Random World</h2>
+          <h2>Собрать мир</h2>
         </div>
-        <p class="card-sub">Blank hex map at the size you pick — no random terrain yet.</p>
+        <p class="card-sub">Пошаговая сборка — силуэт, климат, вода… Вы принимаете каждый слой.</p>
         <label for="generate-id">World name</label>
         <input id="generate-id" placeholder="my-world" autocomplete="off" />
         <label for="generate-path">Folder</label>
@@ -329,7 +506,7 @@
           <option value="world">World (~99,777 cells, not stable)</option>
         </select>
         <p id="generate-preset-warn" class="preset-size-warn"></p>
-        <button id="generate" type="button">Generate</button>
+        <button id="build-start" type="button">Начать сборку</button>
         <div id="generate-status"></div>
       </article>
 
@@ -478,6 +655,62 @@
         </div>
       </div>
     </aside>
+    <div id="build-wizard">
+      <header class="wiz-top">
+        <button id="wiz-worlds" type="button">&larr; Миры</button>
+        <button id="wiz-save-draft" type="button">Save Draft</button>
+        <span class="wiz-crumb">Гео &rsaquo; Силуэт суши</span>
+        <span class="wiz-spacer"></span>
+        <span id="wizard-status"></span>
+        <button id="wiz-finish" type="button" disabled title="После принятия силуэта суши">Finish / Open Editor</button>
+      </header>
+      <nav class="wiz-left" aria-label="Шаги сборки">
+        <div class="wiz-group expanded">
+          <button type="button" class="wiz-group-head" data-wiz-group="geo">&#9660; Гео</button>
+          <ul class="wiz-steps">
+            <li class="wiz-step done">1 &middot; Размер и форма</li>
+            <li class="wiz-step done">2 &middot; Сетка</li>
+            <li class="wiz-step active">3 &middot; Силуэт суши</li>
+            <li class="wiz-step locked">4 &middot; Тектоника</li>
+            <li class="wiz-step locked">5 &middot; Высота</li>
+            <li class="wiz-step locked">6 &middot; Берега</li>
+          </ul>
+        </div>
+        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Климат</button></div>
+        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Вода</button></div>
+        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Почвы</button></div>
+        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Жизнь</button></div>
+        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Доп</button></div>
+        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Проверка</button></div>
+      </nav>
+      <aside class="wiz-right">
+        <h2>Силуэт суши</h2>
+        <p class="wiz-hint">Выберите общую форму материков и характер береговой линии. Затем сгенерируйте варианты A/B/C внизу и примите один.</p>
+        <p class="wiz-label">Стиль</p>
+        <div class="wiz-btn-row" id="wiz-styles">
+          <button class="wiz-style-btn active" type="button" data-wiz-style="continent">Один материк</button>
+          <button class="wiz-style-btn" type="button" data-wiz-style="archipelago">Архипелаг</button>
+          <button class="wiz-style-btn" type="button" data-wiz-style="dual">Два массива</button>
+          <button class="wiz-style-btn" type="button" data-wiz-style="island">Остров</button>
+        </div>
+        <p class="wiz-label">Характер</p>
+        <div class="wiz-btn-row" id="wiz-chars">
+          <button class="wiz-style-btn active" type="button" data-wiz-char="smooth">Гладкие берега</button>
+          <button class="wiz-style-btn" type="button" data-wiz-char="jagged">Изрезанные берега</button>
+        </div>
+        <p class="wiz-hint" id="wiz-right-note">Генерация силуэта — в следующем проходе. Сейчас можно осмотреть мастер.</p>
+      </aside>
+      <footer class="wiz-bottom">
+        <span class="wiz-label">Варианты</span>
+        <button class="wiz-variant-btn wiz-disabled" type="button" disabled data-wiz-stub="variant-a">A</button>
+        <button class="wiz-variant-btn wiz-disabled" type="button" disabled data-wiz-stub="variant-b">B</button>
+        <button class="wiz-variant-btn wiz-disabled" type="button" disabled data-wiz-stub="variant-c">C</button>
+        <button class="wiz-action-btn wiz-disabled" type="button" disabled data-wiz-stub="regenerate">Regenerate</button>
+        <button class="wiz-action-btn wiz-disabled" type="button" disabled data-wiz-stub="accept">Accept</button>
+        <button class="wiz-action-btn wiz-disabled" type="button" disabled data-wiz-stub="edit">Edit</button>
+        <button class="wiz-action-btn primary wiz-disabled" type="button" disabled data-wiz-stub="continue">Continue</button>
+      </footer>
+    </div>
   </div>
 
   <script>
