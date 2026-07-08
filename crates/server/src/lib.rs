@@ -30,6 +30,11 @@ use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::layer::{
     Bounds, DenseLayer, LayerCellWrite, MapManifest, ValueType, WireCellState, ELEVATION_LAYER_ID,
+    RIVER_ID_LAYER_ID,
+};
+use mapkeeper_core::rivers::{
+    append_cell, create_river, delete_river, pop_last_cell, sync_river_id_layer, cell_index,
+    RiverCatalog, RiverError, RIVER_CATALOG_FILE,
 };
 use mapkeeper_core::map_preset::{legacy_default_bounds, parse_map_preset, rect_cell_count, MapPreset};
 use mapkeeper_core::profile::CellProfile;
@@ -423,6 +428,11 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         // save-batch--http-endpoint-v1: one request -> one layer write.
         .route("/api/layers/:id/batch", axum::routing::put(put_layer_batch))
         .route("/api/layers/:id/cells/:q/:r", axum::routing::put(put_layer_cell))
+        // river-overlay-layer-v1 (D-54): catalog API + derived river_id sync.
+        .route("/api/rivers", get(get_rivers).put(put_rivers))
+        .route("/api/rivers/append", axum::routing::post(append_river_cell))
+        .route("/api/rivers/:id/pop", axum::routing::post(pop_river_cell))
+        .route("/api/rivers/:id", axum::routing::delete(delete_river_handler))
         .with_state(state)
         .fallback_service(ServeDir::new(&config.web_dist)))
 }
@@ -762,7 +772,7 @@ fn layer_file_path(world_path: &Path, layer_id: &str) -> PathBuf {
 /// Default value kind for a not-yet-created layer. Only `elevation` is integer
 /// today; everything else defaults to categorical.
 fn default_value_type(layer_id: &str) -> ValueType {
-    if layer_id == ELEVATION_LAYER_ID {
+    if layer_id == ELEVATION_LAYER_ID || layer_id == RIVER_ID_LAYER_ID {
         ValueType::Integer
     } else {
         ValueType::Categorical
@@ -843,4 +853,133 @@ async fn put_layer_cell(
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
     Json(WireCellState::from_dense(dense.state(index))).into_response()
+}
+
+// --- River catalog (river-overlay-layer-v1, D-54) ---------------------------
+
+fn rivers_file_path(world_path: &Path) -> PathBuf {
+    world_path.join("map").join(RIVER_CATALOG_FILE)
+}
+
+fn read_river_catalog(world_path: &Path) -> RiverCatalog {
+    std::fs::read_to_string(rivers_file_path(world_path))
+        .ok()
+        .and_then(|raw| RiverCatalog::from_json(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn write_river_catalog(world_path: &Path, catalog: &RiverCatalog) -> Result<(), String> {
+    let path = rivers_file_path(world_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let body = catalog.to_json_pretty().map_err(|e| e.to_string())?;
+    std::fs::write(&path, body).map_err(|e| e.to_string())
+}
+
+fn persist_rivers(world_path: &Path, catalog: &RiverCatalog, bounds: &MapBounds) -> Result<(), String> {
+    write_river_catalog(world_path, catalog)?;
+    let layer = sync_river_id_layer(catalog, bounds);
+    write_dense_layer(world_path, &layer)
+}
+
+fn river_error_status(err: RiverError) -> (StatusCode, String) {
+    (StatusCode::BAD_REQUEST, err.to_string())
+}
+
+async fn get_rivers(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    Json(read_river_catalog(&active.path)).into_response()
+}
+
+async fn put_rivers(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(catalog): Json<RiverCatalog>,
+) -> impl IntoResponse {
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    let bounds = map_bounds(&active.path);
+    if let Err(err) = persist_rivers(&active.path, &catalog, &bounds) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    Json(catalog).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+struct RiverAppendInput {
+    river_id: Option<u32>,
+    q: i32,
+    r: i32,
+}
+
+async fn append_river_cell(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(input): Json<RiverAppendInput>,
+) -> impl IntoResponse {
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    let bounds = map_bounds(&active.path);
+    let index = match cell_index(&bounds, input.q, input.r) {
+        Ok(i) => i,
+        Err(err) => return river_error_status(err).into_response(),
+    };
+    let mut catalog = read_river_catalog(&active.path);
+    let result = match input.river_id {
+        Some(id) => append_cell(&mut catalog, &bounds, id, index).map(|_| id),
+        None => create_river(&mut catalog, &bounds, index),
+    };
+    match result {
+        Ok(_) => {
+            if let Err(err) = persist_rivers(&active.path, &catalog, &bounds) {
+                return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+            }
+            Json(catalog).into_response()
+        }
+        Err(err) => river_error_status(err).into_response(),
+    }
+}
+
+async fn pop_river_cell(
+    State(state): State<Arc<Mutex<AppState>>>,
+    AxPath(river_id): AxPath<u32>,
+) -> impl IntoResponse {
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    let bounds = map_bounds(&active.path);
+    let mut catalog = read_river_catalog(&active.path);
+    if let Err(err) = pop_last_cell(&mut catalog, river_id) {
+        return river_error_status(err).into_response();
+    }
+    if let Err(err) = persist_rivers(&active.path, &catalog, &bounds) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    Json(catalog).into_response()
+}
+
+async fn delete_river_handler(
+    State(state): State<Arc<Mutex<AppState>>>,
+    AxPath(river_id): AxPath<u32>,
+) -> impl IntoResponse {
+    let guard = state.lock().unwrap();
+    let Some(active) = guard.active.as_ref() else {
+        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+    };
+    let bounds = map_bounds(&active.path);
+    let mut catalog = read_river_catalog(&active.path);
+    if let Err(err) = delete_river(&mut catalog, river_id) {
+        return river_error_status(err).into_response();
+    }
+    if let Err(err) = persist_rivers(&active.path, &catalog, &bounds) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    Json(catalog).into_response()
 }

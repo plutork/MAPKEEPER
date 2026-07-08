@@ -27,6 +27,8 @@ use serde::{Deserialize, Serialize};
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 pub const TERRAIN_LAYER_ID: &str = "terrain";
 pub const ELEVATION_LAYER_ID: &str = "elevation";
+/// Dense integer layer: 0 = no river, N = river id (river-overlay-layer-v1).
+pub const RIVER_ID_LAYER_ID: &str = "river_id";
 
 /// Kind of value a layer stores: `categorical` (palette-encoded strings) or
 /// `integer`. Future numeric/enum kinds are additive.

@@ -16,6 +16,11 @@ use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::{filled_elevation_layer, hydro_from_elevation, DEFAULT_LAND_ELEVATION, ELEVATION_LAYER_ID, OCEAN_ELEVATION};
 use mapkeeper_core::layer::{
     Bounds, DenseLayer, DenseState, LayerValue, MapManifest, ValueType, TERRAIN_LAYER_ID,
+    RIVER_ID_LAYER_ID,
+};
+use mapkeeper_core::rivers::{
+    append_cell, create_river, delete_river, pop_last_cell, sync_river_id_layer,
+    RiverCatalog, RIVER_CATALOG_FILE,
 };
 use mapkeeper_core::map_preset::{legacy_default_bounds, parse_map_preset, MapPreset};
 use mapkeeper_core::profile::CellProfile;
@@ -53,6 +58,11 @@ enum Command {
     Layer {
         #[command(subcommand)]
         action: LayerAction,
+    },
+    /// River catalog (river-overlay-layer-v1, D-54).
+    Rivers {
+        #[command(subcommand)]
+        action: RiversAction,
     },
 }
 
@@ -198,6 +208,37 @@ enum LayerAction {
     },
 }
 
+#[derive(Subcommand)]
+enum RiversAction {
+    /// Print the river catalog JSON.
+    List {
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+    },
+    /// Append a cell to a river chain (omit --river-id to start a new river).
+    Append {
+        cell_id: String,
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+        #[arg(long)]
+        river_id: Option<u32>,
+    },
+    /// Remove the last cell from a river.
+    Pop {
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+        #[arg(long)]
+        river_id: u32,
+    },
+    /// Delete a river entirely.
+    Delete {
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+        #[arg(long)]
+        river_id: u32,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -236,6 +277,14 @@ fn main() -> Result<()> {
             LayerAction::Clear { layer_id, cell_id, world } => {
                 cmd_layer_clear(&world, &layer_id, &cell_id)
             }
+        },
+        Command::Rivers { action } => match action {
+            RiversAction::List { world } => cmd_rivers_list(&world),
+            RiversAction::Append { cell_id, world, river_id } => {
+                cmd_rivers_append(&world, &cell_id, river_id)
+            }
+            RiversAction::Pop { world, river_id } => cmd_rivers_pop(&world, river_id),
+            RiversAction::Delete { world, river_id } => cmd_rivers_delete(&world, river_id),
         },
     }
 }
@@ -446,9 +495,8 @@ fn cell_index(bounds: &MapBounds, cell_id: &str) -> Result<usize> {
         .with_context(|| format!("cell {cell_id} is outside the map bounds"))
 }
 
-/// Default value kind for a not-yet-created layer (`elevation` = integer).
 fn default_value_type(layer_id: &str) -> ValueType {
-    if layer_id == ELEVATION_LAYER_ID {
+    if layer_id == ELEVATION_LAYER_ID || layer_id == RIVER_ID_LAYER_ID {
         ValueType::Integer
     } else {
         ValueType::Categorical
@@ -673,5 +721,70 @@ fn cmd_layer_clear(world: &Path, layer_id: &str, cell_id: &str) -> Result<()> {
     dense.set(index, DenseState::Unknown);
     write_dense_layer(world, &dense)?;
     println!("Cleared {layer_id} for {cell_id} (now unknown)");
+    Ok(())
+}
+
+fn rivers_file_path(world: &Path) -> PathBuf {
+    world.join("map").join(RIVER_CATALOG_FILE)
+}
+
+fn read_river_catalog(world: &Path) -> RiverCatalog {
+    fs::read_to_string(rivers_file_path(world))
+        .ok()
+        .and_then(|raw| RiverCatalog::from_json(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn write_river_catalog(world: &Path, catalog: &RiverCatalog) -> Result<()> {
+    let path = rivers_file_path(world);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, catalog.to_json_pretty()?)?;
+    Ok(())
+}
+
+fn persist_rivers(world: &Path, catalog: &RiverCatalog, bounds: &MapBounds) -> Result<()> {
+    write_river_catalog(world, catalog)?;
+    let layer = sync_river_id_layer(catalog, bounds);
+    write_dense_layer(world, &layer)
+}
+
+fn cmd_rivers_list(world: &Path) -> Result<()> {
+    let catalog = read_river_catalog(world);
+    println!("{}", catalog.to_json_pretty()?);
+    Ok(())
+}
+
+fn cmd_rivers_append(world: &Path, cell_id: &str, river_id: Option<u32>) -> Result<()> {
+    let bounds = read_bounds(world);
+    let index = cell_index(&bounds, cell_id)?;
+    let mut catalog = read_river_catalog(world);
+    match river_id {
+        Some(id) => append_cell(&mut catalog, &bounds, id, index).map_err(|e| anyhow::anyhow!(e.to_string()))?,
+        None => {
+            create_river(&mut catalog, &bounds, index).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        }
+    }
+    persist_rivers(world, &catalog, &bounds)?;
+    println!("{}", catalog.to_json_pretty()?);
+    Ok(())
+}
+
+fn cmd_rivers_pop(world: &Path, river_id: u32) -> Result<()> {
+    let bounds = read_bounds(world);
+    let mut catalog = read_river_catalog(world);
+    pop_last_cell(&mut catalog, river_id).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    persist_rivers(world, &catalog, &bounds)?;
+    println!("{}", catalog.to_json_pretty()?);
+    Ok(())
+}
+
+fn cmd_rivers_delete(world: &Path, river_id: u32) -> Result<()> {
+    let bounds = read_bounds(world);
+    let mut catalog = read_river_catalog(world);
+    delete_river(&mut catalog, river_id).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    persist_rivers(world, &catalog, &bounds)?;
+    println!("{}", catalog.to_json_pretty()?);
     Ok(())
 }

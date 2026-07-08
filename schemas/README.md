@@ -28,6 +28,13 @@ kept separate from author profiles. Dense and **index-addressed** for the
 50–100k ceiling: cells are addressed by linear index within the map bounds
 (`core::hex::MapBounds::index_of`), not by `cell_id` strings, and categorical
 values are palette/dictionary-encoded. `cell_id` stays the external identity
+
+## `map-rivers.schema.json` (D-54, river-overlay-layer-v1)
+
+River **catalog** at `map/rivers.json` — mirrors `crates/core/src/rivers.rs::RiverCatalog`.
+Ordered `cells[]` linear indices per river; derived dense `river_id` integer layer
+is defined by `map-layer-dense.schema.json`.
+
 (API / profiles / agent); the linear index is the internal storage key.
 
 | Field | Meaning |

@@ -388,6 +388,7 @@
       <nav id="dock-rail" aria-label="Tools">
         <button class="dock-btn active tool-active" data-dock="inspect" type="button" title="Inspect">&#128269;</button>
         <button class="dock-btn" data-dock="terrain" type="button" title="Terrain">&#9998;</button>
+        <button class="dock-btn" data-dock="rivers" type="button" title="Rivers">&#127754;</button>
         <button class="dock-btn" data-dock="view" type="button" title="View">&#128065;</button>
         <button class="dock-btn" data-dock="world" type="button" title="World">&#127968;</button>
       </nav>
@@ -435,6 +436,20 @@
           </div>
           <p class="dock-note">Current: <span id="brush-size-value">1</span>x. Raise/Lower auto-switch to Elevation view.</p>
           <p class="dock-note">Autosave writes on a short cooldown and flushes on mouse release.</p>
+        </div>
+        <div class="drawer-pane" data-drawer="rivers">
+          <p class="pane-label">Rivers</p>
+          <p class="dock-note">Click each hex in order — neighbor-only chain. Straight stroke overlay (v1).</p>
+          <div class="swatch-grid">
+            <button class="swatch" data-brush="river" type="button"><span class="dot" style="background:#4da6ff"></span>Draw river</button>
+            <button class="swatch" data-brush="river-erase" type="button"><span class="dot" style="background:#c44"></span>Erase river</button>
+          </div>
+          <div class="row">
+            <button class="swatch" data-river-action="new" type="button">New river</button>
+            <button class="swatch" data-river-action="undo" type="button">Undo step</button>
+          </div>
+          <p id="river-status" class="dock-note">New river on next click · 0 river(s) on map</p>
+          <p class="dock-note">Erase removes the whole river on any of its cells.</p>
         </div>
         <div class="drawer-pane" data-drawer="view">
           <p class="pane-label">View</p>

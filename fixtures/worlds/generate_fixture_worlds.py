@@ -141,7 +141,76 @@ def write_world(slug: str, _desc: str, elev_fn) -> None:
     with open(root / "map" / "layers" / "elevation.json", "w", encoding="utf-8") as f:
         json.dump(build_layer(elev_fn), f, indent=2)
         f.write("\n")
+    if slug == "coastal-slope":
+        write_coastal_slope_rivers(root)
     print(f"wrote {slug}")
+
+
+def offset_to_axial(col: int, row: int) -> tuple[int, int]:
+    col_c = col - WIDTH // 2
+    row_c = row - HEIGHT // 2
+    q = col_c - (row_c - (row_c & 1)) // 2
+    r = row_c
+    return q, r
+
+
+def axial_to_index(q: int, r: int) -> int:
+    for row in range(HEIGHT):
+        for col in range(WIDTH):
+            if offset_to_axial(col, row) == (q, r):
+                return index(col, row)
+    raise ValueError(f"cell ({q},{r}) out of bounds")
+
+
+def hex_neighbors(q: int, r: int) -> list[tuple[int, int]]:
+    dirs = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
+    return [(q + dq, r + dr) for dq, dr in dirs]
+
+
+def coastal_slope_river_chain() -> list[int]:
+    """Westward neighbor chain from axial (4,0) — mirrors core rivers test."""
+    chain = [axial_to_index(4, 0)]
+    q, r = 4, 0
+    for _ in range(6):
+        west = [
+            n for n in hex_neighbors(q, r)
+            if n[0] < q and axial_to_index(n[0], n[1]) is not None
+        ]
+        nxt = min(west, key=lambda c: c[0])
+        chain.append(axial_to_index(nxt[0], nxt[1]))
+        q, r = nxt
+    return chain
+
+
+def build_river_id_layer(cells_by_river: dict[int, list[int]]) -> dict:
+    values = [0] * CELL_COUNT
+    states = [2] * CELL_COUNT
+    for river_id, cells in cells_by_river.items():
+        for idx in cells:
+            values[idx] = river_id
+    return {
+        "schema_version": 2,
+        "layer_id": "river_id",
+        "value_type": "integer",
+        "cell_count": CELL_COUNT,
+        "states": states,
+        "values": values,
+    }
+
+
+def write_coastal_slope_rivers(root: Path) -> None:
+    cells = coastal_slope_river_chain()
+    rivers = {
+        "schema_version": 1,
+        "rivers": [{"id": 1, "cells": cells}],
+        "next_id": 2,
+    }
+    with open(root / "map" / "rivers.json", "w", encoding="utf-8") as f:
+        json.dump(rivers, f, indent=2)
+        f.write("\n")
+    with open(root / "map" / "layers" / "river_id.json", "w", encoding="utf-8") as f:
+        json.dump(build_river_id_layer({1: cells}), f, indent=2)
+        f.write("\n")
 
 
 def main() -> None:

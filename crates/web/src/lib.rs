@@ -23,6 +23,7 @@ use gloo_timers::future::TimeoutFuture;
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::{hydro_from_elevation, stamp_delta, HydroKind};
 use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
+use mapkeeper_core::rivers::{river_at_cell, RiverCatalog};
 use mapkeeper_core::map_preset::MapPreset;
 use mapkeeper_core::profile::CellProfile;
 use serde::{Deserialize, Serialize};
@@ -388,6 +389,9 @@ enum Brush {
     SetWater,
     Raise,
     Lower,
+    /// river-overlay-layer-v1: chain-click polyline brush.
+    River,
+    RiverErase,
 }
 
 struct AppState {
@@ -396,8 +400,14 @@ struct AppState {
     /// Index-addressed elevation layer — primary render cache (perf-100k--web-dense-client).
     elevation: DenseLayer,
     brush: Brush,
-    /// Last non-Inspect brush — restored when reopening Terrain tab.
+    /// Last terrain brush — restored when reopening Terrain tab.
     last_paint_brush: Brush,
+    /// Last river brush — restored when reopening Rivers tab.
+    last_river_brush: Brush,
+    /// Active river chain id (`None` = next click starts a new river).
+    active_river_id: Option<u32>,
+    /// River catalog mirror (river-overlay-layer-v1).
+    rivers: RiverCatalog,
     selected: Option<(i32, i32)>,
     /// Hex bounds from `map/manifest.json` (via `/api/map`).
     map_bounds: MapBounds,
@@ -455,6 +465,9 @@ pub fn start() {
         elevation: fresh_elevation_layer(initial_bounds),
         brush: Brush::Inspect,
         last_paint_brush: Brush::SetLand,
+        last_river_brush: Brush::River,
+        active_river_id: None,
+        rivers: RiverCatalog::default(),
         selected: None,
         map_bounds: initial_bounds,
         zoom: 1.0,
@@ -615,12 +628,26 @@ fn clear_pointer_interaction(s: &mut AppState) {
 }
 
 fn apply_paint_brush(s: &mut AppState, brush: Brush) {
-    if !matches!(brush, Brush::Inspect) {
+    if terrain_brush(&brush) {
         s.last_paint_brush = brush.clone();
+    }
+    if river_brush(&brush) {
+        s.last_river_brush = brush.clone();
     }
     s.brush = brush;
     s.hover_cell = None;
     clear_pointer_interaction(s);
+}
+
+fn terrain_brush(brush: &Brush) -> bool {
+    matches!(
+        brush,
+        Brush::SetLand | Brush::SetWater | Brush::Raise | Brush::Lower
+    )
+}
+
+fn river_brush(brush: &Brush) -> bool {
+    matches!(brush, Brush::River | Brush::RiverErase)
 }
 
 fn active_dock_tab() -> Option<String> {
@@ -647,15 +674,17 @@ fn sync_paint_tool_ui(brush: &Brush) {
 }
 
 fn sync_dock_rail_for_brush(brush: &Brush) {
-    let terrain_active = !matches!(brush, Brush::Inspect);
+    let terrain_active = terrain_brush(brush);
+    let rivers_active = river_brush(brush);
     if let Some(rail) = document().get_element_by_id("dock-rail") {
         if let Ok(items) = rail.query_selector_all("[data-dock]") {
             for i in 0..items.length() {
                 if let Some(node) = items.item(i) {
                     if let Ok(el) = node.dyn_into::<Element>() {
                         let dock = el.get_attribute("data-dock").unwrap_or_default();
-                        let tool_active = (dock == "inspect" && !terrain_active)
-                            || (dock == "terrain" && terrain_active);
+                        let tool_active = (dock == "inspect" && !terrain_active && !rivers_active)
+                            || (dock == "terrain" && terrain_active)
+                            || (dock == "rivers" && rivers_active);
                         if tool_active {
                             let _ = el.class_list().add_1("tool-active");
                         } else {
@@ -686,6 +715,8 @@ fn sync_brush_swatch_active(brush: &Brush) {
         Brush::SetWater => "water".to_string(),
         Brush::Raise => "raise".to_string(),
         Brush::Lower => "lower".to_string(),
+        Brush::River => "river".to_string(),
+        Brush::RiverErase => "river-erase".to_string(),
     };
     if let Some(drawer) = document().get_element_by_id("dock-drawer") {
         if let Ok(Some(button)) = drawer.query_selector(&format!("[data-brush=\"{kind}\"]")) {
@@ -720,7 +751,7 @@ fn sync_brush_radius_active(radius: i32) {
 }
 
 fn draw_preview_boundary(state: &AppState, ctx: &CanvasRenderingContext2d, size: f64, ox: f64, oy: f64) {
-    if matches!(state.brush, Brush::Inspect) {
+    if matches!(state.brush, Brush::Inspect) || river_brush(&state.brush) {
         return;
     }
     let Some(center) = state.hover_cell else { return };
@@ -750,6 +781,51 @@ fn draw_preview_boundary(state: &AppState, ctx: &CanvasRenderingContext2d, size:
         ctx.close_path();
         ctx.stroke();
     }
+}
+
+/// river-overlay-layer-v1: straight center-to-center polyline strokes.
+fn draw_rivers(state: &AppState, ctx: &CanvasRenderingContext2d, size: f64, ox: f64, oy: f64) {
+    if state.rivers.rivers.is_empty() {
+        return;
+    }
+    ctx.set_line_width(2.0);
+    ctx.set_stroke_style_str("#4da6ff");
+    ctx.set_line_cap("round");
+    ctx.set_line_join("round");
+    let bounds = state.map_bounds;
+    for river in &state.rivers.rivers {
+        if river.cells.len() < 2 {
+            continue;
+        }
+        ctx.begin_path();
+        let mut started = false;
+        for &idx in &river.cells {
+            let Some(cell) = bounds.from_index(idx) else { continue };
+            let (x, y) = cell.to_pixel(size);
+            let (cx, cy) = (ox + x, oy + y);
+            if started {
+                ctx.line_to(cx, cy);
+            } else {
+                ctx.move_to(cx, cy);
+                started = true;
+            }
+        }
+        if started {
+            ctx.stroke();
+        }
+    }
+}
+
+fn sync_river_status(state: &AppState) {
+    let active = state
+        .active_river_id
+        .map(|id| format!("River #{id}"))
+        .unwrap_or_else(|| "New river on next click".to_string());
+    let count = state.rivers.rivers.len();
+    set_text(
+        "river-status",
+        &format!("{active} · {count} river(s) on map"),
+    );
 }
 
 fn open_dock_tab(tab: &str) {
@@ -1017,6 +1093,7 @@ fn redraw(state: &AppState) -> usize {
         ),
     );
     draw_preview_boundary(state, &ctx, size, ox, oy);
+    draw_rivers(state, &ctx, size, ox, oy);
     set_text("toggle-grid", grid_lines_toggle_label(state.show_grid));
     set_text(
         "toggle-color-mode",
@@ -1285,6 +1362,7 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
         }
     }
     load_elevation(&state).await;
+    load_rivers(&state).await;
     let redraw_start = perf_now();
     let drawn = redraw(&state.borrow());
     let first_redraw_ms = perf_now() - redraw_start;
@@ -1324,6 +1402,135 @@ async fn load_elevation(state: &Rc<RefCell<AppState>>) {
     state_mut.perf.layer_fetch_ms = Some(fetch_ms);
     state_mut.perf.layer_parse_or_decode_ms = Some(parse_ms);
     state_mut.perf.client_mirror_ms = Some(mirror_ms);
+}
+
+/// Fetch river catalog (river-overlay-layer-v1).
+async fn load_rivers(state: &Rc<RefCell<AppState>>) {
+    let Ok(resp) = gloo_net::http::Request::get("/api/rivers").send().await else { return };
+    let Ok(catalog) = resp.json::<RiverCatalog>().await else { return };
+    let mut s = state.borrow_mut();
+    s.rivers = catalog;
+    s.active_river_id = None;
+    sync_river_status(&s);
+}
+
+#[derive(Serialize)]
+struct RiverAppendBody {
+    river_id: Option<u32>,
+    q: i32,
+    r: i32,
+}
+
+async fn post_river_append(state: Rc<RefCell<AppState>>, q: i32, r: i32) {
+    let river_id = state.borrow().active_river_id;
+    let body = RiverAppendBody { river_id, q, r };
+    let Ok(resp) = gloo_net::http::Request::post("/api/rivers/append")
+        .json(&body)
+        .expect("serialize river append")
+        .send()
+        .await
+    else {
+        set_text("river-status", "River save failed (network)");
+        return;
+    };
+    if !resp.ok() {
+        let msg = resp.text().await.unwrap_or_else(|_| "River append rejected".into());
+        set_text("river-status", &msg);
+        return;
+    }
+    let Ok(catalog) = resp.json::<RiverCatalog>().await else {
+        set_text("river-status", "River save failed (parse)");
+        return;
+    };
+    let new_active = if river_id.is_some() {
+        river_id
+    } else {
+        catalog.rivers.last().map(|r| r.id)
+    };
+    {
+        let mut s = state.borrow_mut();
+        s.rivers = catalog;
+        s.active_river_id = new_active;
+        bump_content_rev(&mut s);
+        sync_river_status(&s);
+    }
+    schedule_redraw(state);
+}
+
+async fn delete_river_at_cell(state: Rc<RefCell<AppState>>, q: i32, r: i32) {
+    let river_id = {
+        let s = state.borrow();
+        let index = match s.map_bounds.index_of(Axial::new(q, r)) {
+            Some(i) => i,
+            None => return,
+        };
+        match river_at_cell(&s.rivers, index) {
+            Some(id) => id,
+            None => {
+                set_text("river-status", "No river on this cell");
+                return;
+            }
+        }
+    };
+    let url = format!("/api/rivers/{river_id}");
+    let Ok(resp) = gloo_net::http::Request::delete(&url).send().await else {
+        set_text("river-status", "River delete failed (network)");
+        return;
+    };
+    if !resp.ok() {
+        let msg = resp.text().await.unwrap_or_else(|_| "River delete rejected".into());
+        set_text("river-status", &msg);
+        return;
+    }
+    let Ok(catalog) = resp.json::<RiverCatalog>().await else {
+        set_text("river-status", "River delete failed (parse)");
+        return;
+    };
+    {
+        let mut s = state.borrow_mut();
+        s.rivers = catalog;
+        if s.active_river_id == Some(river_id) {
+            s.active_river_id = None;
+        }
+        bump_content_rev(&mut s);
+        sync_river_status(&s);
+    }
+    schedule_redraw(state);
+}
+
+async fn post_river_pop(state: Rc<RefCell<AppState>>) {
+    let river_id = match state.borrow().active_river_id {
+        Some(id) => id,
+        None => {
+            set_text("river-status", "No active river to undo");
+            return;
+        }
+    };
+    let url = format!("/api/rivers/{river_id}/pop");
+    let Ok(resp) = gloo_net::http::Request::post(&url).send().await else {
+        set_text("river-status", "Undo failed (network)");
+        return;
+    };
+    if !resp.ok() {
+        let msg = resp.text().await.unwrap_or_else(|_| "Undo rejected".into());
+        set_text("river-status", &msg);
+        return;
+    }
+    let Ok(catalog) = resp.json::<RiverCatalog>().await else {
+        set_text("river-status", "Undo failed (parse)");
+        return;
+    };
+    let still_active = catalog.rivers.iter().any(|r| r.id == river_id);
+    {
+        let mut s = state.borrow_mut();
+        s.rivers = catalog;
+        if !still_active {
+            s.active_river_id = None;
+        }
+        bump_content_rev(&mut s);
+        sync_river_status(&s);
+    }
+    schedule_redraw(state);
 }
 
 fn cell_from_mouse_event(state: &Rc<RefCell<AppState>>, event: &web_sys::MouseEvent) -> Option<(i32, i32)> {
@@ -1493,6 +1700,14 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
         // Hydro brush paints elevation-driven hydro; Inspect opens the
         // author profile panel (unchanged behavior).
         let brush = state.borrow().brush.clone();
+        if matches!(brush, Brush::River) {
+            wasm_bindgen_futures::spawn_local(post_river_append(state.clone(), q, r));
+            return;
+        }
+        if matches!(brush, Brush::RiverErase) {
+            wasm_bindgen_futures::spawn_local(delete_river_at_cell(state.clone(), q, r));
+            return;
+        }
         if let Some(new_elevation) = brush_absolute_elevation(&brush) {
             queue_paint_stamp(state.clone(), (q, r), new_elevation);
             return;
@@ -2120,13 +2335,15 @@ fn reset_view_on_world_open(s: &mut AppState) {
     s.show_elevation_labels = true;
     s.show_peaks = false;
     s.show_grid = s.map_bounds.len() <= elevation_view::OVERLAY_LOD_MAX_VISIBLE;
+    s.active_river_id = None;
+    s.rivers = RiverCatalog::default();
     deactivate_paint_brush(s);
 }
 
 /// Map a brush to absolute target elevation. `Inspect` / Raise / Lower write nothing here.
 fn brush_absolute_elevation(brush: &Brush) -> Option<i32> {
     match brush {
-        Brush::Inspect | Brush::Raise | Brush::Lower => None,
+        Brush::Inspect | Brush::Raise | Brush::Lower | Brush::River | Brush::RiverErase => None,
         Brush::SetLand => Some(1),
         Brush::SetWater => Some(0),
     }
@@ -2239,7 +2456,7 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
             let terrain_deselect = tab == "terrain"
                 && current.as_deref() == Some("terrain")
                 && drawer_open
-                && brush_paints(&state.borrow().brush);
+                && terrain_brush(&state.borrow().brush);
             if terrain_deselect {
                 {
                     let mut s = state.borrow_mut();
@@ -2265,7 +2482,7 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                     let brush = {
                         let mut s = state.borrow_mut();
                         clear_pointer_interaction(&mut s);
-                        if matches!(s.brush, Brush::Inspect) {
+                        if !terrain_brush(&s.brush) {
                             s.brush = s.last_paint_brush.clone();
                         }
                         s.hover_cell = None;
@@ -2275,6 +2492,37 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                     if brush_paints(&brush) {
                         schedule_redraw(state.clone());
                     }
+                }
+                "rivers" => {
+                    let brush = {
+                        let mut s = state.borrow_mut();
+                        clear_pointer_interaction(&mut s);
+                        if !river_brush(&s.brush) {
+                            s.brush = s.last_river_brush.clone();
+                        }
+                        s.hover_cell = None;
+                        s.brush.clone()
+                    };
+                    sync_paint_tool_ui(&brush);
+                    sync_river_status(&state.borrow());
+                    if brush_paints(&brush) {
+                        schedule_redraw(state.clone());
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        if let Ok(Some(button)) = target.closest("[data-river-action]") {
+            let Some(action) = button.get_attribute("data-river-action") else { return };
+            match action.as_str() {
+                "new" => {
+                    state.borrow_mut().active_river_id = None;
+                    sync_river_status(&state.borrow());
+                }
+                "undo" => {
+                    wasm_bindgen_futures::spawn_local(post_river_pop(state.clone()));
                 }
                 _ => {}
             }
@@ -2289,6 +2537,8 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
             "water" => Brush::SetWater,
             "raise" => Brush::Raise,
             "lower" => Brush::Lower,
+            "river" => Brush::River,
+            "river-erase" => Brush::RiverErase,
             _ => return,
         };
         {
@@ -2298,11 +2548,18 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                 apply_elevation_brush_intent(&mut s);
             }
         }
-        open_dock_tab("terrain");
+        if river_brush(&brush) {
+            open_dock_tab("rivers");
+            sync_river_status(&state.borrow());
+        } else {
+            open_dock_tab("terrain");
+        }
         sync_paint_tool_ui(&brush);
         if matches!(brush, Brush::Raise | Brush::Lower) {
             sync_falloff_active(state.borrow().falloff_even, state.borrow().brush_radius);
             sync_brush_step_active(state.borrow().brush_step);
+            schedule_redraw(state.clone());
+        } else if river_brush(&brush) {
             schedule_redraw(state.clone());
         }
     });
