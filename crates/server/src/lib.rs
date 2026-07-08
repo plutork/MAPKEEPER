@@ -26,21 +26,27 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
+use mapkeeper_core::build_state::{self, BUILD_STEP_LAND_SILHOUETTE};
 use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::hex::{Axial, MapBounds};
+use mapkeeper_core::land_mask::{
+    elevation_from_land_mask, generate_land_mask, normalize_kind, ShoreCharacter, SilhouetteStyle,
+    LAND_MASK_INLAND_SEA, LAND_MASK_LAND, LAND_MASK_LAYER_ID, LAND_MASK_OCEAN,
+};
 use mapkeeper_core::layer::{
-    Bounds, DenseLayer, LayerCellWrite, MapManifest, ValueType, WireCellState, ELEVATION_LAYER_ID,
-    RIVER_ID_LAYER_ID,
+    Bounds, DenseLayer, DenseState, LayerCellWrite, LayerValue, MapManifest, ValueType,
+    WireCellState, ELEVATION_LAYER_ID, RIVER_ID_LAYER_ID,
 };
-use mapkeeper_core::river_flux::{generate_with_owners, sync_river_id_from_owners};
-use mapkeeper_core::rivers::{
-    append_cell, create_river, delete_river, pop_last_cell, sync_river_id_layer, cell_index,
-    RiverCatalog, RiverError, RIVER_CATALOG_FILE,
+use mapkeeper_core::map_preset::{
+    legacy_default_bounds, parse_map_preset, rect_cell_count, MapPreset,
 };
-use mapkeeper_core::build_state::{self, BUILD_STEP_LAND_SILHOUETTE};
-use mapkeeper_core::map_preset::{legacy_default_bounds, parse_map_preset, rect_cell_count, MapPreset};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
+use mapkeeper_core::river_flux::{generate_with_owners, sync_river_id_from_owners};
+use mapkeeper_core::rivers::{
+    append_cell, cell_index, create_river, delete_river, pop_last_cell, sync_river_id_layer,
+    RiverCatalog, RiverError, RIVER_CATALOG_FILE,
+};
 use mapkeeper_core::world;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
@@ -148,6 +154,25 @@ struct BuildStateInput {
 }
 
 #[derive(Deserialize)]
+struct LandMaskGenerateInput {
+    #[serde(default)]
+    style: Option<String>,
+    #[serde(default)]
+    character: Option<String>,
+    #[serde(default)]
+    variant: Option<String>,
+    #[serde(default)]
+    regenerate_nonce: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct LandMaskCellInput {
+    q: i32,
+    r: i32,
+    kind: String,
+}
+
+#[derive(Deserialize)]
 struct OpenProjectInput {
     path: String,
 }
@@ -218,7 +243,10 @@ fn write_map_manifest(world_path: &Path, preset: MapPreset) -> Result<()> {
     std::fs::write(path, manifest.to_json_pretty()?)?;
     // elevation-authoring-v2: new worlds start as ocean (programmatic fill).
     let bounds = MapBounds::new(width, height);
-    let ocean = mapkeeper_core::hydro::filled_elevation_layer(&bounds, mapkeeper_core::hydro::OCEAN_ELEVATION);
+    let ocean = mapkeeper_core::hydro::filled_elevation_layer(
+        &bounds,
+        mapkeeper_core::hydro::OCEAN_ELEVATION,
+    );
     write_dense_layer(world_path, &ocean).map_err(|e| anyhow::anyhow!(e))?;
     Ok(())
 }
@@ -253,7 +281,9 @@ fn bounds_response(bounds: &MapBounds) -> MapBoundsResponse {
 
 fn projects_path() -> PathBuf {
     let appdata = std::env::var("APPDATA").ok();
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok();
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok();
     PathBuf::from(projects_file_path(appdata.as_deref(), home.as_deref()))
 }
 
@@ -278,7 +308,9 @@ fn normalize_world_path(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        std::env::current_dir().map(|cwd| cwd.join(path)).unwrap_or_else(|_| path.to_path_buf())
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
     };
     let normalized = std::fs::canonicalize(&absolute).unwrap_or(absolute);
     strip_windows_verbatim_prefix(normalized)
@@ -301,7 +333,11 @@ fn strip_windows_verbatim_prefix(path: PathBuf) -> PathBuf {
 fn path_cmp_key(path: &Path) -> String {
     let normalized = normalize_world_path(path);
     let key = normalized.to_string_lossy().replace('\\', "/");
-    if cfg!(windows) { key.to_lowercase() } else { key }
+    if cfg!(windows) {
+        key.to_lowercase()
+    } else {
+        key
+    }
 }
 
 fn dedupe_projects(mut file: ProjectsFile) -> ProjectsFile {
@@ -310,10 +346,19 @@ fn dedupe_projects(mut file: ProjectsFile) -> ProjectsFile {
         let normalized = normalize_world_path(Path::new(&p.path));
         let normalized_path = normalized.display().to_string();
         let key = path_cmp_key(&normalized);
-        if let Some(existing) = unique.iter_mut().find(|e| path_cmp_key(Path::new(&e.path)) == key) {
-            *existing = ProjectEntry { id: p.id, path: normalized_path };
+        if let Some(existing) = unique
+            .iter_mut()
+            .find(|e| path_cmp_key(Path::new(&e.path)) == key)
+        {
+            *existing = ProjectEntry {
+                id: p.id,
+                path: normalized_path,
+            };
         } else {
-            unique.push(ProjectEntry { id: p.id, path: normalized_path });
+            unique.push(ProjectEntry {
+                id: p.id,
+                path: normalized_path,
+            });
         }
     }
     file.projects = unique;
@@ -322,10 +367,18 @@ fn dedupe_projects(mut file: ProjectsFile) -> ProjectsFile {
 
 fn default_worlds_root_path() -> String {
     if let Ok(userprofile) = std::env::var("USERPROFILE") {
-        return PathBuf::from(userprofile).join("Documents").join("MAPKEEPER Worlds").display().to_string();
+        return PathBuf::from(userprofile)
+            .join("Documents")
+            .join("MAPKEEPER Worlds")
+            .display()
+            .to_string();
     }
     if let Ok(home) = std::env::var("HOME") {
-        return PathBuf::from(home).join("Documents").join("MAPKEEPER Worlds").display().to_string();
+        return PathBuf::from(home)
+            .join("Documents")
+            .join("MAPKEEPER Worlds")
+            .display()
+            .to_string();
     }
     "MAPKEEPER Worlds".to_string()
 }
@@ -380,13 +433,19 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 
 fn list_fixture_worlds() -> FixtureWorldsResponse {
     let Some(root) = fixture_worlds_root() else {
-        return FixtureWorldsResponse { available: false, worlds: Vec::new() };
+        return FixtureWorldsResponse {
+            available: false,
+            worlds: Vec::new(),
+        };
     };
     let mut worlds = Vec::new();
     for (slug, label) in FIXTURE_WORLD_LABELS {
         let path = root.join(slug);
         if path.join("mapkeeper.toml").is_file() {
-            worlds.push(FixtureWorldInfo { slug: (*slug).to_string(), label: (*label).to_string() });
+            worlds.push(FixtureWorldInfo {
+                slug: (*slug).to_string(),
+                label: (*label).to_string(),
+            });
         }
     }
     FixtureWorldsResponse {
@@ -399,7 +458,9 @@ fn import_fixture_world(slug: &str) -> Result<PathBuf> {
     if !is_valid_fixture_slug(slug) {
         anyhow::bail!("invalid fixture slug");
     }
-    let root = fixture_worlds_root().context("fixture worlds not found (run from MAPKEEPER repo or set MAPKEEPER_FIXTURE_WORLDS)")?;
+    let root = fixture_worlds_root().context(
+        "fixture worlds not found (run from MAPKEEPER repo or set MAPKEEPER_FIXTURE_WORLDS)",
+    )?;
     let src = root.join(slug);
     if !src.join("mapkeeper.toml").is_file() {
         anyhow::bail!("unknown fixture world: {slug}");
@@ -422,7 +483,10 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
     let active = match &config.world {
         Some(world_path) => {
             let id = read_manifest_id(world_path)?;
-            Some(ActiveWorld { path: world_path.clone(), id })
+            Some(ActiveWorld {
+                path: world_path.clone(),
+                id,
+            })
         }
         None => None,
     };
@@ -435,22 +499,45 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         .route("/api/projects/delete", axum::routing::post(delete_project))
         .route("/api/projects/close", axum::routing::post(close_project))
         .route("/api/build", axum::routing::put(put_build_state))
+        .route(
+            "/api/build/land-mask/generate",
+            axum::routing::post(generate_land_mask_handler),
+        )
+        .route(
+            "/api/build/land-mask/cells",
+            axum::routing::put(put_land_mask_cells),
+        )
         .route("/api/fixture-worlds", get(list_fixture_worlds_handler))
-        .route("/api/fixture-worlds/open", axum::routing::post(open_fixture_world))
+        .route(
+            "/api/fixture-worlds/open",
+            axum::routing::post(open_fixture_world),
+        )
         .route("/api/map", get(get_map))
-        .route("/api/cells/:q/:r/profile", get(get_profile).put(put_profile))
+        .route(
+            "/api/cells/:q/:r/profile",
+            get(get_profile).put(put_profile),
+        )
         // scale-layers (D-46): generic layer API by id (dense). Replaces the old
         // per-layer terrain/elevation routes.
         .route("/api/layers/:id", get(get_layer))
         // save-batch--http-endpoint-v1: one request -> one layer write.
         .route("/api/layers/:id/batch", axum::routing::put(put_layer_batch))
-        .route("/api/layers/:id/cells/:q/:r", axum::routing::put(put_layer_cell))
+        .route(
+            "/api/layers/:id/cells/:q/:r",
+            axum::routing::put(put_layer_cell),
+        )
         // river-overlay-layer-v1 (D-54): catalog API + derived river_id sync.
         .route("/api/rivers", get(get_rivers).put(put_rivers))
         .route("/api/rivers/append", axum::routing::post(append_river_cell))
         .route("/api/rivers/:id/pop", axum::routing::post(pop_river_cell))
-        .route("/api/rivers/:id", axum::routing::delete(delete_river_handler))
-        .route("/api/rivers/generate", axum::routing::post(generate_rivers_handler))
+        .route(
+            "/api/rivers/:id",
+            axum::routing::delete(delete_river_handler),
+        )
+        .route(
+            "/api/rivers/generate",
+            axum::routing::post(generate_rivers_handler),
+        )
         .with_state(state)
         .fallback_service(ServeDir::new(&config.web_dist)))
 }
@@ -473,7 +560,10 @@ pub async fn run(config: ServerConfig) -> Result<()> {
     let (listener, app) = bind(config).await?;
     let addr = listener.local_addr()?;
     match &world {
-        Some(world) => println!("mapkeeper-server: world '{}' at http://{addr}", world.display()),
+        Some(world) => println!(
+            "mapkeeper-server: world '{}' at http://{addr}",
+            world.display()
+        ),
         None => println!("mapkeeper-server: launcher mode at http://{addr}"),
     }
     axum::serve(listener, app).await?;
@@ -584,13 +674,23 @@ async fn create_project(
     }
 
     let mut file = load_projects();
-    file.upsert(ProjectEntry { id: input.id.clone(), path: path.display().to_string() });
+    file.upsert(ProjectEntry {
+        id: input.id.clone(),
+        path: path.display().to_string(),
+    });
     if let Err(err) = save_projects(&file) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
-    state.lock().unwrap().active = Some(ActiveWorld { path: path.clone(), id: input.id.clone() });
-    Json(ProjectEntry { id: input.id, path: path.display().to_string() }).into_response()
+    state.lock().unwrap().active = Some(ActiveWorld {
+        path: path.clone(),
+        id: input.id.clone(),
+    });
+    Json(ProjectEntry {
+        id: input.id,
+        path: path.display().to_string(),
+    })
+    .into_response()
 }
 
 async fn open_project(
@@ -604,13 +704,23 @@ async fn open_project(
     };
 
     let mut file = load_projects();
-    file.upsert(ProjectEntry { id: id.clone(), path: path.display().to_string() });
+    file.upsert(ProjectEntry {
+        id: id.clone(),
+        path: path.display().to_string(),
+    });
     if let Err(err) = save_projects(&file) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
-    state.lock().unwrap().active = Some(ActiveWorld { path: path.clone(), id: id.clone() });
-    Json(ProjectEntry { id, path: path.display().to_string() }).into_response()
+    state.lock().unwrap().active = Some(ActiveWorld {
+        path: path.clone(),
+        id: id.clone(),
+    });
+    Json(ProjectEntry {
+        id,
+        path: path.display().to_string(),
+    })
+    .into_response()
 }
 
 async fn list_fixture_worlds_handler() -> impl IntoResponse {
@@ -631,13 +741,23 @@ async fn open_fixture_world(
     };
 
     let mut file = load_projects();
-    file.upsert(ProjectEntry { id: id.clone(), path: path.display().to_string() });
+    file.upsert(ProjectEntry {
+        id: id.clone(),
+        path: path.display().to_string(),
+    });
     if let Err(err) = save_projects(&file) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
-    state.lock().unwrap().active = Some(ActiveWorld { path: path.clone(), id: id.clone() });
-    Json(ProjectEntry { id, path: path.display().to_string() }).into_response()
+    state.lock().unwrap().active = Some(ActiveWorld {
+        path: path.clone(),
+        id: id.clone(),
+    });
+    Json(ProjectEntry {
+        id,
+        path: path.display().to_string(),
+    })
+    .into_response()
 }
 
 async fn forget_project(
@@ -648,7 +768,8 @@ async fn forget_project(
 
     let mut file = load_projects();
     let before = file.projects.len();
-    file.projects.retain(|p| path_cmp_key(Path::new(&p.path)) != forget_key);
+    file.projects
+        .retain(|p| path_cmp_key(Path::new(&p.path)) != forget_key);
 
     if file.projects.len() == before {
         return StatusCode::NO_CONTENT.into_response();
@@ -686,7 +807,8 @@ async fn delete_project(
     }
 
     let mut file = load_projects();
-    file.projects.retain(|p| path_cmp_key(Path::new(&p.path)) != target_key);
+    file.projects
+        .retain(|p| path_cmp_key(Path::new(&p.path)) != target_key);
     if let Err(err) = save_projects(&file) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
@@ -731,10 +853,87 @@ async fn put_build_state(
     }
 }
 
+/// world-pipeline--land-silhouette-v1: generate step-3 `land_mask` variants and
+/// sync elevation (`land=1`, water/inland_sea=0).
+async fn generate_land_mask_handler(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(input): Json<LandMaskGenerateInput>,
+) -> impl IntoResponse {
+    let (world_path, world_id) = {
+        let guard = state.lock().unwrap();
+        let Some(active) = guard.active.as_ref() else {
+            return (StatusCode::CONFLICT, "no active world").into_response();
+        };
+        (active.path.clone(), active.id.clone())
+    };
+    let bounds = map_bounds(&world_path);
+    let style = SilhouetteStyle::parse(input.style.as_deref().unwrap_or("continent"));
+    let character = ShoreCharacter::parse(input.character.as_deref().unwrap_or("smooth"));
+    let variant = input
+        .variant
+        .as_deref()
+        .unwrap_or("A")
+        .trim()
+        .chars()
+        .next()
+        .unwrap_or('A')
+        .to_ascii_uppercase();
+    let nonce = input.regenerate_nonce.unwrap_or(0) as u64;
+    let seed = silhouette_seed(&world_id, style, character, variant, nonce);
+    let mask = generate_land_mask(&bounds, style, character, seed);
+    let elevation = elevation_from_land_mask(&bounds, &mask);
+    if let Err(err) = write_dense_layer(&world_path, &mask) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    if let Err(err) = write_dense_layer(&world_path, &elevation) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// Step-3 edit brush writes land/ocean into `land_mask` and keeps elevation in sync.
+async fn put_land_mask_cells(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(cells): Json<Vec<LandMaskCellInput>>,
+) -> impl IntoResponse {
+    if cells.is_empty() {
+        return StatusCode::NO_CONTENT.into_response();
+    }
+    let world_path = {
+        let guard = state.lock().unwrap();
+        let Some(active) = guard.active.as_ref() else {
+            return (StatusCode::CONFLICT, "no active world").into_response();
+        };
+        active.path.clone()
+    };
+    let bounds = map_bounds(&world_path);
+    let mut mask = read_dense_layer(&world_path, LAND_MASK_LAYER_ID, &bounds);
+    for cell in cells {
+        let Some(index) = bounds.index_of(Axial::new(cell.q, cell.r)) else {
+            continue;
+        };
+        let kind = normalize_kind(&cell.kind);
+        mask.set(index, DenseState::Value(LayerValue::Text(kind.to_string())));
+    }
+    mark_inland_for_unknown_pools(&bounds, &mut mask);
+    let elevation = elevation_from_land_mask(&bounds, &mask);
+    if let Err(err) = write_dense_layer(&world_path, &mask) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    if let Err(err) = write_dense_layer(&world_path, &elevation) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
 async fn get_map(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
-        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+        return (
+            StatusCode::CONFLICT,
+            "no active world — open one via /api/projects",
+        )
+            .into_response();
     };
     let dir = profiles_dir(&active.path);
     let mut cells = Vec::new();
@@ -744,9 +943,15 @@ async fn get_map(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            let Ok(raw) = std::fs::read_to_string(&path) else { continue };
-            let Ok(profile) = serde_json::from_str::<CellProfile>(&raw) else { continue };
-            let Some(id) = CellId::parse(&profile.cell_id) else { continue };
+            let Ok(raw) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(profile) = serde_json::from_str::<CellProfile>(&raw) else {
+                continue;
+            };
+            let Some(id) = CellId::parse(&profile.cell_id) else {
+                continue;
+            };
             cells.push(CellSummary {
                 cell_id: profile.cell_id,
                 q: id.q,
@@ -771,7 +976,11 @@ async fn get_profile(
 ) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
-        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+        return (
+            StatusCode::CONFLICT,
+            "no active world — open one via /api/projects",
+        )
+            .into_response();
     };
     let id = CellId::new(&active.id, q, r);
     let path = profile_path(&active.path, &active.id, q, r);
@@ -794,14 +1003,21 @@ async fn put_profile(
 ) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
-        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+        return (
+            StatusCode::CONFLICT,
+            "no active world — open one via /api/projects",
+        )
+            .into_response();
     };
     let id = CellId::new(&active.id, q, r);
     let mut profile = CellProfile::new(&id, input.display_name);
     profile.notes = input.notes;
 
     let issues = profile.validate();
-    if issues.iter().any(|i| matches!(i, mapkeeper_core::profile::ValidationIssue::Error(_))) {
+    if issues
+        .iter()
+        .any(|i| matches!(i, mapkeeper_core::profile::ValidationIssue::Error(_)))
+    {
         return (StatusCode::BAD_REQUEST, format!("{issues:?}")).into_response();
     }
 
@@ -828,7 +1044,10 @@ async fn put_profile(
 // generically — new layers need no new routes.
 
 fn layer_file_path(world_path: &Path, layer_id: &str) -> PathBuf {
-    world_path.join("map").join("layers").join(format!("{layer_id}.json"))
+    world_path
+        .join("map")
+        .join("layers")
+        .join(format!("{layer_id}.json"))
 }
 
 /// Default value kind for a not-yet-created layer. Only `elevation` is integer
@@ -843,7 +1062,12 @@ fn default_value_type(layer_id: &str) -> ValueType {
 
 fn read_dense_layer(world_path: &Path, layer_id: &str, bounds: &MapBounds) -> DenseLayer {
     let raw = std::fs::read_to_string(layer_file_path(world_path, layer_id)).ok();
-    DenseLayer::read_or_empty(raw.as_deref(), layer_id, default_value_type(layer_id), bounds)
+    DenseLayer::read_or_empty(
+        raw.as_deref(),
+        layer_id,
+        default_value_type(layer_id),
+        bounds,
+    )
 }
 
 fn write_dense_layer(world_path: &Path, layer: &DenseLayer) -> Result<(), String> {
@@ -855,13 +1079,89 @@ fn write_dense_layer(world_path: &Path, layer: &DenseLayer) -> Result<(), String
     std::fs::write(&path, body).map_err(|e| e.to_string())
 }
 
+fn silhouette_seed(
+    world_id: &str,
+    style: SilhouetteStyle,
+    character: ShoreCharacter,
+    variant: char,
+    regenerate_nonce: u64,
+) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for b in world_id.bytes() {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash ^= style as u8 as u64;
+    hash = hash.wrapping_mul(0x100000001b3);
+    hash ^= character as u8 as u64;
+    hash = hash.wrapping_mul(0x100000001b3);
+    hash ^= variant as u32 as u64;
+    hash = hash.wrapping_mul(0x100000001b3);
+    hash ^ regenerate_nonce
+}
+
+fn mark_inland_for_unknown_pools(bounds: &MapBounds, mask: &mut DenseLayer) {
+    let mut seen = vec![false; bounds.len()];
+    let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+    for index in 0..bounds.len() {
+        let Some(cell) = bounds.from_index(index) else {
+            continue;
+        };
+        if !cell.neighbors().iter().any(|n| !bounds.contains(*n)) {
+            continue;
+        }
+        if !is_water_like(mask, index) {
+            continue;
+        }
+        seen[index] = true;
+        queue.push_back(index);
+    }
+    while let Some(index) = queue.pop_front() {
+        let Some(cell) = bounds.from_index(index) else {
+            continue;
+        };
+        for n in cell.neighbors() {
+            let Some(next) = bounds.index_of(n) else {
+                continue;
+            };
+            if seen[next] || !is_water_like(mask, next) {
+                continue;
+            }
+            seen[next] = true;
+            queue.push_back(next);
+        }
+    }
+    for (index, ocean_connected) in seen.into_iter().enumerate() {
+        if !is_water_like(mask, index) {
+            continue;
+        }
+        let kind = if ocean_connected {
+            LAND_MASK_OCEAN
+        } else {
+            LAND_MASK_INLAND_SEA
+        };
+        mask.set(index, DenseState::Value(LayerValue::Text(kind.to_string())));
+    }
+}
+
+fn is_water_like(mask: &DenseLayer, index: usize) -> bool {
+    !matches!(
+        mask.state(index),
+        DenseState::Value(LayerValue::Text(kind)) if kind == LAND_MASK_LAND
+    )
+}
+
 async fn get_layer(
     State(state): State<Arc<Mutex<AppState>>>,
     AxPath(layer_id): AxPath<String>,
 ) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
-        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+        return (
+            StatusCode::CONFLICT,
+            "no active world — open one via /api/projects",
+        )
+            .into_response();
     };
     let bounds = map_bounds(&active.path);
     Json(read_dense_layer(&active.path, &layer_id, &bounds)).into_response()
@@ -874,7 +1174,11 @@ async fn put_layer_batch(
 ) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
-        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+        return (
+            StatusCode::CONFLICT,
+            "no active world — open one via /api/projects",
+        )
+            .into_response();
     };
     if updates.is_empty() {
         return StatusCode::NO_CONTENT.into_response();
@@ -882,7 +1186,9 @@ async fn put_layer_batch(
     let bounds = map_bounds(&active.path);
     let mut dense = read_dense_layer(&active.path, &layer_id, &bounds);
     for item in updates {
-        let Some(index) = bounds.index_of(Axial::new(item.q, item.r)) else { continue };
+        let Some(index) = bounds.index_of(Axial::new(item.q, item.r)) else {
+            continue;
+        };
         if let Some(new_state) = item.state.to_dense(dense.value_type) {
             dense.set(index, new_state);
         }
@@ -900,7 +1206,11 @@ async fn put_layer_cell(
 ) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
-        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+        return (
+            StatusCode::CONFLICT,
+            "no active world — open one via /api/projects",
+        )
+            .into_response();
     };
     let bounds = map_bounds(&active.path);
     let Some(index) = bounds.index_of(Axial::new(q, r)) else {
@@ -908,7 +1218,11 @@ async fn put_layer_cell(
     };
     let mut dense = read_dense_layer(&active.path, &layer_id, &bounds);
     let Some(resolved) = new_state.to_dense(dense.value_type) else {
-        return (StatusCode::BAD_REQUEST, "value kind does not match layer value_type").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "value kind does not match layer value_type",
+        )
+            .into_response();
     };
     dense.set(index, resolved);
     if let Err(err) = write_dense_layer(&active.path, &dense) {
@@ -939,7 +1253,11 @@ fn write_river_catalog(world_path: &Path, catalog: &RiverCatalog) -> Result<(), 
     std::fs::write(&path, body).map_err(|e| e.to_string())
 }
 
-fn persist_rivers(world_path: &Path, catalog: &RiverCatalog, bounds: &MapBounds) -> Result<(), String> {
+fn persist_rivers(
+    world_path: &Path,
+    catalog: &RiverCatalog,
+    bounds: &MapBounds,
+) -> Result<(), String> {
     write_river_catalog(world_path, catalog)?;
     let layer = sync_river_id_layer(catalog, bounds);
     write_dense_layer(world_path, &layer)
@@ -963,7 +1281,11 @@ fn river_error_status(err: RiverError) -> (StatusCode, String) {
 async fn get_rivers(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
-        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+        return (
+            StatusCode::CONFLICT,
+            "no active world — open one via /api/projects",
+        )
+            .into_response();
     };
     Json(read_river_catalog(&active.path)).into_response()
 }
@@ -974,7 +1296,11 @@ async fn put_rivers(
 ) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
-        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+        return (
+            StatusCode::CONFLICT,
+            "no active world — open one via /api/projects",
+        )
+            .into_response();
     };
     let bounds = map_bounds(&active.path);
     if let Err(err) = persist_rivers(&active.path, &catalog, &bounds) {
@@ -996,7 +1322,11 @@ async fn append_river_cell(
 ) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
-        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+        return (
+            StatusCode::CONFLICT,
+            "no active world — open one via /api/projects",
+        )
+            .into_response();
     };
     let bounds = map_bounds(&active.path);
     let index = match cell_index(&bounds, input.q, input.r) {
@@ -1025,7 +1355,11 @@ async fn pop_river_cell(
 ) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
-        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+        return (
+            StatusCode::CONFLICT,
+            "no active world — open one via /api/projects",
+        )
+            .into_response();
     };
     let bounds = map_bounds(&active.path);
     let mut catalog = read_river_catalog(&active.path);
@@ -1044,7 +1378,11 @@ async fn delete_river_handler(
 ) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
-        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+        return (
+            StatusCode::CONFLICT,
+            "no active world — open one via /api/projects",
+        )
+            .into_response();
     };
     let bounds = map_bounds(&active.path);
     let mut catalog = read_river_catalog(&active.path);
@@ -1061,7 +1399,11 @@ async fn delete_river_handler(
 async fn generate_rivers_handler(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
-        return (StatusCode::CONFLICT, "no active world — open one via /api/projects").into_response();
+        return (
+            StatusCode::CONFLICT,
+            "no active world — open one via /api/projects",
+        )
+            .into_response();
     };
     let bounds = map_bounds(&active.path);
     let elevation = read_dense_layer(&active.path, ELEVATION_LAYER_ID, &bounds);

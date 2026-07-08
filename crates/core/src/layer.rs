@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 pub const TERRAIN_LAYER_ID: &str = "terrain";
 pub const ELEVATION_LAYER_ID: &str = "elevation";
+pub const LAND_MASK_LAYER_ID: &str = "land_mask";
 /// Dense integer layer: 0 = no river, N = river id (river-overlay-layer-v1).
 pub const RIVER_ID_LAYER_ID: &str = "river_id";
 
@@ -77,6 +78,11 @@ impl MapManifest {
                 height: height.max(1),
             },
             layers: vec![
+                LayerRef {
+                    layer_id: LAND_MASK_LAYER_ID.to_string(),
+                    value_type: ValueType::Categorical,
+                    file: format!("layers/{LAND_MASK_LAYER_ID}.json"),
+                },
                 LayerRef {
                     layer_id: TERRAIN_LAYER_ID.to_string(),
                     value_type: ValueType::Categorical,
@@ -272,7 +278,11 @@ impl DenseLayer {
     }
 
     /// A fresh empty layer of `value_type` sized to `bounds`.
-    pub fn empty(layer_id: &str, value_type: ValueType, bounds: &crate::hex::MapBounds) -> DenseLayer {
+    pub fn empty(
+        layer_id: &str,
+        value_type: ValueType,
+        bounds: &crate::hex::MapBounds,
+    ) -> DenseLayer {
         match value_type {
             ValueType::Categorical => DenseLayer::new_categorical(layer_id, bounds.len()),
             ValueType::Integer => DenseLayer::new_integer(layer_id, bounds.len()),
@@ -316,12 +326,12 @@ impl WireCellState {
             WireCellState::Unknown => Some(DenseState::Unknown),
             WireCellState::None => Some(DenseState::None),
             WireCellState::Value { value } => match value_type {
-                ValueType::Categorical => {
-                    value.as_str().map(|s| DenseState::Value(LayerValue::Text(s.to_string())))
-                }
-                ValueType::Integer => {
-                    value.as_i64().map(|i| DenseState::Value(LayerValue::Int(i as i32)))
-                }
+                ValueType::Categorical => value
+                    .as_str()
+                    .map(|s| DenseState::Value(LayerValue::Text(s.to_string()))),
+                ValueType::Integer => value
+                    .as_i64()
+                    .map(|i| DenseState::Value(LayerValue::Int(i as i32))),
             },
         }
     }
@@ -330,12 +340,12 @@ impl WireCellState {
         match state {
             DenseState::Unknown => WireCellState::Unknown,
             DenseState::None => WireCellState::None,
-            DenseState::Value(LayerValue::Text(v)) => {
-                WireCellState::Value { value: serde_json::Value::String(v) }
-            }
-            DenseState::Value(LayerValue::Int(i)) => {
-                WireCellState::Value { value: serde_json::Value::from(i) }
-            }
+            DenseState::Value(LayerValue::Text(v)) => WireCellState::Value {
+                value: serde_json::Value::String(v),
+            },
+            DenseState::Value(LayerValue::Int(i)) => WireCellState::Value {
+                value: serde_json::Value::from(i),
+            },
         }
     }
 }
@@ -358,14 +368,19 @@ mod tests {
         let manifest = MapManifest::default_v0(14, 8);
         assert_eq!(
             manifest.bounds,
-            Bounds::HexRectangle { width: 14, height: 8 }
+            Bounds::HexRectangle {
+                width: 14,
+                height: 8
+            }
         );
-        assert_eq!(manifest.layers.len(), 2);
-        assert_eq!(manifest.layers[0].layer_id, TERRAIN_LAYER_ID);
-        assert_eq!(manifest.layers[0].file, "layers/terrain.json");
-        assert_eq!(manifest.layers[1].layer_id, ELEVATION_LAYER_ID);
-        assert_eq!(manifest.layers[1].value_type, ValueType::Integer);
-        assert_eq!(manifest.layers[1].file, "layers/elevation.json");
+        assert_eq!(manifest.layers.len(), 3);
+        assert_eq!(manifest.layers[0].layer_id, LAND_MASK_LAYER_ID);
+        assert_eq!(manifest.layers[0].file, "layers/land_mask.json");
+        assert_eq!(manifest.layers[1].layer_id, TERRAIN_LAYER_ID);
+        assert_eq!(manifest.layers[1].file, "layers/terrain.json");
+        assert_eq!(manifest.layers[2].layer_id, ELEVATION_LAYER_ID);
+        assert_eq!(manifest.layers[2].value_type, ValueType::Integer);
+        assert_eq!(manifest.layers[2].file, "layers/elevation.json");
 
         let json = manifest.to_json_pretty().unwrap();
         assert_eq!(MapManifest::from_json(&json).unwrap(), manifest);
@@ -383,8 +398,14 @@ mod tests {
         layer.set(1, DenseState::Value(LayerValue::Text("forest".into())));
         layer.set(2, DenseState::None);
 
-        assert_eq!(layer.state(0), DenseState::Value(LayerValue::Text("forest".into())));
-        assert_eq!(layer.state(1), DenseState::Value(LayerValue::Text("forest".into())));
+        assert_eq!(
+            layer.state(0),
+            DenseState::Value(LayerValue::Text("forest".into()))
+        );
+        assert_eq!(
+            layer.state(1),
+            DenseState::Value(LayerValue::Text("forest".into()))
+        );
         assert_eq!(layer.state(2), DenseState::None);
         assert_eq!(layer.state(3), DenseState::Unknown);
         // palette dictionary-encodes the repeated value once.
@@ -395,7 +416,10 @@ mod tests {
     fn dense_set_unknown_clears() {
         let mut layer = DenseLayer::new_categorical("terrain", 3);
         layer.set(0, DenseState::Value(LayerValue::Text("water".into())));
-        assert_eq!(layer.state(0), DenseState::Value(LayerValue::Text("water".into())));
+        assert_eq!(
+            layer.state(0),
+            DenseState::Value(LayerValue::Text("water".into()))
+        );
         layer.set(0, DenseState::Unknown);
         assert_eq!(layer.state(0), DenseState::Unknown);
     }
@@ -440,7 +464,8 @@ mod tests {
         assert_eq!(empty.value_type, ValueType::Categorical);
 
         // Unparseable => empty (old formats are not kept).
-        let junk = DenseLayer::read_or_empty(Some("not json"), "elevation", ValueType::Integer, &bounds);
+        let junk =
+            DenseLayer::read_or_empty(Some("not json"), "elevation", ValueType::Integer, &bounds);
         assert_eq!(junk.value_type, ValueType::Integer);
         assert_eq!(junk.len(), bounds.len());
 
@@ -448,31 +473,41 @@ mod tests {
         let mut layer = DenseLayer::new_categorical("terrain", bounds.len());
         layer.set(0, DenseState::Value(LayerValue::Text("forest".into())));
         let json = layer.to_json_pretty().unwrap();
-        let back = DenseLayer::read_or_empty(Some(&json), "terrain", ValueType::Categorical, &bounds);
+        let back =
+            DenseLayer::read_or_empty(Some(&json), "terrain", ValueType::Categorical, &bounds);
         assert_eq!(back, layer);
     }
 
     #[test]
     fn wire_cell_state_roundtrips_by_value_type() {
         // Categorical text.
-        let dense = WireCellState::Value { value: serde_json::json!("forest") }
-            .to_dense(ValueType::Categorical)
-            .unwrap();
+        let dense = WireCellState::Value {
+            value: serde_json::json!("forest"),
+        }
+        .to_dense(ValueType::Categorical)
+        .unwrap();
         assert_eq!(dense, DenseState::Value(LayerValue::Text("forest".into())));
         // Integer number.
-        let dense = WireCellState::Value { value: serde_json::json!(-3) }
-            .to_dense(ValueType::Integer)
-            .unwrap();
+        let dense = WireCellState::Value {
+            value: serde_json::json!(-3),
+        }
+        .to_dense(ValueType::Integer)
+        .unwrap();
         assert_eq!(dense, DenseState::Value(LayerValue::Int(-3)));
         // Kind mismatch => None.
-        assert!(WireCellState::Value { value: serde_json::json!("x") }
-            .to_dense(ValueType::Integer)
-            .is_none());
+        assert!(WireCellState::Value {
+            value: serde_json::json!("x")
+        }
+        .to_dense(ValueType::Integer)
+        .is_none());
         // from_dense inverse for the value cases.
         assert!(matches!(
             WireCellState::from_dense(DenseState::Value(LayerValue::Int(7))),
             WireCellState::Value { .. }
         ));
-        assert!(matches!(WireCellState::from_dense(DenseState::None), WireCellState::None));
+        assert!(matches!(
+            WireCellState::from_dense(DenseState::None),
+            WireCellState::None
+        ));
     }
 }

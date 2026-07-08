@@ -12,6 +12,7 @@ Use this first, then open only the needed files.
 - Map state model (dense layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
 - Cell index (`(q,r) <-> linear index`, `MapBounds::index_of`/`from_index`/`len`) -> `crates/core/src/hex.rs`
 - Dense typed-layer model (index-addressed, palette categorical + integer; `read_or_empty`; generic wire `WireCellState`/`LayerCellWrite`) -> `crates/core/src/layer.rs` (`DenseLayer`)
+- Step-3 silhouette model (`land_mask`, style generators, inland sea marking, elevation sync) -> `crates/core/src/land_mask.rs` (`world-pipeline--land-silhouette-v1`)
 - Elevation/hydro threshold model (`elevation <= 0 => water`) + stamp falloff math -> `crates/core/src/hydro.rs` (`elevation-authoring-v2`: `filled_elevation_layer`, `stamp_delta`)
 - River catalog + `river_id` dense sync (`map/rivers.json`, neighbor chain validation) -> `crates/core/src/rivers.rs` (`river-overlay-layer-v1`, D-54)
 - Elevation-driven river auto-generation (flux, depression fill, confluence, `parent`/`basin`) -> `crates/core/src/river_flux.rs` (`rivers-auto-from-elevation-v1`, D-55)
@@ -33,7 +34,9 @@ Use this first, then open only the needed files.
 - River dogfood fixture worlds (Small elevation presets) -> `fixtures/worlds/` (`river-dogfood-fixture-worlds`; maintainer/CI — no Home UI per D-59)
 - Build wizard draft state (`[build]` in `mapkeeper.toml`, read/write/clear) -> `crates/core/src/build_state.rs` (`home-build-draft-v1`, D-59)
 - Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, list `build_draft`/`build_step`) -> `crates/server/src/lib.rs` (D-59)
+- Build wizard step-3 API (`POST /api/build/land-mask/generate`, `PUT /api/build/land-mask/cells`) -> `crates/server/src/lib.rs` (`world-pipeline--land-silhouette-v1`)
 - World Build Wizard shell (D-57 + D-59 draft resume): Home **Build World**, fullscreen overlay, Save Draft / wizard resume -> `crates/web/index.html`, `crates/web/src/lib.rs`
+- World Build Wizard step 3 controls (A/B/C, regenerate, accept/edit/finish) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`world-pipeline--land-silhouette-v1`)
 - World scaffold source -> `toolchain/template/world/`
 - CI/build behavior -> `.github/workflows/`
 

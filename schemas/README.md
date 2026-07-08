@@ -54,6 +54,7 @@ and web switched to dense (`scale-layers--adapters`).
 
 `map/manifest.json` — bounds + declared layers; mirrors
 `crates/core/src/layer.rs::MapManifest`. V0 bounds: `hex-rectangle` (`width`, `height`, 16:9 presets via D-49).
+Default layer set now includes `land_mask` (categorical silhouette), `terrain` (categorical), and `elevation` (integer).
 
 **`mapkeeper.toml` schema:** not yet written — no format instability reported
 so far; add when it starts drifting or CI needs it.

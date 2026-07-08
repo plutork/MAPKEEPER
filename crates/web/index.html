@@ -422,6 +422,7 @@
     color: #8a8f98;
   }
   .wiz-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .wiz-btn-row.hidden { display: none; }
   .wiz-style-btn {
     padding: 8px 10px;
     font-size: 12px;
@@ -454,6 +455,10 @@
     color: #cbd3dd;
     border: 1px solid #3a3f47;
     border-radius: 6px;
+  }
+  .wiz-variant-btn.active {
+    border-color: #9fe3c4;
+    color: #eafff5;
   }
   .wiz-action-btn {
     padding: 8px 14px;
@@ -691,17 +696,24 @@
           <button class="wiz-style-btn active" type="button" data-wiz-char="smooth">Smooth shores</button>
           <button class="wiz-style-btn" type="button" data-wiz-char="jagged">Jagged shores</button>
         </div>
-        <p class="wiz-hint" id="wiz-right-note">Silhouette generation ships in the next pass. Explore the wizard layout for now.</p>
+        <p class="wiz-hint" id="wiz-right-note">Generate A/B/C, accept the best silhouette, then optionally edit land and ocean cells.</p>
+        <p class="wiz-label">Edit brush</p>
+        <div class="wiz-btn-row hidden" id="wiz-edit-brushes">
+          <button id="wiz-edit-land" class="wiz-style-btn active" type="button" data-wiz-edit-brush="land">Land</button>
+          <button id="wiz-edit-ocean" class="wiz-style-btn" type="button" data-wiz-edit-brush="ocean">Ocean</button>
+        </div>
       </aside>
       <footer class="wiz-bottom">
         <span class="wiz-label">Variants</span>
-        <button class="wiz-variant-btn wiz-disabled" type="button" disabled data-wiz-stub="variant-a">A</button>
-        <button class="wiz-variant-btn wiz-disabled" type="button" disabled data-wiz-stub="variant-b">B</button>
-        <button class="wiz-variant-btn wiz-disabled" type="button" disabled data-wiz-stub="variant-c">C</button>
-        <button class="wiz-action-btn wiz-disabled" type="button" disabled data-wiz-stub="regenerate">Regenerate</button>
-        <button class="wiz-action-btn wiz-disabled" type="button" disabled data-wiz-stub="accept">Accept</button>
-        <button class="wiz-action-btn wiz-disabled" type="button" disabled data-wiz-stub="edit">Edit</button>
-        <button class="wiz-action-btn primary wiz-disabled" type="button" disabled data-wiz-stub="continue">Continue</button>
+        <div id="wiz-variants" class="wiz-btn-row">
+          <button id="wiz-variant-a" class="wiz-variant-btn active" type="button" data-wiz-variant="A">A</button>
+          <button id="wiz-variant-b" class="wiz-variant-btn" type="button" data-wiz-variant="B">B</button>
+          <button id="wiz-variant-c" class="wiz-variant-btn" type="button" data-wiz-variant="C">C</button>
+        </div>
+        <button id="wiz-regenerate" class="wiz-action-btn" type="button">Regenerate</button>
+        <button id="wiz-accept" class="wiz-action-btn" type="button">Accept</button>
+        <button id="wiz-edit" class="wiz-action-btn wiz-disabled" type="button" disabled>Edit</button>
+        <button id="wiz-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
       </footer>
     </div>
   </div>

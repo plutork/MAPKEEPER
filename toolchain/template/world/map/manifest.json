@@ -3,6 +3,11 @@
   "bounds": { "kind": "hex-rectangle", "width": 14, "height": 8 },
   "layers": [
     {
+      "layer_id": "land_mask",
+      "value_type": "categorical",
+      "file": "layers/land_mask.json"
+    },
+    {
       "layer_id": "terrain",
       "value_type": "categorical",
       "file": "layers/terrain.json"

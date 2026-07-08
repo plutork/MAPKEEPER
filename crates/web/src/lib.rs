@@ -16,20 +16,23 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use elevation_view::{
-    draw_elevation_label, draw_mountain_glyph, labels_status_label, overlays_lod_ok, peaks_status_label,
-    set_fill_rgb, ColorMode, MOUNTAIN_THRESHOLD,
+    draw_elevation_label, draw_mountain_glyph, labels_status_label, overlays_lod_ok,
+    peaks_status_label, set_fill_rgb, ColorMode, MOUNTAIN_THRESHOLD,
 };
 use gloo_timers::future::TimeoutFuture;
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::{hydro_from_elevation, stamp_delta, HydroKind};
 use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
-use mapkeeper_core::rivers::{river_at_cell, RiverCatalog};
 use mapkeeper_core::map_preset::MapPreset;
 use mapkeeper_core::profile::CellProfile;
+use mapkeeper_core::rivers::{river_at_cell, RiverCatalog};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
+use web_sys::{
+    CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlElement, HtmlInputElement,
+    HtmlSelectElement, HtmlTextAreaElement,
+};
 
 const MIN_ZOOM: f64 = 0.6;
 const MAX_ZOOM: f64 = 2.5;
@@ -60,9 +63,7 @@ fn fresh_elevation_layer(bounds: MapBounds) -> DenseLayer {
 }
 
 fn elevation_at(layer: &DenseLayer, bounds: MapBounds, q: i32, r: i32) -> i32 {
-    let index = bounds
-        .index_of(Axial::new(q, r))
-        .unwrap_or(0);
+    let index = bounds.index_of(Axial::new(q, r)).unwrap_or(0);
     layer.int_or(index, DEFAULT_LAND_ELEVATION)
 }
 
@@ -339,6 +340,21 @@ struct BuildStateInput {
 }
 
 #[derive(Serialize)]
+struct WizardLandMaskGenerateInput<'a> {
+    style: &'a str,
+    character: &'a str,
+    variant: &'a str,
+    regenerate_nonce: u32,
+}
+
+#[derive(Serialize)]
+struct WizardLandMaskCellInput<'a> {
+    q: i32,
+    r: i32,
+    kind: &'a str,
+}
+
+#[derive(Serialize)]
 struct CreateProjectInput<'a> {
     id: &'a str,
     path: &'a str,
@@ -447,6 +463,13 @@ struct AppState {
     last_draw_snapshot: Option<DrawSnapshot>,
     redraw_dirty: bool,
     redraw_raf_pending: bool,
+    wizard_style: String,
+    wizard_character: String,
+    wizard_variant: String,
+    wizard_regenerate_nonce: u32,
+    wizard_accepted: bool,
+    wizard_edit_mode: bool,
+    wizard_edit_brush: String,
 }
 
 #[wasm_bindgen(start)]
@@ -496,6 +519,13 @@ pub fn start() {
         last_draw_snapshot: None,
         redraw_dirty: false,
         redraw_raf_pending: false,
+        wizard_style: "continent".to_string(),
+        wizard_character: "smooth".to_string(),
+        wizard_variant: "A".to_string(),
+        wizard_regenerate_nonce: 0,
+        wizard_accepted: false,
+        wizard_edit_mode: false,
+        wizard_edit_brush: "land".to_string(),
     }));
 
     redraw(&state.borrow());
@@ -561,11 +591,19 @@ fn context() -> CanvasRenderingContext2d {
 }
 
 fn input(id: &str) -> HtmlInputElement {
-    document().get_element_by_id(id).expect("missing input").dyn_into().expect("not an input")
+    document()
+        .get_element_by_id(id)
+        .expect("missing input")
+        .dyn_into()
+        .expect("not an input")
 }
 
 fn textarea(id: &str) -> HtmlTextAreaElement {
-    document().get_element_by_id(id).expect("missing textarea").dyn_into().expect("not a textarea")
+    document()
+        .get_element_by_id(id)
+        .expect("missing textarea")
+        .dyn_into()
+        .expect("not a textarea")
 }
 
 fn set_text(id: &str, text: &str) {
@@ -658,14 +696,12 @@ fn river_brush(brush: &Brush) -> bool {
 }
 
 fn active_dock_tab() -> Option<String> {
-    document()
-        .get_element_by_id("dock-rail")
-        .and_then(|rail| {
-            rail.query_selector("[data-dock].active")
-                .ok()
-                .flatten()
-                .and_then(|el| el.get_attribute("data-dock"))
-        })
+    document().get_element_by_id("dock-rail").and_then(|rail| {
+        rail.query_selector("[data-dock].active")
+            .ok()
+            .flatten()
+            .and_then(|el| el.get_attribute("data-dock"))
+    })
 }
 
 /// tool-dock-brush-deselect-v1: leave paint mode — pan / inspect on canvas.
@@ -757,11 +793,19 @@ fn sync_brush_radius_active(radius: i32) {
     }
 }
 
-fn draw_preview_boundary(state: &AppState, ctx: &CanvasRenderingContext2d, size: f64, ox: f64, oy: f64) {
+fn draw_preview_boundary(
+    state: &AppState,
+    ctx: &CanvasRenderingContext2d,
+    size: f64,
+    ox: f64,
+    oy: f64,
+) {
     if matches!(state.brush, Brush::Inspect) || river_brush(&state.brush) {
         return;
     }
-    let Some(center) = state.hover_cell else { return };
+    let Some(center) = state.hover_cell else {
+        return;
+    };
     let cells = paint_stamp_cells(center, state.brush_radius, state.map_bounds);
     if cells.is_empty() {
         return;
@@ -807,7 +851,9 @@ fn draw_rivers(state: &AppState, ctx: &CanvasRenderingContext2d, size: f64, ox: 
             continue;
         }
         if river.cells.len() == 1 {
-            let Some(cell) = bounds.from_index(river.cells[0]) else { continue };
+            let Some(cell) = bounds.from_index(river.cells[0]) else {
+                continue;
+            };
             let (x, y) = cell.to_pixel(size);
             ctx.begin_path();
             let _ = ctx.arc(ox + x, oy + y, dot_r, 0.0, std::f64::consts::TAU);
@@ -817,7 +863,9 @@ fn draw_rivers(state: &AppState, ctx: &CanvasRenderingContext2d, size: f64, ox: 
         ctx.begin_path();
         let mut started = false;
         for &idx in &river.cells {
-            let Some(cell) = bounds.from_index(idx) else { continue };
+            let Some(cell) = bounds.from_index(idx) else {
+                continue;
+            };
             let (x, y) = cell.to_pixel(size);
             let (cx, cy) = (ox + x, oy + y);
             if started {
@@ -852,14 +900,12 @@ fn open_dock_tab(tab: &str) {
 
 fn toggle_dock_tab(tab: &str) {
     if drawer_is_open() {
-        let current = document()
-            .get_element_by_id("dock-rail")
-            .and_then(|rail| {
-                rail.query_selector("[data-dock].active")
-                    .ok()
-                    .flatten()
-                    .and_then(|el| el.get_attribute("data-dock"))
-            });
+        let current = document().get_element_by_id("dock-rail").and_then(|rail| {
+            rail.query_selector("[data-dock].active")
+                .ok()
+                .flatten()
+                .and_then(|el| el.get_attribute("data-dock"))
+        });
         if current.as_deref() == Some(tab) {
             set_drawer_open(false);
             return;
@@ -924,7 +970,7 @@ fn set_wizard_active(active: bool) {
     if active {
         let _ = editor.class_list().add_1("wizard-active");
         set_drawer_open(false);
-        set_wizard_status("Explore the wizard — silhouette generation ships next.");
+        set_wizard_status("Step 3: generate and accept a land silhouette.");
     } else {
         let _ = editor.class_list().remove_1("wizard-active");
         set_wizard_status("");
@@ -941,6 +987,143 @@ fn close_build_wizard() {
 
 fn set_wizard_status(msg: &str) {
     set_text("wizard-status", msg);
+}
+
+fn wizard_is_active() -> bool {
+    document()
+        .get_element_by_id("editor")
+        .is_some_and(|el| el.class_list().contains("wizard-active"))
+}
+
+fn set_button_disabled(id: &str, disabled: bool) {
+    let Some(el) = document().get_element_by_id(id) else {
+        return;
+    };
+    if let Ok(btn) = el.dyn_into::<HtmlElement>() {
+        if disabled {
+            let _ = btn.set_attribute("disabled", "");
+            let _ = btn.class_list().add_1("wiz-disabled");
+        } else {
+            let _ = btn.remove_attribute("disabled");
+            let _ = btn.class_list().remove_1("wiz-disabled");
+        }
+    }
+}
+
+fn sync_wizard_variant_buttons(active: &str) {
+    for (id, name) in [
+        ("wiz-variant-a", "A"),
+        ("wiz-variant-b", "B"),
+        ("wiz-variant-c", "C"),
+    ] {
+        let Some(el) = document().get_element_by_id(id) else {
+            continue;
+        };
+        let is_active = name == active;
+        if is_active {
+            let _ = el.class_list().add_1("active");
+        } else {
+            let _ = el.class_list().remove_1("active");
+        }
+    }
+}
+
+fn sync_wizard_edit_mode_ui(edit_mode: bool, brush: &str) {
+    if let Some(row) = document().get_element_by_id("wiz-edit-brushes") {
+        if edit_mode {
+            let _ = row.class_list().remove_1("hidden");
+        } else {
+            let _ = row.class_list().add_1("hidden");
+        }
+    }
+    for (id, kind) in [("wiz-edit-land", "land"), ("wiz-edit-ocean", "ocean")] {
+        let Some(el) = document().get_element_by_id(id) else {
+            continue;
+        };
+        if kind == brush {
+            let _ = el.class_list().add_1("active");
+        } else {
+            let _ = el.class_list().remove_1("active");
+        }
+    }
+}
+
+fn sync_wizard_actions(state: &AppState) {
+    set_button_disabled("wiz-regenerate", false);
+    set_button_disabled("wiz-accept", false);
+    set_button_disabled("wiz-edit", !state.wizard_accepted);
+    set_button_disabled("wiz-continue", !state.wizard_accepted);
+    set_button_disabled("wiz-finish", !state.wizard_accepted);
+    sync_wizard_variant_buttons(&state.wizard_variant);
+    sync_wizard_edit_mode_ui(state.wizard_edit_mode, &state.wizard_edit_brush);
+}
+
+async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
+    let (style, character, variant, nonce) = {
+        let s = state.borrow();
+        (
+            s.wizard_style.clone(),
+            s.wizard_character.clone(),
+            s.wizard_variant.clone(),
+            s.wizard_regenerate_nonce,
+        )
+    };
+    let body = WizardLandMaskGenerateInput {
+        style: &style,
+        character: &character,
+        variant: &variant,
+        regenerate_nonce: nonce,
+    };
+    let Ok(resp) = gloo_net::http::Request::post("/api/build/land-mask/generate")
+        .json(&body)
+        .expect("serialize wizard generate")
+        .send()
+        .await
+    else {
+        set_wizard_status("Generation failed (network).");
+        return;
+    };
+    if !resp.ok() {
+        let msg = resp
+            .text()
+            .await
+            .unwrap_or_else(|_| "Generation rejected".to_string());
+        set_wizard_status(&msg);
+        return;
+    }
+    load_elevation(&state).await;
+    schedule_redraw(state.clone());
+    set_wizard_status("Variant generated.");
+}
+
+async fn wizard_set_land_mask_cell(state: Rc<RefCell<AppState>>, q: i32, r: i32, kind: String) {
+    let payload = vec![WizardLandMaskCellInput { q, r, kind: &kind }];
+    let Ok(resp) = gloo_net::http::Request::put("/api/build/land-mask/cells")
+        .json(&payload)
+        .expect("serialize wizard land_mask cell")
+        .send()
+        .await
+    else {
+        set_wizard_status("Edit save failed.");
+        return;
+    };
+    if !resp.ok() {
+        let msg = resp
+            .text()
+            .await
+            .unwrap_or_else(|_| "Edit rejected".to_string());
+        set_wizard_status(&msg);
+        return;
+    }
+    // local preview + sync with server write model
+    {
+        let mut s = state.borrow_mut();
+        let bounds = s.map_bounds;
+        let value = if kind == "land" { 1 } else { 0 };
+        set_elevation_cell(&mut s.elevation, bounds, q, r, value);
+        bump_content_rev(&mut s);
+    }
+    schedule_redraw(state);
 }
 
 fn wiz_toggle_style_group(container_id: &str, attr: &str, active: &web_sys::Element) {
@@ -999,34 +1182,220 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Style / character buttons — visual selection only in shell pass.
+    // Style / character selection.
     {
+        let state = state.clone();
         let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
-            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else { return };
-            let Some(el) = click_target_element(&mouse) else { return };
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else {
+                return;
+            };
+            let Some(el) = click_target_element(&mouse) else {
+                return;
+            };
             if !el.class_list().contains("wiz-style-btn") {
                 return;
             }
-            if let Some(_) = el.get_attribute("data-wiz-style") {
+            if let Some(style) = el.get_attribute("data-wiz-style") {
                 wiz_toggle_style_group("wiz-styles", "data-wiz-style", &el);
-            } else if let Some(_) = el.get_attribute("data-wiz-char") {
+                state.borrow_mut().wizard_style = style;
+            } else if let Some(character) = el.get_attribute("data-wiz-char") {
                 wiz_toggle_style_group("wiz-chars", "data-wiz-char", &el);
+                state.borrow_mut().wizard_character = character;
             }
-            set_wizard_status("Style selected — generation ships in the next pass.");
+            set_wizard_status("Style updated. Generate to preview.");
         });
         for id in ["wiz-styles", "wiz-chars"] {
             if let Ok(Some(root)) = document().query_selector(&format!("#{id}")) {
-                let _ = root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+                let _ = root
+                    .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
             }
         }
+        closure.forget();
+    }
+
+    // A/B/C variant switch and generation.
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else {
+                return;
+            };
+            let Some(el) = click_target_element(&mouse) else {
+                return;
+            };
+            if !el.class_list().contains("wiz-variant-btn") {
+                return;
+            }
+            let Some(variant) = el.get_attribute("data-wiz-variant") else {
+                return;
+            };
+            {
+                let mut s = state.borrow_mut();
+                s.wizard_variant = variant.clone();
+                s.wizard_accepted = false;
+                s.wizard_edit_mode = false;
+                sync_wizard_actions(&s);
+            }
+            set_wizard_status(&format!("Generating variant {variant}…"));
+            wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
+        });
+        if let Ok(Some(root)) = document().query_selector("#wiz-variants") {
+            let _ =
+                root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+
+    // Regenerate active variant.
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            {
+                let mut s = state.borrow_mut();
+                s.wizard_regenerate_nonce = s.wizard_regenerate_nonce.saturating_add(1);
+                s.wizard_accepted = false;
+                s.wizard_edit_mode = false;
+                sync_wizard_actions(&s);
+            }
+            set_wizard_status("Regenerating…");
+            wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
+        });
+        document()
+            .get_element_by_id("wiz-regenerate")
+            .expect("missing #wiz-regenerate")
+            .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+            .expect("wiz-regenerate");
+        closure.forget();
+    }
+
+    // Accept currently visible variant.
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            {
+                let mut s = state.borrow_mut();
+                s.wizard_accepted = true;
+                s.wizard_edit_mode = false;
+                sync_wizard_actions(&s);
+            }
+            set_wizard_status("Silhouette accepted. You can Edit or Finish.");
+        });
+        document()
+            .get_element_by_id("wiz-accept")
+            .expect("missing #wiz-accept")
+            .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+            .expect("wiz-accept");
+        closure.forget();
+    }
+
+    // Enter/exit manual edit mode.
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let mut s = state.borrow_mut();
+            if !s.wizard_accepted {
+                set_wizard_status("Accept a silhouette first.");
+                return;
+            }
+            s.wizard_edit_mode = !s.wizard_edit_mode;
+            let edit_now = s.wizard_edit_mode;
+            sync_wizard_actions(&s);
+            if edit_now {
+                set_wizard_status("Edit mode: click map cells to paint land/ocean.");
+            } else {
+                set_wizard_status("Edit mode off.");
+            }
+        });
+        document()
+            .get_element_by_id("wiz-edit")
+            .expect("missing #wiz-edit")
+            .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+            .expect("wiz-edit");
+        closure.forget();
+    }
+
+    // Land/ocean brush toggle in edit mode.
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else {
+                return;
+            };
+            let Some(el) = click_target_element(&mouse) else {
+                return;
+            };
+            if !el.class_list().contains("wiz-style-btn") {
+                return;
+            }
+            let Some(kind) = el.get_attribute("data-wiz-edit-brush") else {
+                return;
+            };
+            let mut s = state.borrow_mut();
+            s.wizard_edit_brush = kind;
+            sync_wizard_actions(&s);
+        });
+        if let Ok(Some(root)) = document().query_selector("#wiz-edit-brushes") {
+            let _ =
+                root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+
+    // Continue/Finish both close the build draft for this world.
+    for id in ["wiz-continue", "wiz-finish"] {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let accepted = state.borrow().wizard_accepted;
+            if !accepted {
+                set_wizard_status("Accept a silhouette first.");
+                return;
+            }
+            let state = state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let body = BuildStateInput {
+                    status: "complete",
+                    step: 3,
+                };
+                let Ok(resp) = gloo_net::http::Request::put("/api/build")
+                    .json(&body)
+                    .expect("serialize build complete")
+                    .send()
+                    .await
+                else {
+                    set_wizard_status("Could not finalize build.");
+                    return;
+                };
+                if !resp.ok() {
+                    set_wizard_status("Could not finalize build.");
+                    return;
+                }
+                {
+                    let mut s = state.borrow_mut();
+                    s.wizard_accepted = false;
+                    s.wizard_edit_mode = false;
+                    sync_wizard_actions(&s);
+                }
+                close_build_wizard();
+                set_wizard_status("Build step completed.");
+            });
+        });
+        document()
+            .get_element_by_id(id)
+            .expect("missing wizard finalize button")
+            .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+            .expect("attach wizard finalize");
         closure.forget();
     }
 
     // Geo group collapse toggle (shell: only group with steps).
     {
         let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
-            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else { return };
-            let Some(head) = click_target_element(&mouse) else { return };
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else {
+                return;
+            };
+            let Some(head) = click_target_element(&mouse) else {
+                return;
+            };
             if head.get_attribute("data-wiz-group").as_deref() != Some("geo") {
                 return;
             }
@@ -1043,9 +1412,15 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
         });
         if let Ok(Some(left)) = document().query_selector(".wiz-left") {
-            let _ = left.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+            let _ =
+                left.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
         closure.forget();
+    }
+
+    {
+        let s = state.borrow();
+        sync_wizard_actions(&s);
     }
 }
 
@@ -1057,7 +1432,9 @@ async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
         let _ = persist_build_draft(3).await;
     }
     close_build_wizard();
-    let _ = gloo_net::http::Request::post("/api/projects/close").send().await;
+    let _ = gloo_net::http::Request::post("/api/projects/close")
+        .send()
+        .await;
     let mut state_mut = state.borrow_mut();
     state_mut.cells.clear();
     state_mut.elevation = fresh_elevation_layer(state_mut.map_bounds);
@@ -1072,10 +1449,15 @@ async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.show_grid = false;
     reset_view_on_world_open(&mut state_mut);
     state_mut.legacy_map = false;
+    state_mut.wizard_accepted = false;
+    state_mut.wizard_edit_mode = false;
+    state_mut.wizard_variant = "A".to_string();
+    state_mut.wizard_regenerate_nonce = 0;
     set_drawer_open(false);
     clear_inspect_selection();
     set_world_label("—");
     set_text("legacy-map-note", "");
+    sync_wizard_actions(&state_mut);
     drop(state_mut);
     wasm_bindgen_futures::spawn_local(refresh_projects(state));
 }
@@ -1204,9 +1586,7 @@ fn redraw(state: &AppState) -> usize {
     let draw_profile_dots = show_profile_markers(state.zoom);
     let overlay_lod = overlays_lod_ok(visible_cells, state.zoom);
     let draw_labels = state.show_elevation_labels && overlay_lod;
-    let draw_peaks = state.show_peaks
-        && state.color_mode == ColorMode::Elevation
-        && overlay_lod;
+    let draw_peaks = state.show_peaks && state.color_mode == ColorMode::Elevation && overlay_lod;
     let mut color_buf = String::with_capacity(20);
     let mut drawn_cells = 0usize;
     for q in q_min..=q_max {
@@ -1271,9 +1651,9 @@ fn redraw(state: &AppState) -> usize {
             drawn_cells += 1;
         }
     }
-    let hover_elev = state.hover_cell.map(|(q, r)| {
-        elevation_at(&state.elevation, bounds, q, r)
-    });
+    let hover_elev = state
+        .hover_cell
+        .map(|(q, r)| elevation_at(&state.elevation, bounds, q, r));
     let hover_note = hover_elev
         .map(|e| format!(" · Hover elev {e}"))
         .unwrap_or_default();
@@ -1342,7 +1722,9 @@ async fn refresh_projects(state: Rc<RefCell<AppState>>) {
         set_text("home-status", "Could not reach mapkeeper-server.");
         return;
     };
-    let Ok(data) = resp.json::<ProjectsResponse>().await else { return };
+    let Ok(data) = resp.json::<ProjectsResponse>().await else {
+        return;
+    };
 
     {
         let mut state_mut = state.borrow_mut();
@@ -1362,7 +1744,9 @@ async fn refresh_projects(state: Rc<RefCell<AppState>>) {
 
 fn render_project_list(projects: &[ProjectStatus]) {
     let document = document();
-    let Some(list) = document.get_element_by_id("project-list") else { return };
+    let Some(list) = document.get_element_by_id("project-list") else {
+        return;
+    };
     let empty = document.get_element_by_id("project-empty");
 
     if projects.is_empty() {
@@ -1434,13 +1818,24 @@ fn render_project_list(projects: &[ProjectStatus]) {
 }
 
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn suggested_world_path(state: &AppState, world_id: &str) -> Option<String> {
     let root = state.default_worlds_root.as_ref()?;
-    let tail = if world_id.trim().is_empty() { "my-world" } else { world_id.trim() };
-    let sep = if root.ends_with('\\') || root.ends_with('/') { "" } else { "\\" };
+    let tail = if world_id.trim().is_empty() {
+        "my-world"
+    } else {
+        world_id.trim()
+    };
+    let sep = if root.ends_with('\\') || root.ends_with('/') {
+        ""
+    } else {
+        "\\"
+    };
     Some(format!("{root}{sep}{tail}"))
 }
 
@@ -1469,12 +1864,14 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
     if let Ok(resp) = gloo_net::http::Request::get("/api/map").send().await {
         if let Ok(map) = resp.json::<MapResponse>().await {
             let mut state_mut = state.borrow_mut();
-            state_mut.cells = map.cells.into_iter().map(|c| ((c.q, c.r), c.display_name)).collect();
+            state_mut.cells = map
+                .cells
+                .into_iter()
+                .map(|c| ((c.q, c.r), c.display_name))
+                .collect();
             bump_content_rev(&mut state_mut);
-            state_mut.map_bounds = MapBounds::new(
-                map.bounds.width.max(1),
-                map.bounds.height.max(1),
-            );
+            state_mut.map_bounds =
+                MapBounds::new(map.bounds.width.max(1), map.bounds.height.max(1));
             state_mut.zoom = 1.0;
             state_mut.pan_x = 0.0;
             state_mut.pan_y = 0.0;
@@ -1483,6 +1880,7 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
             state_mut.paint_flush_in_flight = false;
             state_mut.legacy_map = map.legacy_map;
             reset_view_on_world_open(&mut state_mut);
+            sync_wizard_actions(&state_mut);
             set_world_label(&format!(
                 "{} · {} cells",
                 map.world_id, map.bounds.cell_count
@@ -1518,10 +1916,17 @@ async fn load_map(state: Rc<RefCell<AppState>>) {
 /// Fetch the dense elevation layer (scale-layers, D-46) into index buffers.
 async fn load_elevation(state: &Rc<RefCell<AppState>>) {
     let fetch_start = perf_now();
-    let Ok(resp) = gloo_net::http::Request::get("/api/layers/elevation").send().await else { return };
+    let Ok(resp) = gloo_net::http::Request::get("/api/layers/elevation")
+        .send()
+        .await
+    else {
+        return;
+    };
     let fetch_ms = perf_now() - fetch_start;
     let parse_start = perf_now();
-    let Ok(layer) = resp.json::<DenseLayer>().await else { return };
+    let Ok(layer) = resp.json::<DenseLayer>().await else {
+        return;
+    };
     let parse_ms = perf_now() - parse_start;
     let mirror_start = perf_now();
     let bounds = state.borrow().map_bounds;
@@ -1542,8 +1947,12 @@ async fn load_elevation(state: &Rc<RefCell<AppState>>) {
 
 /// Fetch river catalog (river-overlay-layer-v1).
 async fn load_rivers(state: &Rc<RefCell<AppState>>) {
-    let Ok(resp) = gloo_net::http::Request::get("/api/rivers").send().await else { return };
-    let Ok(catalog) = resp.json::<RiverCatalog>().await else { return };
+    let Ok(resp) = gloo_net::http::Request::get("/api/rivers").send().await else {
+        return;
+    };
+    let Ok(catalog) = resp.json::<RiverCatalog>().await else {
+        return;
+    };
     let mut s = state.borrow_mut();
     s.rivers = catalog;
     s.active_river_id = None;
@@ -1570,7 +1979,10 @@ async fn post_river_append(state: Rc<RefCell<AppState>>, q: i32, r: i32) {
         return;
     };
     if !resp.ok() {
-        let msg = resp.text().await.unwrap_or_else(|_| "River append rejected".into());
+        let msg = resp
+            .text()
+            .await
+            .unwrap_or_else(|_| "River append rejected".into());
         set_text("river-status", &msg);
         return;
     }
@@ -1614,7 +2026,10 @@ async fn delete_river_at_cell(state: Rc<RefCell<AppState>>, q: i32, r: i32) {
         return;
     };
     if !resp.ok() {
-        let msg = resp.text().await.unwrap_or_else(|_| "River delete rejected".into());
+        let msg = resp
+            .text()
+            .await
+            .unwrap_or_else(|_| "River delete rejected".into());
         set_text("river-status", &msg);
         return;
     }
@@ -1671,12 +2086,18 @@ async fn post_river_pop(state: Rc<RefCell<AppState>>) {
 
 async fn post_river_generate(state: Rc<RefCell<AppState>>) {
     set_text("river-status", "Generating rivers…");
-    let Ok(resp) = gloo_net::http::Request::post("/api/rivers/generate").send().await else {
+    let Ok(resp) = gloo_net::http::Request::post("/api/rivers/generate")
+        .send()
+        .await
+    else {
         set_text("river-status", "Generate failed (network)");
         return;
     };
     if !resp.ok() {
-        let msg = resp.text().await.unwrap_or_else(|_| "Generate rejected".into());
+        let msg = resp
+            .text()
+            .await
+            .unwrap_or_else(|_| "Generate rejected".into());
         set_text("river-status", &msg);
         return;
     }
@@ -1693,15 +2114,15 @@ async fn post_river_generate(state: Rc<RefCell<AppState>>) {
     }
     set_text(
         "river-status",
-        &format!(
-            "Generated {} river(s)",
-            state.borrow().rivers.rivers.len()
-        ),
+        &format!("Generated {} river(s)", state.borrow().rivers.rivers.len()),
     );
     schedule_redraw(state);
 }
 
-fn cell_from_mouse_event(state: &Rc<RefCell<AppState>>, event: &web_sys::MouseEvent) -> Option<(i32, i32)> {
+fn cell_from_mouse_event(
+    state: &Rc<RefCell<AppState>>,
+    event: &web_sys::MouseEvent,
+) -> Option<(i32, i32)> {
     let canvas = canvas();
     let rect = canvas.get_bounding_client_rect();
     let bounds = state.borrow().map_bounds;
@@ -1716,7 +2137,11 @@ fn cell_from_mouse_event(state: &Rc<RefCell<AppState>>, event: &web_sys::MouseEv
     }
 }
 
-fn paint_stamp_cells(center: (i32, i32), brush_radius: i32, map_bounds: MapBounds) -> Vec<(i32, i32)> {
+fn paint_stamp_cells(
+    center: (i32, i32),
+    brush_radius: i32,
+    map_bounds: MapBounds,
+) -> Vec<(i32, i32)> {
     let brush = brush_radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
     Axial::new(center.0, center.1)
         .range(brush)
@@ -1858,47 +2283,66 @@ async fn flush_pending_paints(state: Rc<RefCell<AppState>>) {
 }
 
 fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
-    let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        if state.borrow().suppress_next_click {
-            state.borrow_mut().suppress_next_click = false;
-            return;
-        }
-        let Some((q, r)) = cell_from_mouse_event(&state, &event) else { return };
+    let closure =
+        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+            if state.borrow().suppress_next_click {
+                state.borrow_mut().suppress_next_click = false;
+                return;
+            }
+            let Some((q, r)) = cell_from_mouse_event(&state, &event) else {
+                return;
+            };
 
-        // Hydro brush paints elevation-driven hydro; Inspect opens the
-        // author profile panel (unchanged behavior).
-        let brush = state.borrow().brush.clone();
-        if matches!(brush, Brush::River) {
-            wasm_bindgen_futures::spawn_local(post_river_append(state.clone(), q, r));
-            return;
-        }
-        if matches!(brush, Brush::RiverErase) {
-            wasm_bindgen_futures::spawn_local(delete_river_at_cell(state.clone(), q, r));
-            return;
-        }
-        if let Some(new_elevation) = brush_absolute_elevation(&brush) {
-            queue_paint_stamp(state.clone(), (q, r), new_elevation);
-            return;
-        }
-        if let Some(step_sign) = brush_delta_sign(&brush) {
-            queue_paint_delta_stamp(state.clone(), (q, r), step_sign);
-            return;
-        }
+            if wizard_is_active() {
+                let (edit_mode, kind) = {
+                    let s = state.borrow();
+                    (s.wizard_edit_mode, s.wizard_edit_brush.clone())
+                };
+                if edit_mode {
+                    wasm_bindgen_futures::spawn_local(wizard_set_land_mask_cell(
+                        state.clone(),
+                        q,
+                        r,
+                        kind,
+                    ));
+                }
+                return;
+            }
 
-        state.borrow_mut().selected = Some((q, r));
-        open_dock_tab("inspect");
-        set_text("panel-cell", &cell_label(q, r));
-        input("title").set_value("");
-        textarea("notes").set_value("");
-        // Disabled while loading — otherwise a fast typist can fill the
-        // fields before the fetch below resolves, and the (still pending)
-        // response then silently overwrites what they just typed.
-        input("title").set_disabled(true);
-        textarea("notes").set_disabled(true);
-        set_text("status", "Loading…");
+            // Hydro brush paints elevation-driven hydro; Inspect opens the
+            // author profile panel (unchanged behavior).
+            let brush = state.borrow().brush.clone();
+            if matches!(brush, Brush::River) {
+                wasm_bindgen_futures::spawn_local(post_river_append(state.clone(), q, r));
+                return;
+            }
+            if matches!(brush, Brush::RiverErase) {
+                wasm_bindgen_futures::spawn_local(delete_river_at_cell(state.clone(), q, r));
+                return;
+            }
+            if let Some(new_elevation) = brush_absolute_elevation(&brush) {
+                queue_paint_stamp(state.clone(), (q, r), new_elevation);
+                return;
+            }
+            if let Some(step_sign) = brush_delta_sign(&brush) {
+                queue_paint_delta_stamp(state.clone(), (q, r), step_sign);
+                return;
+            }
 
-        wasm_bindgen_futures::spawn_local(load_profile_into_panel(state.clone(), q, r));
-    });
+            state.borrow_mut().selected = Some((q, r));
+            open_dock_tab("inspect");
+            set_text("panel-cell", &cell_label(q, r));
+            input("title").set_value("");
+            textarea("notes").set_value("");
+            // Disabled while loading — otherwise a fast typist can fill the
+            // fields before the fetch below resolves, and the (still pending)
+            // response then silently overwrites what they just typed.
+            input("title").set_disabled(true);
+            textarea("notes").set_disabled(true);
+            set_text("status", "Loading…");
+
+            wasm_bindgen_futures::spawn_local(load_profile_into_panel(state.clone(), q, r));
+        });
     canvas().set_onclick(Some(closure.as_ref().unchecked_ref()));
     closure.forget();
 }
@@ -1907,72 +2351,77 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
 /// turns into viewport pan once movement exceeds a small threshold.
 fn attach_pan_drag(state: Rc<RefCell<AppState>>) {
     let down_state = state.clone();
-    let on_down = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        if event.button() != 0 {
-            return;
-        }
-        // Keep painting clicks reliable: pan starts only in Inspect mode.
-        if !matches!(down_state.borrow().brush, Brush::Inspect) {
-            return;
-        }
-        let mut s = down_state.borrow_mut();
-        s.drag_active = true;
-        s.drag_moved = false;
-        s.drag_last_x = event.client_x() as f64;
-        s.drag_last_y = event.client_y() as f64;
-    });
-    let _ = canvas().add_event_listener_with_callback("mousedown", on_down.as_ref().unchecked_ref());
+    let on_down =
+        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+            if event.button() != 0 {
+                return;
+            }
+            // Keep painting clicks reliable: pan starts only in Inspect mode.
+            if !matches!(down_state.borrow().brush, Brush::Inspect) {
+                return;
+            }
+            let mut s = down_state.borrow_mut();
+            s.drag_active = true;
+            s.drag_moved = false;
+            s.drag_last_x = event.client_x() as f64;
+            s.drag_last_y = event.client_y() as f64;
+        });
+    let _ =
+        canvas().add_event_listener_with_callback("mousedown", on_down.as_ref().unchecked_ref());
     on_down.forget();
 
     let move_state = state.clone();
-    let on_move = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        if !move_state.borrow().drag_active {
-            return;
-        }
-        let x = event.client_x() as f64;
-        let y = event.client_y() as f64;
-        let mut redraw_now = false;
-        {
-            let mut s = move_state.borrow_mut();
-            let dx = x - s.drag_last_x;
-            let dy = y - s.drag_last_y;
-            s.drag_last_x = x;
-            s.drag_last_y = y;
-            if !s.drag_moved && (dx * dx + dy * dy).sqrt() >= PAN_DRAG_THRESHOLD {
-                s.drag_moved = true;
+    let on_move =
+        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+            if !move_state.borrow().drag_active {
+                return;
             }
-            if s.drag_moved {
-                s.pan_x += dx;
-                s.pan_y += dy;
-                redraw_now = true;
+            let x = event.client_x() as f64;
+            let y = event.client_y() as f64;
+            let mut redraw_now = false;
+            {
+                let mut s = move_state.borrow_mut();
+                let dx = x - s.drag_last_x;
+                let dy = y - s.drag_last_y;
+                s.drag_last_x = x;
+                s.drag_last_y = y;
+                if !s.drag_moved && (dx * dx + dy * dy).sqrt() >= PAN_DRAG_THRESHOLD {
+                    s.drag_moved = true;
+                }
+                if s.drag_moved {
+                    s.pan_x += dx;
+                    s.pan_y += dy;
+                    redraw_now = true;
+                }
             }
-        }
-        if redraw_now {
-            schedule_redraw(move_state.clone());
-        }
-    });
-    let _ = window().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
+            if redraw_now {
+                schedule_redraw(move_state.clone());
+            }
+        });
+    let _ =
+        window().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
     on_move.forget();
 
     let up_state = state.clone();
-    let on_up = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        if event.button() != 0 {
-            return;
-        }
-        let moved = up_state.borrow().drag_moved;
-        let was_active = up_state.borrow().drag_active;
-        if !was_active {
-            return;
-        }
-        {
-            let mut s = up_state.borrow_mut();
-            s.drag_active = false;
-            s.drag_moved = false;
-            if moved {
-                s.suppress_next_click = true;
+    let on_up =
+        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+            if event.button() != 0 {
+                return;
             }
-        }
-    });
+            let moved = up_state.borrow().drag_moved;
+            let was_active = up_state.borrow().drag_active;
+            if !was_active {
+                return;
+            }
+            {
+                let mut s = up_state.borrow_mut();
+                s.drag_active = false;
+                s.drag_moved = false;
+                if moved {
+                    s.suppress_next_click = true;
+                }
+            }
+        });
     let _ = window().add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
     on_up.forget();
 }
@@ -1980,116 +2429,129 @@ fn attach_pan_drag(state: Rc<RefCell<AppState>>) {
 /// Drag painting for Land/Water brushes: hold LMB and move across cells.
 fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
     let down_state = state.clone();
-    let on_down = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        if event.button() != 0 {
-            return;
-        }
-        let brush = down_state.borrow().brush.clone();
-        if let Some(elevation) = brush_absolute_elevation(&brush) {
-            let Some((q, r)) = cell_from_mouse_event(&down_state, &event) else { return };
-            {
-                let mut s = down_state.borrow_mut();
-                s.paint_active = true;
-                s.paint_moved = false;
-                s.paint_last_cell = Some((q, r));
+    let on_down =
+        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+            if event.button() != 0 {
+                return;
             }
-            queue_paint_stamp(down_state.clone(), (q, r), elevation);
-            return;
-        }
-        if let Some(step_sign) = brush_delta_sign(&brush) {
-            let Some((q, r)) = cell_from_mouse_event(&down_state, &event) else { return };
-            {
-                let mut s = down_state.borrow_mut();
-                s.paint_active = true;
-                s.paint_moved = false;
-                s.paint_last_cell = Some((q, r));
+            let brush = down_state.borrow().brush.clone();
+            if let Some(elevation) = brush_absolute_elevation(&brush) {
+                let Some((q, r)) = cell_from_mouse_event(&down_state, &event) else {
+                    return;
+                };
+                {
+                    let mut s = down_state.borrow_mut();
+                    s.paint_active = true;
+                    s.paint_moved = false;
+                    s.paint_last_cell = Some((q, r));
+                }
+                queue_paint_stamp(down_state.clone(), (q, r), elevation);
+                return;
             }
-            queue_paint_delta_stamp(down_state.clone(), (q, r), step_sign);
-        }
-    });
-    let _ = canvas().add_event_listener_with_callback("mousedown", on_down.as_ref().unchecked_ref());
+            if let Some(step_sign) = brush_delta_sign(&brush) {
+                let Some((q, r)) = cell_from_mouse_event(&down_state, &event) else {
+                    return;
+                };
+                {
+                    let mut s = down_state.borrow_mut();
+                    s.paint_active = true;
+                    s.paint_moved = false;
+                    s.paint_last_cell = Some((q, r));
+                }
+                queue_paint_delta_stamp(down_state.clone(), (q, r), step_sign);
+            }
+        });
+    let _ =
+        canvas().add_event_listener_with_callback("mousedown", on_down.as_ref().unchecked_ref());
     on_down.forget();
 
     let move_state = state.clone();
-    let on_move = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        if !move_state.borrow().paint_active {
-            return;
-        }
-        let brush = move_state.borrow().brush.clone();
-        let Some((q, r)) = cell_from_mouse_event(&move_state, &event) else { return };
-        let should_paint = {
-            let mut s = move_state.borrow_mut();
-            if s.paint_last_cell == Some((q, r)) {
-                false
-            } else {
-                s.paint_moved = true;
-                true
+    let on_move =
+        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+            if !move_state.borrow().paint_active {
+                return;
             }
-        };
-        if !should_paint {
-            return;
-        }
-        if let Some(elevation) = brush_absolute_elevation(&brush) {
-            queue_paint_stamp(move_state.clone(), (q, r), elevation);
-        } else if let Some(step_sign) = brush_delta_sign(&brush) {
-            queue_paint_delta_stamp(move_state.clone(), (q, r), step_sign);
-        } else {
-            return;
-        }
-        move_state.borrow_mut().paint_last_cell = Some((q, r));
-    });
-    let _ = window().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
+            let brush = move_state.borrow().brush.clone();
+            let Some((q, r)) = cell_from_mouse_event(&move_state, &event) else {
+                return;
+            };
+            let should_paint = {
+                let mut s = move_state.borrow_mut();
+                if s.paint_last_cell == Some((q, r)) {
+                    false
+                } else {
+                    s.paint_moved = true;
+                    true
+                }
+            };
+            if !should_paint {
+                return;
+            }
+            if let Some(elevation) = brush_absolute_elevation(&brush) {
+                queue_paint_stamp(move_state.clone(), (q, r), elevation);
+            } else if let Some(step_sign) = brush_delta_sign(&brush) {
+                queue_paint_delta_stamp(move_state.clone(), (q, r), step_sign);
+            } else {
+                return;
+            }
+            move_state.borrow_mut().paint_last_cell = Some((q, r));
+        });
+    let _ =
+        window().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
     on_move.forget();
 
     let up_state = state.clone();
-    let on_up = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        if event.button() != 0 {
-            return;
-        }
-        let (was_active, moved) = {
-            let s = up_state.borrow();
-            (s.paint_active, s.paint_moved)
-        };
-        if !was_active {
-            return;
-        }
-        {
-            let mut s = up_state.borrow_mut();
-            s.paint_active = false;
-            s.paint_moved = false;
-            s.paint_last_cell = None;
-            if moved {
-                s.suppress_next_click = true;
+    let on_up =
+        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+            if event.button() != 0 {
+                return;
             }
-        }
-        wasm_bindgen_futures::spawn_local(flush_pending_paints(up_state.clone()));
-    });
+            let (was_active, moved) = {
+                let s = up_state.borrow();
+                (s.paint_active, s.paint_moved)
+            };
+            if !was_active {
+                return;
+            }
+            {
+                let mut s = up_state.borrow_mut();
+                s.paint_active = false;
+                s.paint_moved = false;
+                s.paint_last_cell = None;
+                if moved {
+                    s.suppress_next_click = true;
+                }
+            }
+            wasm_bindgen_futures::spawn_local(flush_pending_paints(up_state.clone()));
+        });
     let _ = window().add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
     on_up.forget();
 }
 
 fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
     let move_state = state.clone();
-    let on_move = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        let next_hover = if brush_paints(&move_state.borrow().brush) {
-            cell_from_mouse_event(&move_state, &event)
-        } else {
-            None
-        };
-        let changed = {
-            let mut s = move_state.borrow_mut();
-            if s.hover_cell == next_hover {
-                false
+    let on_move =
+        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+            let next_hover = if brush_paints(&move_state.borrow().brush) {
+                cell_from_mouse_event(&move_state, &event)
             } else {
-                s.hover_cell = next_hover;
-                true
+                None
+            };
+            let changed = {
+                let mut s = move_state.borrow_mut();
+                if s.hover_cell == next_hover {
+                    false
+                } else {
+                    s.hover_cell = next_hover;
+                    true
+                }
+            };
+            if changed {
+                schedule_redraw(move_state.clone());
             }
-        };
-        if changed {
-            schedule_redraw(move_state.clone());
-        }
-    });
-    let _ = canvas().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
+        });
+    let _ =
+        canvas().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
     on_move.forget();
 
     let leave_state = state.clone();
@@ -2107,7 +2569,8 @@ fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
             schedule_redraw(leave_state.clone());
         }
     });
-    let _ = canvas().add_event_listener_with_callback("mouseleave", on_leave.as_ref().unchecked_ref());
+    let _ =
+        canvas().add_event_listener_with_callback("mouseleave", on_leave.as_ref().unchecked_ref());
     on_leave.forget();
 }
 
@@ -2185,7 +2648,9 @@ async fn load_profile_into_panel(state: Rc<RefCell<AppState>>, q: i32, r: i32) {
 
 fn attach_save_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
-        let Some((q, r)) = state.borrow().selected else { return };
+        let Some((q, r)) = state.borrow().selected else {
+            return;
+        };
         let display_name = input("title").value();
         let notes = textarea("notes").value();
         let has_payload = !display_name.trim().is_empty() || !notes.trim().is_empty();
@@ -2197,7 +2662,10 @@ fn attach_save_click(state: Rc<RefCell<AppState>>) {
         let state = state.clone();
         set_text("status", "Saving…");
         wasm_bindgen_futures::spawn_local(async move {
-            let body = ProfileInput { display_name: display_name.clone(), notes };
+            let body = ProfileInput {
+                display_name: display_name.clone(),
+                notes,
+            };
             let sent = gloo_net::http::Request::put(&format!("/api/cells/{q}/{r}/profile"))
                 .json(&body)
                 .expect("serializing profile body")
@@ -2282,7 +2750,10 @@ fn sync_preset_size_warning(select_id: &str, warn_id: &str) {
 }
 
 fn attach_preset_warn_handlers() {
-    for (select_id, warn_id) in [("new-preset", "new-preset-warn"), ("generate-preset", "generate-preset-warn")] {
+    for (select_id, warn_id) in [
+        ("new-preset", "new-preset-warn"),
+        ("generate-preset", "generate-preset-warn"),
+    ] {
         sync_preset_size_warning(select_id, warn_id);
         let select_id = select_id.to_string();
         let warn_id = warn_id.to_string();
@@ -2292,7 +2763,8 @@ fn attach_preset_warn_handlers() {
             sync_preset_size_warning(&select_for_change, &warn_for_change);
         });
         if let Ok(Some(select)) = document().query_selector(&format!("#{select_id}")) {
-            let _ = select.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+            let _ = select
+                .add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
         }
         on_change.forget();
     }
@@ -2336,7 +2808,10 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
                     wasm_bindgen_futures::spawn_local(load_map(state));
                 }
                 Ok(resp) => {
-                    let msg = resp.text().await.unwrap_or_else(|_| "create failed".to_string());
+                    let msg = resp
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "create failed".to_string());
                     set_text("home-status", &msg);
                 }
                 Err(err) => set_text("home-status", &format!("Error: {err}")),
@@ -2371,7 +2846,10 @@ fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
         let id = input("generate-id").value();
         let path = input("generate-path").value();
         if id.trim().is_empty() || path.trim().is_empty() {
-            set_text("generate-status", "World name and folder are both required.");
+            set_text(
+                "generate-status",
+                "World name and folder are both required.",
+            );
             return;
         }
         let preset = select_value("generate-preset");
@@ -2401,9 +2879,21 @@ fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
                     show_view("editor");
                     load_map(state.clone()).await;
                     open_build_wizard();
+                    {
+                        let mut s = state.borrow_mut();
+                        s.wizard_variant = "A".to_string();
+                        s.wizard_accepted = false;
+                        s.wizard_edit_mode = false;
+                        sync_wizard_actions(&s);
+                    }
+                    set_wizard_status("Generating variant A…");
+                    wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
                 }
                 Ok(resp) => {
-                    let msg = resp.text().await.unwrap_or_else(|_| "create failed".to_string());
+                    let msg = resp
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "create failed".to_string());
                     set_text("generate-status", &msg);
                 }
                 Err(err) => set_text("generate-status", &format!("Error: {err}")),
@@ -2432,7 +2922,8 @@ fn attach_new_id_input(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
         refresh_suggested_path(&state);
     });
-    let _ = input("new-id").add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
+    let _ =
+        input("new-id").add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
     closure.forget();
 }
 
@@ -2440,7 +2931,8 @@ fn attach_new_path_input(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
         state.borrow_mut().path_touched = true;
     });
-    let _ = input("new-path").add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
+    let _ = input("new-path")
+        .add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
     closure.forget();
 }
 
@@ -2448,7 +2940,8 @@ fn attach_generate_id_input(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
         refresh_suggested_path(&state);
     });
-    let _ = input("generate-id").add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
+    let _ = input("generate-id")
+        .add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
     closure.forget();
 }
 
@@ -2456,7 +2949,8 @@ fn attach_generate_path_input(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
         state.borrow_mut().build_path_touched = true;
     });
-    let _ = input("generate-path").add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
+    let _ = input("generate-path")
+        .add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
     closure.forget();
 }
 
@@ -2527,6 +3021,8 @@ fn reset_view_on_world_open(s: &mut AppState) {
     s.show_grid = s.map_bounds.len() <= elevation_view::OVERLAY_LOD_MAX_VISIBLE;
     s.active_river_id = None;
     s.rivers = RiverCatalog::default();
+    s.wizard_accepted = false;
+    s.wizard_edit_mode = false;
     deactivate_paint_brush(s);
 }
 
@@ -2553,206 +3049,227 @@ fn brush_paints(brush: &Brush) -> bool {
 
 /// Tool dock: rail tabs toggle drawers; hydro swatches set the active brush.
 fn attach_dock_click(state: Rc<RefCell<AppState>>) {
-    let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        let Some(target) = click_target_element(&event) else { return };
+    let closure =
+        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+            let Some(target) = click_target_element(&event) else {
+                return;
+            };
 
-        if let Ok(Some(button)) = target.closest("[data-view-toggle]") {
-            let Some(kind) = button.get_attribute("data-view-toggle") else { return };
-            match kind.as_str() {
-                "grid" => {
-                    let show_grid = {
+            if let Ok(Some(button)) = target.closest("[data-view-toggle]") {
+                let Some(kind) = button.get_attribute("data-view-toggle") else {
+                    return;
+                };
+                match kind.as_str() {
+                    "grid" => {
+                        let show_grid = {
+                            let mut s = state.borrow_mut();
+                            s.show_grid = !s.show_grid;
+                            s.show_grid
+                        };
+                        button.set_text_content(Some(grid_lines_toggle_label(show_grid)));
+                        schedule_redraw(state.clone());
+                    }
+                    "color-mode" => {
                         let mut s = state.borrow_mut();
-                        s.show_grid = !s.show_grid;
-                        s.show_grid
-                    };
-                    button.set_text_content(Some(grid_lines_toggle_label(show_grid)));
-                    schedule_redraw(state.clone());
+                        s.color_mode = if s.color_mode == ColorMode::Hydro {
+                            ColorMode::Elevation
+                        } else {
+                            ColorMode::Hydro
+                        };
+                        drop(s);
+                        schedule_redraw(state.clone());
+                    }
+                    "elevation-labels" => {
+                        let show = {
+                            let s = state.borrow();
+                            !s.show_elevation_labels
+                        };
+                        state.borrow_mut().show_elevation_labels = show;
+                        schedule_redraw(state.clone());
+                    }
+                    "peaks" => {
+                        let show = {
+                            let s = state.borrow();
+                            !s.show_peaks
+                        };
+                        state.borrow_mut().show_peaks = show;
+                        schedule_redraw(state.clone());
+                    }
+                    _ => {}
                 }
-                "color-mode" => {
-                    let mut s = state.borrow_mut();
-                    s.color_mode = if s.color_mode == ColorMode::Hydro {
-                        ColorMode::Elevation
-                    } else {
-                        ColorMode::Hydro
-                    };
-                    drop(s);
-                    schedule_redraw(state.clone());
-                }
-                "elevation-labels" => {
-                    let show = {
-                        let s = state.borrow();
-                        !s.show_elevation_labels
-                    };
-                    state.borrow_mut().show_elevation_labels = show;
-                    schedule_redraw(state.clone());
-                }
-                "peaks" => {
-                    let show = {
-                        let s = state.borrow();
-                        !s.show_peaks
-                    };
-                    state.borrow_mut().show_peaks = show;
-                    schedule_redraw(state.clone());
-                }
-                _ => {}
-            }
-            return;
-        }
-
-        if let Ok(Some(button)) = target.closest("[data-brush-step]") {
-            let Some(raw) = button.get_attribute("data-brush-step") else { return };
-            let Ok(step) = raw.parse::<i32>() else { return };
-            if [1, 5, 10].contains(&step) {
-                state.borrow_mut().brush_step = step;
-                sync_brush_step_active(step);
-            }
-            return;
-        }
-
-        if let Ok(Some(button)) = target.closest("[data-falloff]") {
-            if button.has_attribute("disabled") {
                 return;
             }
-            let Some(mode) = button.get_attribute("data-falloff") else { return };
-            let even = mode != "hill";
-            if state.borrow().brush_radius == 0 && !even {
+
+            if let Ok(Some(button)) = target.closest("[data-brush-step]") {
+                let Some(raw) = button.get_attribute("data-brush-step") else {
+                    return;
+                };
+                let Ok(step) = raw.parse::<i32>() else { return };
+                if [1, 5, 10].contains(&step) {
+                    state.borrow_mut().brush_step = step;
+                    sync_brush_step_active(step);
+                }
                 return;
             }
-            state.borrow_mut().falloff_even = even;
-            sync_falloff_active(even, state.borrow().brush_radius);
-            return;
-        }
 
-        if let Ok(Some(button)) = target.closest("[data-brush-size]") {
-            let Some(raw_size) = button.get_attribute("data-brush-size") else { return };
-            let Ok(radius) = raw_size.parse::<i32>() else { return };
-            {
-                let mut s = state.borrow_mut();
-                s.brush_radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
-                if s.brush_radius == 0 {
-                    s.falloff_even = true;
+            if let Ok(Some(button)) = target.closest("[data-falloff]") {
+                if button.has_attribute("disabled") {
+                    return;
                 }
+                let Some(mode) = button.get_attribute("data-falloff") else {
+                    return;
+                };
+                let even = mode != "hill";
+                if state.borrow().brush_radius == 0 && !even {
+                    return;
+                }
+                state.borrow_mut().falloff_even = even;
+                sync_falloff_active(even, state.borrow().brush_radius);
+                return;
             }
-            sync_brush_radius_active(state.borrow().brush_radius);
-            sync_falloff_active(state.borrow().falloff_even, state.borrow().brush_radius);
-            return;
-        }
 
-        if let Ok(Some(button)) = target.closest("[data-dock]") {
-            let Some(tab) = button.get_attribute("data-dock") else { return };
-            let current = active_dock_tab();
-            let drawer_open = drawer_is_open();
-            // tool-dock-brush-deselect-v1 (variant A): repeat Terrain deselects brush, drawer stays.
-            let terrain_deselect = tab == "terrain"
-                && current.as_deref() == Some("terrain")
-                && drawer_open
-                && terrain_brush(&state.borrow().brush);
-            if terrain_deselect {
+            if let Ok(Some(button)) = target.closest("[data-brush-size]") {
+                let Some(raw_size) = button.get_attribute("data-brush-size") else {
+                    return;
+                };
+                let Ok(radius) = raw_size.parse::<i32>() else {
+                    return;
+                };
                 {
                     let mut s = state.borrow_mut();
-                    deactivate_paint_brush(&mut s);
+                    s.brush_radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
+                    if s.brush_radius == 0 {
+                        s.falloff_even = true;
+                    }
                 }
-                sync_paint_tool_ui(&Brush::Inspect);
-                schedule_redraw(state.clone());
+                sync_brush_radius_active(state.borrow().brush_radius);
+                sync_falloff_active(state.borrow().falloff_even, state.borrow().brush_radius);
                 return;
             }
 
-            toggle_dock_tab(&tab);
-
-            match tab.as_str() {
-                "inspect" | "view" | "world" => {
+            if let Ok(Some(button)) = target.closest("[data-dock]") {
+                let Some(tab) = button.get_attribute("data-dock") else {
+                    return;
+                };
+                let current = active_dock_tab();
+                let drawer_open = drawer_is_open();
+                // tool-dock-brush-deselect-v1 (variant A): repeat Terrain deselects brush, drawer stays.
+                let terrain_deselect = tab == "terrain"
+                    && current.as_deref() == Some("terrain")
+                    && drawer_open
+                    && terrain_brush(&state.borrow().brush);
+                if terrain_deselect {
                     {
                         let mut s = state.borrow_mut();
                         deactivate_paint_brush(&mut s);
                     }
                     sync_paint_tool_ui(&Brush::Inspect);
                     schedule_redraw(state.clone());
+                    return;
                 }
-                "terrain" => {
-                    let brush = {
-                        let mut s = state.borrow_mut();
-                        clear_pointer_interaction(&mut s);
-                        if !terrain_brush(&s.brush) {
-                            s.brush = s.last_paint_brush.clone();
+
+                toggle_dock_tab(&tab);
+
+                match tab.as_str() {
+                    "inspect" | "view" | "world" => {
+                        {
+                            let mut s = state.borrow_mut();
+                            deactivate_paint_brush(&mut s);
                         }
-                        s.hover_cell = None;
-                        s.brush.clone()
-                    };
-                    sync_paint_tool_ui(&brush);
-                    if brush_paints(&brush) {
+                        sync_paint_tool_ui(&Brush::Inspect);
                         schedule_redraw(state.clone());
                     }
-                }
-                "rivers" => {
-                    let brush = {
-                        let mut s = state.borrow_mut();
-                        clear_pointer_interaction(&mut s);
-                        if !river_brush(&s.brush) {
-                            s.brush = s.last_river_brush.clone();
+                    "terrain" => {
+                        let brush = {
+                            let mut s = state.borrow_mut();
+                            clear_pointer_interaction(&mut s);
+                            if !terrain_brush(&s.brush) {
+                                s.brush = s.last_paint_brush.clone();
+                            }
+                            s.hover_cell = None;
+                            s.brush.clone()
+                        };
+                        sync_paint_tool_ui(&brush);
+                        if brush_paints(&brush) {
+                            schedule_redraw(state.clone());
                         }
-                        s.hover_cell = None;
-                        s.brush.clone()
-                    };
-                    sync_paint_tool_ui(&brush);
-                    sync_river_status(&state.borrow());
-                    if brush_paints(&brush) {
-                        schedule_redraw(state.clone());
                     }
+                    "rivers" => {
+                        let brush = {
+                            let mut s = state.borrow_mut();
+                            clear_pointer_interaction(&mut s);
+                            if !river_brush(&s.brush) {
+                                s.brush = s.last_river_brush.clone();
+                            }
+                            s.hover_cell = None;
+                            s.brush.clone()
+                        };
+                        sync_paint_tool_ui(&brush);
+                        sync_river_status(&state.borrow());
+                        if brush_paints(&brush) {
+                            schedule_redraw(state.clone());
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
+                return;
             }
-            return;
-        }
 
-        if let Ok(Some(button)) = target.closest("[data-river-action]") {
-            let Some(action) = button.get_attribute("data-river-action") else { return };
-            match action.as_str() {
-                "new" => {
-                    state.borrow_mut().active_river_id = None;
-                    sync_river_status(&state.borrow());
+            if let Ok(Some(button)) = target.closest("[data-river-action]") {
+                let Some(action) = button.get_attribute("data-river-action") else {
+                    return;
+                };
+                match action.as_str() {
+                    "new" => {
+                        state.borrow_mut().active_river_id = None;
+                        sync_river_status(&state.borrow());
+                    }
+                    "undo" => {
+                        wasm_bindgen_futures::spawn_local(post_river_pop(state.clone()));
+                    }
+                    _ => {}
                 }
-                "undo" => {
-                    wasm_bindgen_futures::spawn_local(post_river_pop(state.clone()));
-                }
-                _ => {}
+                return;
             }
-            return;
-        }
 
-        let Ok(Some(button)) = target.closest("[data-brush]") else { return };
-        let Some(kind) = button.get_attribute("data-brush") else { return };
+            let Ok(Some(button)) = target.closest("[data-brush]") else {
+                return;
+            };
+            let Some(kind) = button.get_attribute("data-brush") else {
+                return;
+            };
 
-        let brush = match kind.as_str() {
-            "land" => Brush::SetLand,
-            "water" => Brush::SetWater,
-            "raise" => Brush::Raise,
-            "lower" => Brush::Lower,
-            "river" => Brush::River,
-            "river-erase" => Brush::RiverErase,
-            _ => return,
-        };
-        {
-            let mut s = state.borrow_mut();
-            apply_paint_brush(&mut s, brush.clone());
+            let brush = match kind.as_str() {
+                "land" => Brush::SetLand,
+                "water" => Brush::SetWater,
+                "raise" => Brush::Raise,
+                "lower" => Brush::Lower,
+                "river" => Brush::River,
+                "river-erase" => Brush::RiverErase,
+                _ => return,
+            };
+            {
+                let mut s = state.borrow_mut();
+                apply_paint_brush(&mut s, brush.clone());
+                if matches!(brush, Brush::Raise | Brush::Lower) {
+                    apply_elevation_brush_intent(&mut s);
+                }
+            }
+            if river_brush(&brush) {
+                open_dock_tab("rivers");
+                sync_river_status(&state.borrow());
+            } else {
+                open_dock_tab("terrain");
+            }
+            sync_paint_tool_ui(&brush);
             if matches!(brush, Brush::Raise | Brush::Lower) {
-                apply_elevation_brush_intent(&mut s);
+                sync_falloff_active(state.borrow().falloff_even, state.borrow().brush_radius);
+                sync_brush_step_active(state.borrow().brush_step);
+                schedule_redraw(state.clone());
+            } else if river_brush(&brush) {
+                schedule_redraw(state.clone());
             }
-        }
-        if river_brush(&brush) {
-            open_dock_tab("rivers");
-            sync_river_status(&state.borrow());
-        } else {
-            open_dock_tab("terrain");
-        }
-        sync_paint_tool_ui(&brush);
-        if matches!(brush, Brush::Raise | Brush::Lower) {
-            sync_falloff_active(state.borrow().falloff_even, state.borrow().brush_radius);
-            sync_brush_step_active(state.borrow().brush_step);
-            schedule_redraw(state.clone());
-        } else if river_brush(&brush) {
-            schedule_redraw(state.clone());
-        }
-    });
+        });
     document()
         .get_element_by_id("tool-dock")
         .expect("missing #tool-dock")
@@ -2762,12 +3279,14 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
 }
 
 fn attach_escape_key() {
-    let closure = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |event: web_sys::KeyboardEvent| {
-        if event.key() == "Escape" {
-            set_drawer_open(false);
-        }
-    });
-    let _ = document().add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
+    let closure =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |event: web_sys::KeyboardEvent| {
+            if event.key() == "Escape" {
+                set_drawer_open(false);
+            }
+        });
+    let _ =
+        document().add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
     closure.forget();
 }
 
@@ -2818,115 +3337,147 @@ async fn pick_folder_via_tauri() -> Option<String> {
 
 /// Delegated click on the project list: any `.open-btn` opens that world.
 fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
-    let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-        let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else { return };
-        if let Ok(Some(button)) = target.closest(".manage-btn") {
-            let Some(row) = button.closest("li").ok().flatten() else { return };
-            if row.class_list().contains("manage-open") {
-                let _ = row.class_list().remove_1("manage-open");
-            } else {
-                let _ = row.class_list().add_1("manage-open");
-            }
-            return;
-        }
-        if let Ok(Some(button)) = target.closest(".delete-btn") {
-            let Some(path) = button.get_attribute("data-path") else { return };
-            if !button.class_list().contains("armed") {
-                let _ = button.class_list().add_1("armed");
-                button.set_text_content(Some("Delete now"));
-                set_text("home-status", "Click \"Delete now\" again to permanently remove this world from disk.");
+    let closure =
+        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+            let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else {
+                return;
+            };
+            if let Ok(Some(button)) = target.closest(".manage-btn") {
+                let Some(row) = button.closest("li").ok().flatten() else {
+                    return;
+                };
+                if row.class_list().contains("manage-open") {
+                    let _ = row.class_list().remove_1("manage-open");
+                } else {
+                    let _ = row.class_list().add_1("manage-open");
+                }
                 return;
             }
-            let state = state.clone();
-            set_text("home-status", "Deleting…");
-            wasm_bindgen_futures::spawn_local(async move {
-                let body = DeleteProjectInput { path: &path };
-                let sent = gloo_net::http::Request::post("/api/projects/delete").json(&body);
-                let sent = match sent {
-                    Ok(req) => req.send().await,
-                    Err(err) => {
-                        set_text("home-status", &format!("Error: {err}"));
-                        return;
-                    }
+            if let Ok(Some(button)) = target.closest(".delete-btn") {
+                let Some(path) = button.get_attribute("data-path") else {
+                    return;
                 };
-                match sent {
-                    Ok(resp) if resp.ok() => {
-                        set_text("home-status", "");
-                        wasm_bindgen_futures::spawn_local(refresh_projects(state));
-                    }
-                    Ok(resp) => {
-                        let msg = resp.text().await.unwrap_or_else(|_| "delete failed".to_string());
-                        set_text("home-status", &msg);
-                    }
-                    Err(err) => set_text("home-status", &format!("Error: {err}")),
-                }
-            });
-            return;
-        }
-        if let Ok(Some(button)) = target.closest(".remove-btn") {
-            let Some(path) = button.get_attribute("data-path") else { return };
-            let state = state.clone();
-            set_text("home-status", "Removing from launcher…");
-            wasm_bindgen_futures::spawn_local(async move {
-                let body = ForgetProjectInput { path: &path };
-                let sent = gloo_net::http::Request::post("/api/projects/forget").json(&body);
-                let sent = match sent {
-                    Ok(req) => req.send().await,
-                    Err(err) => {
-                        set_text("home-status", &format!("Error: {err}"));
-                        return;
-                    }
-                };
-                match sent {
-                    Ok(resp) if resp.ok() => {
-                        set_text("home-status", "");
-                        wasm_bindgen_futures::spawn_local(refresh_projects(state));
-                    }
-                    Ok(resp) => {
-                        let msg = resp.text().await.unwrap_or_else(|_| "remove failed".to_string());
-                        set_text("home-status", &msg);
-                    }
-                    Err(err) => set_text("home-status", &format!("Error: {err}")),
-                }
-            });
-            return;
-        }
-
-        let Ok(Some(button)) = target.closest(".open-btn") else { return };
-        let Some(path) = button.get_attribute("data-path") else { return };
-        let resume_wizard = button.get_attribute("data-build-draft").as_deref() == Some("1");
-
-        let state = state.clone();
-        set_text("home-status", "Opening…");
-        wasm_bindgen_futures::spawn_local(async move {
-            let body = OpenProjectInput { path: &path };
-            let sent = gloo_net::http::Request::post("/api/projects/open").json(&body);
-            let sent = match sent {
-                Ok(req) => req.send().await,
-                Err(err) => {
-                    set_text("home-status", &format!("Error: {err}"));
+                if !button.class_list().contains("armed") {
+                    let _ = button.class_list().add_1("armed");
+                    button.set_text_content(Some("Delete now"));
+                    set_text(
+                        "home-status",
+                        "Click \"Delete now\" again to permanently remove this world from disk.",
+                    );
                     return;
                 }
-            };
-            match sent {
-                Ok(resp) if resp.ok() => {
-                    set_text("home-status", "");
-                    show_view("editor");
-                    load_map(state.clone()).await;
-                    if resume_wizard {
-                        open_build_wizard();
-                    } else {
-                        close_build_wizard();
+                let state = state.clone();
+                set_text("home-status", "Deleting…");
+                wasm_bindgen_futures::spawn_local(async move {
+                    let body = DeleteProjectInput { path: &path };
+                    let sent = gloo_net::http::Request::post("/api/projects/delete").json(&body);
+                    let sent = match sent {
+                        Ok(req) => req.send().await,
+                        Err(err) => {
+                            set_text("home-status", &format!("Error: {err}"));
+                            return;
+                        }
+                    };
+                    match sent {
+                        Ok(resp) if resp.ok() => {
+                            set_text("home-status", "");
+                            wasm_bindgen_futures::spawn_local(refresh_projects(state));
+                        }
+                        Ok(resp) => {
+                            let msg = resp
+                                .text()
+                                .await
+                                .unwrap_or_else(|_| "delete failed".to_string());
+                            set_text("home-status", &msg);
+                        }
+                        Err(err) => set_text("home-status", &format!("Error: {err}")),
                     }
-                }
-                Ok(resp) => {
-                    let msg = resp.text().await.unwrap_or_else(|_| "open failed".to_string());
-                    set_text("home-status", &msg);
-                }
-                Err(err) => set_text("home-status", &format!("Error: {err}")),
+                });
+                return;
             }
+            if let Ok(Some(button)) = target.closest(".remove-btn") {
+                let Some(path) = button.get_attribute("data-path") else {
+                    return;
+                };
+                let state = state.clone();
+                set_text("home-status", "Removing from launcher…");
+                wasm_bindgen_futures::spawn_local(async move {
+                    let body = ForgetProjectInput { path: &path };
+                    let sent = gloo_net::http::Request::post("/api/projects/forget").json(&body);
+                    let sent = match sent {
+                        Ok(req) => req.send().await,
+                        Err(err) => {
+                            set_text("home-status", &format!("Error: {err}"));
+                            return;
+                        }
+                    };
+                    match sent {
+                        Ok(resp) if resp.ok() => {
+                            set_text("home-status", "");
+                            wasm_bindgen_futures::spawn_local(refresh_projects(state));
+                        }
+                        Ok(resp) => {
+                            let msg = resp
+                                .text()
+                                .await
+                                .unwrap_or_else(|_| "remove failed".to_string());
+                            set_text("home-status", &msg);
+                        }
+                        Err(err) => set_text("home-status", &format!("Error: {err}")),
+                    }
+                });
+                return;
+            }
+
+            let Ok(Some(button)) = target.closest(".open-btn") else {
+                return;
+            };
+            let Some(path) = button.get_attribute("data-path") else {
+                return;
+            };
+            let resume_wizard = button.get_attribute("data-build-draft").as_deref() == Some("1");
+
+            let state = state.clone();
+            set_text("home-status", "Opening…");
+            wasm_bindgen_futures::spawn_local(async move {
+                let body = OpenProjectInput { path: &path };
+                let sent = gloo_net::http::Request::post("/api/projects/open").json(&body);
+                let sent = match sent {
+                    Ok(req) => req.send().await,
+                    Err(err) => {
+                        set_text("home-status", &format!("Error: {err}"));
+                        return;
+                    }
+                };
+                match sent {
+                    Ok(resp) if resp.ok() => {
+                        set_text("home-status", "");
+                        show_view("editor");
+                        load_map(state.clone()).await;
+                        if resume_wizard {
+                            open_build_wizard();
+                            {
+                                let mut s = state.borrow_mut();
+                                s.wizard_accepted = false;
+                                s.wizard_edit_mode = false;
+                                sync_wizard_actions(&s);
+                            }
+                            set_wizard_status("Select a variant and accept it to continue.");
+                        } else {
+                            close_build_wizard();
+                        }
+                    }
+                    Ok(resp) => {
+                        let msg = resp
+                            .text()
+                            .await
+                            .unwrap_or_else(|_| "open failed".to_string());
+                        set_text("home-status", &msg);
+                    }
+                    Err(err) => set_text("home-status", &format!("Error: {err}")),
+                }
+            });
         });
-    });
     document()
         .get_element_by_id("project-list")
         .expect("missing #project-list")
