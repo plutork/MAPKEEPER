@@ -22,6 +22,7 @@ use elevation_view::{
 use gloo_timers::future::TimeoutFuture;
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::{hydro_from_elevation, stamp_delta, HydroKind};
+use mapkeeper_core::land_mask::{find_recipe, pick_compare_trio};
 use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
 use mapkeeper_core::map_preset::MapPreset;
 use mapkeeper_core::profile::CellProfile;
@@ -341,7 +342,7 @@ struct BuildStateInput {
 
 #[derive(Serialize)]
 struct WizardLandMaskGenerateInput<'a> {
-    compare_set: &'a str,
+    recipe_id: &'a str,
     character: &'a str,
     variant: &'a str,
     regenerate_nonce: u32,
@@ -463,10 +464,13 @@ struct AppState {
     last_draw_snapshot: Option<DrawSnapshot>,
     redraw_dirty: bool,
     redraw_raf_pending: bool,
-    wizard_compare_set: String,
     wizard_character: String,
     wizard_variant: String,
     wizard_regenerate_nonce: u32,
+    /// Recipe ids for A/B/C cards (distinct layout classes).
+    wizard_recipe_a: String,
+    wizard_recipe_b: String,
+    wizard_recipe_c: String,
     wizard_accepted: bool,
     wizard_edit_mode: bool,
     wizard_edit_brush: String,
@@ -519,10 +523,12 @@ pub fn start() {
         last_draw_snapshot: None,
         redraw_dirty: false,
         redraw_raf_pending: false,
-        wizard_compare_set: "macro".to_string(),
         wizard_character: "smooth".to_string(),
         wizard_variant: "A".to_string(),
         wizard_regenerate_nonce: 0,
+        wizard_recipe_a: String::new(),
+        wizard_recipe_b: String::new(),
+        wizard_recipe_c: String::new(),
         wizard_accepted: false,
         wizard_edit_mode: false,
         wizard_edit_brush: "land".to_string(),
@@ -1028,42 +1034,47 @@ fn sync_wizard_variant_buttons(active: &str) {
     }
 }
 
-fn sync_wizard_variant_labels(compare_set: &str) {
-    let (a, b, c) = match compare_set {
-        "coastal" => ("A · Island", "B · Continent + islands", "C · Mediterranean"),
-        _ => ("A · Pangea", "B · Continents", "C · Archipelago"),
-    };
-    for (id, label) in [
-        ("wiz-variant-a", a),
-        ("wiz-variant-b", b),
-        ("wiz-variant-c", c),
+fn sync_wizard_variant_labels(state: &AppState) {
+    for (id, recipe_id, letter) in [
+        ("wiz-variant-a", state.wizard_recipe_a.as_str(), "A"),
+        ("wiz-variant-b", state.wizard_recipe_b.as_str(), "B"),
+        ("wiz-variant-c", state.wizard_recipe_c.as_str(), "C"),
     ] {
-        if let Some(el) = document().get_element_by_id(id) {
-            el.set_text_content(Some(label));
-        }
+        let Some(el) = document().get_element_by_id(id) else {
+            continue;
+        };
+        let label = if let Some(recipe) = find_recipe(recipe_id) {
+            format!("{letter} · {}", recipe.layout_class.label())
+        } else {
+            letter.to_string()
+        };
+        el.set_text_content(Some(&label));
     }
 }
 
-fn sync_wizard_compare_set_buttons(active: &str) {
-    let Ok(Some(root)) = document().query_selector("#wiz-compare-sets") else {
+fn ensure_wizard_trio(state: &mut AppState) {
+    if !state.wizard_recipe_a.is_empty()
+        && !state.wizard_recipe_b.is_empty()
+        && !state.wizard_recipe_c.is_empty()
+    {
         return;
-    };
-    if let Ok(list) = root.query_selector_all("[data-wiz-compare]") {
-        for i in 0..list.length() {
-            if let Some(node) = list.item(i) {
-                if let Ok(el) = node.dyn_into::<web_sys::Element>() {
-                    let is_active = el
-                        .get_attribute("data-wiz-compare")
-                        .as_deref()
-                        == Some(active);
-                    if is_active {
-                        let _ = el.class_list().add_1("active");
-                    } else {
-                        let _ = el.class_list().remove_1("active");
-                    }
-                }
-            }
-        }
+    }
+    reshuffle_wizard_trio(state);
+}
+
+fn reshuffle_wizard_trio(state: &mut AppState) {
+    let seed = (state.wizard_regenerate_nonce as u64).wrapping_mul(0x9E37_79B9) ^ 0xC0FF_EE;
+    let trio = pick_compare_trio(seed);
+    state.wizard_recipe_a = trio[0].id.to_string();
+    state.wizard_recipe_b = trio[1].id.to_string();
+    state.wizard_recipe_c = trio[2].id.to_string();
+}
+
+fn active_wizard_recipe_id(state: &AppState) -> String {
+    match state.wizard_variant.as_str() {
+        "B" => state.wizard_recipe_b.clone(),
+        "C" => state.wizard_recipe_c.clone(),
+        _ => state.wizard_recipe_a.clone(),
     }
 }
 
@@ -1092,24 +1103,24 @@ fn sync_wizard_actions(state: &AppState) {
     set_button_disabled("wiz-accept", false);
     set_button_disabled("wiz-edit", !state.wizard_accepted);
     set_button_disabled("wiz-continue", !state.wizard_accepted);
-    sync_wizard_compare_set_buttons(&state.wizard_compare_set);
-    sync_wizard_variant_labels(&state.wizard_compare_set);
+    sync_wizard_variant_labels(state);
     sync_wizard_variant_buttons(&state.wizard_variant);
     sync_wizard_edit_mode_ui(state.wizard_edit_mode, &state.wizard_edit_brush);
 }
 
 async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
-    let (compare_set, character, variant, nonce) = {
-        let s = state.borrow();
+    let (recipe_id, character, variant, nonce) = {
+        let mut s = state.borrow_mut();
+        ensure_wizard_trio(&mut s);
         (
-            s.wizard_compare_set.clone(),
+            active_wizard_recipe_id(&s),
             s.wizard_character.clone(),
             s.wizard_variant.clone(),
             s.wizard_regenerate_nonce,
         )
     };
     let body = WizardLandMaskGenerateInput {
-        compare_set: &compare_set,
+        recipe_id: &recipe_id,
         character: &character,
         variant: &variant,
         regenerate_nonce: nonce,
@@ -1222,7 +1233,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Compare-set + shore character (block 1).
+    // Shore character (block 1).
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
@@ -1235,31 +1246,15 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             if !el.class_list().contains("wiz-style-btn") {
                 return;
             }
-            if let Some(compare) = el.get_attribute("data-wiz-compare") {
-                wiz_toggle_style_group("wiz-compare-sets", "data-wiz-compare", &el);
-                {
-                    let mut s = state.borrow_mut();
-                    s.wizard_compare_set = compare;
-                    s.wizard_variant = "A".to_string();
-                    s.wizard_accepted = false;
-                    s.wizard_edit_mode = false;
-                    sync_wizard_actions(&s);
-                }
-                set_wizard_status("Compare set updated. Generating A…");
-                wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
-                return;
-            }
             if let Some(character) = el.get_attribute("data-wiz-char") {
                 wiz_toggle_style_group("wiz-chars", "data-wiz-char", &el);
                 state.borrow_mut().wizard_character = character;
                 set_wizard_status("Shore updated. Regenerate or pick a layout variant.");
             }
         });
-        for id in ["wiz-compare-sets", "wiz-chars"] {
-            if let Ok(Some(root)) = document().query_selector(&format!("#{id}")) {
-                let _ = root
-                    .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
-            }
+        if let Ok(Some(root)) = document().query_selector("#wiz-chars") {
+            let _ = root
+                .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
         closure.forget();
     }
@@ -1297,18 +1292,20 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Regenerate active variant.
+    // Regenerate: reshuffle A/B/C classes+recipes, reset accept, generate A.
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
             {
                 let mut s = state.borrow_mut();
                 s.wizard_regenerate_nonce = s.wizard_regenerate_nonce.saturating_add(1);
+                reshuffle_wizard_trio(&mut s);
+                s.wizard_variant = "A".to_string();
                 s.wizard_accepted = false;
                 s.wizard_edit_mode = false;
                 sync_wizard_actions(&s);
             }
-            set_wizard_status("Regenerating…");
+            set_wizard_status("New comparison set — generating A…");
             wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
         });
         document()
@@ -1470,7 +1467,8 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
     }
 
     {
-        let s = state.borrow();
+        let mut s = state.borrow_mut();
+        ensure_wizard_trio(&mut s);
         sync_wizard_actions(&s);
     }
 }
@@ -1504,6 +1502,9 @@ async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.wizard_edit_mode = false;
     state_mut.wizard_variant = "A".to_string();
     state_mut.wizard_regenerate_nonce = 0;
+    state_mut.wizard_recipe_a.clear();
+    state_mut.wizard_recipe_b.clear();
+    state_mut.wizard_recipe_c.clear();
     set_drawer_open(false);
     clear_inspect_selection();
     set_world_label("—");
@@ -2933,8 +2934,13 @@ fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
                     {
                         let mut s = state.borrow_mut();
                         s.wizard_variant = "A".to_string();
+                        s.wizard_regenerate_nonce = 0;
+                        s.wizard_recipe_a.clear();
+                        s.wizard_recipe_b.clear();
+                        s.wizard_recipe_c.clear();
                         s.wizard_accepted = false;
                         s.wizard_edit_mode = false;
+                        ensure_wizard_trio(&mut s);
                         sync_wizard_actions(&s);
                     }
                     set_wizard_status("Generating variant A…");
@@ -3511,6 +3517,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                 let mut s = state.borrow_mut();
                                 s.wizard_accepted = false;
                                 s.wizard_edit_mode = false;
+                                ensure_wizard_trio(&mut s);
                                 sync_wizard_actions(&s);
                             }
                             set_wizard_status("Select a variant and accept it to continue.");

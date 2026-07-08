@@ -30,8 +30,9 @@ use mapkeeper_core::build_state::{self, BUILD_STEP_LAND_SILHOUETTE};
 use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::land_mask::{
-    elevation_from_land_mask, generate_land_mask, normalize_kind, LayoutClass, LayoutCompareSet,
-    ShoreCharacter, LAND_MASK_INLAND_SEA, LAND_MASK_LAND, LAND_MASK_LAYER_ID, LAND_MASK_OCEAN,
+    elevation_from_land_mask, find_recipe, generate_land_mask, generate_land_mask_recipe,
+    normalize_kind, LayoutClass, ShoreCharacter, LAND_MASK_INLAND_SEA, LAND_MASK_LAND,
+    LAND_MASK_LAYER_ID, LAND_MASK_OCEAN,
 };
 use mapkeeper_core::layer::{
     Bounds, DenseLayer, DenseState, LayerCellWrite, LayerValue, MapManifest, ValueType,
@@ -155,12 +156,12 @@ struct BuildStateInput {
 
 #[derive(Deserialize)]
 struct LandMaskGenerateInput {
-    /// Optional explicit layout class; if omitted, resolved from compare_set + variant (D-62).
+    /// Explicit layout class (optional if recipe_id present).
     #[serde(default)]
     style: Option<String>,
-    /// `macro` (A/B/C = pangea/continents/archipelago) or `coastal` (island/…).
+    /// Recipe id from pattern bank (preferred).
     #[serde(default)]
-    compare_set: Option<String>,
+    recipe_id: Option<String>,
     #[serde(default)]
     character: Option<String>,
     #[serde(default)]
@@ -857,8 +858,8 @@ async fn put_build_state(
     }
 }
 
-/// world-pipeline--land-silhouette-v1 + step3-geo-variant-classes-v1 (D-62):
-/// generate step-3 `land_mask`; A/B/C map to different layout classes.
+/// world-pipeline--land-silhouette-v1 + step3-layout-pattern-bank-v1:
+/// generate step-3 `land_mask` from recipe bank (macroform) + shore character.
 async fn generate_land_mask_handler(
     State(state): State<Arc<Mutex<AppState>>>,
     Json(input): Json<LandMaskGenerateInput>,
@@ -871,7 +872,6 @@ async fn generate_land_mask_handler(
         (active.path.clone(), active.id.clone())
     };
     let bounds = map_bounds(&world_path);
-    let compare_set = LayoutCompareSet::parse(input.compare_set.as_deref().unwrap_or("macro"));
     let character = ShoreCharacter::parse(input.character.as_deref().unwrap_or("smooth"));
     let variant = input
         .variant
@@ -882,14 +882,34 @@ async fn generate_land_mask_handler(
         .next()
         .unwrap_or('A')
         .to_ascii_uppercase();
-    let style = if let Some(raw) = input.style.as_deref().filter(|s| !s.trim().is_empty()) {
-        LayoutClass::parse(raw)
-    } else {
-        compare_set.class_for_variant(variant)
-    };
     let nonce = input.regenerate_nonce.unwrap_or(0) as u64;
-    let seed = silhouette_seed(&world_id, style, character, variant, nonce);
-    let mask = generate_land_mask(&bounds, style, character, seed);
+    let recipe = input
+        .recipe_id
+        .as_deref()
+        .and_then(find_recipe);
+    let style = recipe
+        .map(|r| r.layout_class)
+        .or_else(|| {
+            input
+                .style
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .map(LayoutClass::parse)
+        })
+        .unwrap_or(LayoutClass::Pangea);
+    let seed = silhouette_seed(
+        &world_id,
+        style,
+        character,
+        variant,
+        nonce,
+        recipe.map(|r| r.id).unwrap_or(""),
+    );
+    let mask = if let Some(recipe) = recipe {
+        generate_land_mask_recipe(&bounds, recipe, character, seed)
+    } else {
+        generate_land_mask(&bounds, style, character, seed)
+    };
     let elevation = elevation_from_land_mask(&bounds, &mask);
     if let Err(err) = write_dense_layer(&world_path, &mask) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
@@ -1094,6 +1114,7 @@ fn silhouette_seed(
     character: ShoreCharacter,
     variant: char,
     regenerate_nonce: u64,
+    recipe_id: &str,
 ) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for b in world_id.bytes() {
@@ -1101,6 +1122,10 @@ fn silhouette_seed(
         hash = hash.wrapping_mul(0x100000001b3);
     }
     for b in style.id().bytes() {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    for b in recipe_id.bytes() {
         hash ^= b as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }

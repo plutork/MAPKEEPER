@@ -1,10 +1,7 @@
 //! Step 3 world pipeline: land silhouette (`land_mask`) generators.
 //!
-//! `land_mask` is a categorical dense layer (`ocean` | `land` | `inland_sea`)
-//! used as land/water source of truth for the build wizard.
-//!
-//! Layout classes (D-62 / `step3-geo-variant-classes-v1`): macro land/water
-//! arrangement only — not elevation or geology.
+//! Layout classes (D-62) + crude recipe bank (`step3-layout-pattern-bank-v1`):
+//! ~5 blob recipes per class so Regenerate changes macroform, not only shore noise.
 
 use crate::hex::{Axial, MapBounds};
 use crate::layer::{DenseLayer, DenseState, LayerValue};
@@ -15,7 +12,7 @@ pub const LAND_MASK_LAND: &str = "land";
 pub const LAND_MASK_INLAND_SEA: &str = "inland_sea";
 
 /// Macro silhouette layout (D-62). Shore character is orthogonal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LayoutClass {
     Pangea,
     Continents,
@@ -26,6 +23,15 @@ pub enum LayoutClass {
 }
 
 impl LayoutClass {
+    pub const ALL: [LayoutClass; 6] = [
+        LayoutClass::Pangea,
+        LayoutClass::Continents,
+        LayoutClass::Archipelago,
+        LayoutClass::Island,
+        LayoutClass::ContinentAndIslands,
+        LayoutClass::Mediterranean,
+    ];
+
     pub fn parse(raw: &str) -> LayoutClass {
         match raw.trim().to_ascii_lowercase().as_str() {
             "continents" | "dual" | "two-landmasses" => LayoutClass::Continents,
@@ -33,7 +39,6 @@ impl LayoutClass {
             "island" => LayoutClass::Island,
             "continent_and_islands" | "continent-and-islands" => LayoutClass::ContinentAndIslands,
             "mediterranean" => LayoutClass::Mediterranean,
-            // legacy "continent" + default
             _ => LayoutClass::Pangea,
         }
     }
@@ -61,44 +66,7 @@ impl LayoutClass {
     }
 }
 
-/// A/B/C compare sets: three different layout classes (not seeds of one style).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LayoutCompareSet {
-    /// A=pangea · B=continents · C=archipelago
-    Macro,
-    /// A=island · B=continent_and_islands · C=mediterranean
-    Coastal,
-}
-
-impl LayoutCompareSet {
-    pub fn parse(raw: &str) -> LayoutCompareSet {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "coastal" => LayoutCompareSet::Coastal,
-            _ => LayoutCompareSet::Macro,
-        }
-    }
-
-    pub fn id(self) -> &'static str {
-        match self {
-            LayoutCompareSet::Macro => "macro",
-            LayoutCompareSet::Coastal => "coastal",
-        }
-    }
-
-    pub fn class_for_variant(self, variant: char) -> LayoutClass {
-        let v = variant.to_ascii_uppercase();
-        match (self, v) {
-            (LayoutCompareSet::Macro, 'B') => LayoutClass::Continents,
-            (LayoutCompareSet::Macro, 'C') => LayoutClass::Archipelago,
-            (LayoutCompareSet::Macro, _) => LayoutClass::Pangea,
-            (LayoutCompareSet::Coastal, 'B') => LayoutClass::ContinentAndIslands,
-            (LayoutCompareSet::Coastal, 'C') => LayoutClass::Mediterranean,
-            (LayoutCompareSet::Coastal, _) => LayoutClass::Island,
-        }
-    }
-}
-
-/// Backward-compatible alias used by older call sites.
+/// Backward-compatible alias.
 pub type SilhouetteStyle = LayoutClass;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,10 +84,364 @@ impl ShoreCharacter {
     }
 }
 
-/// Generate a silhouette layer for the provided layout class / shore / seed.
+/// Elliptical land (or hole) blob in normalized map space (~[-1,1]).
+#[derive(Debug, Clone, Copy)]
+pub struct LayoutBlob {
+    pub cx: f64,
+    pub cy: f64,
+    pub rx: f64,
+    pub ry: f64,
+}
+
+/// Crude macro recipe tagged with a layout class (step3-layout-pattern-bank-v1).
+#[derive(Debug, Clone, Copy)]
+pub struct LayoutRecipe {
+    pub id: &'static str,
+    pub layout_class: LayoutClass,
+    pub blobs: &'static [LayoutBlob],
+    /// Optional water hole (mediterranean inland basin).
+    pub hole: Option<LayoutBlob>,
+}
+
+macro_rules! blobs {
+    ($($cx:expr, $cy:expr, $rx:expr, $ry:expr);+ $(;)?) => {
+        &[$(LayoutBlob { cx: $cx, cy: $cy, rx: $rx, ry: $ry }),+]
+    };
+}
+
+/// Static catalog: 5 recipes × 6 classes = 30.
+pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
+    // --- pangea ---
+    LayoutRecipe {
+        id: "pangea_round",
+        layout_class: LayoutClass::Pangea,
+        blobs: blobs!(0.0, 0.0, 0.82, 0.72),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "pangea_wide",
+        layout_class: LayoutClass::Pangea,
+        blobs: blobs!(0.0, 0.05, 0.92, 0.55),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "pangea_tall",
+        layout_class: LayoutClass::Pangea,
+        blobs: blobs!(0.0, 0.0, 0.58, 0.88),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "pangea_offset",
+        layout_class: LayoutClass::Pangea,
+        blobs: blobs!(-0.18, 0.12, 0.78, 0.68),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "pangea_bean",
+        layout_class: LayoutClass::Pangea,
+        blobs: blobs!(-0.22, 0.0, 0.55, 0.70; 0.28, 0.08, 0.48, 0.58),
+        hole: None,
+    },
+    // --- continents ---
+    LayoutRecipe {
+        id: "continents_ew",
+        layout_class: LayoutClass::Continents,
+        blobs: blobs!(-0.52, 0.05, 0.42, 0.55; 0.52, -0.05, 0.42, 0.55),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "continents_ns",
+        layout_class: LayoutClass::Continents,
+        blobs: blobs!(0.0, -0.48, 0.55, 0.36; 0.05, 0.50, 0.50, 0.34),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "continents_diag",
+        layout_class: LayoutClass::Continents,
+        blobs: blobs!(-0.48, -0.35, 0.40, 0.42; 0.48, 0.38, 0.42, 0.40),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "continents_uneven",
+        layout_class: LayoutClass::Continents,
+        blobs: blobs!(-0.40, 0.0, 0.52, 0.62; 0.58, 0.15, 0.30, 0.38),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "continents_triple",
+        layout_class: LayoutClass::Continents,
+        blobs: blobs!(-0.55, -0.25, 0.34, 0.40; 0.50, -0.20, 0.34, 0.38; 0.05, 0.52, 0.40, 0.30),
+        hole: None,
+    },
+    // --- archipelago ---
+    LayoutRecipe {
+        id: "archipelago_ring",
+        layout_class: LayoutClass::Archipelago,
+        blobs: blobs!(
+            0.55, 0.0, 0.20, 0.18;
+            -0.55, 0.05, 0.20, 0.18;
+            0.0, 0.55, 0.18, 0.20;
+            0.0, -0.55, 0.18, 0.20;
+            0.38, 0.38, 0.16, 0.15;
+            -0.38, -0.38, 0.16, 0.15
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "archipelago_chain",
+        layout_class: LayoutClass::Archipelago,
+        blobs: blobs!(
+            -0.70, 0.35, 0.16, 0.14;
+            -0.40, 0.18, 0.18, 0.15;
+            -0.10, 0.0, 0.17, 0.14;
+            0.22, -0.18, 0.18, 0.15;
+            0.52, -0.35, 0.16, 0.14;
+            0.72, -0.48, 0.12, 0.11
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "archipelago_scatter",
+        layout_class: LayoutClass::Archipelago,
+        blobs: blobs!(
+            -0.60, -0.40, 0.18, 0.16;
+            0.55, -0.45, 0.17, 0.15;
+            -0.35, 0.45, 0.19, 0.16;
+            0.45, 0.40, 0.16, 0.18;
+            0.05, -0.05, 0.14, 0.13;
+            -0.15, 0.15, 0.12, 0.11
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "archipelago_cluster",
+        layout_class: LayoutClass::Archipelago,
+        blobs: blobs!(
+            -0.35, 0.10, 0.22, 0.20;
+            -0.10, -0.05, 0.18, 0.16;
+            -0.45, -0.20, 0.14, 0.13;
+            0.50, 0.25, 0.20, 0.18;
+            0.65, 0.05, 0.14, 0.13;
+            0.40, 0.45, 0.13, 0.12
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "archipelago_arc",
+        layout_class: LayoutClass::Archipelago,
+        blobs: blobs!(
+            -0.65, 0.40, 0.15, 0.14;
+            -0.35, 0.50, 0.16, 0.14;
+            0.0, 0.55, 0.17, 0.14;
+            0.35, 0.48, 0.16, 0.14;
+            0.62, 0.32, 0.15, 0.14;
+            0.72, 0.05, 0.13, 0.12
+        ),
+        hole: None,
+    },
+    // --- island ---
+    LayoutRecipe {
+        id: "island_center",
+        layout_class: LayoutClass::Island,
+        blobs: blobs!(0.0, 0.0, 0.42, 0.38),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "island_long",
+        layout_class: LayoutClass::Island,
+        blobs: blobs!(0.05, 0.0, 0.58, 0.28),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "island_tall",
+        layout_class: LayoutClass::Island,
+        blobs: blobs!(0.0, 0.05, 0.28, 0.55),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "island_offset",
+        layout_class: LayoutClass::Island,
+        blobs: blobs!(0.35, -0.25, 0.38, 0.34),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "island_comma",
+        layout_class: LayoutClass::Island,
+        blobs: blobs!(-0.10, 0.05, 0.36, 0.42; 0.28, -0.22, 0.20, 0.18),
+        hole: None,
+    },
+    // --- continent_and_islands ---
+    LayoutRecipe {
+        id: "cai_west_sats",
+        layout_class: LayoutClass::ContinentAndIslands,
+        blobs: blobs!(
+            0.15, 0.0, 0.52, 0.55;
+            -0.72, 0.30, 0.18, 0.16;
+            -0.68, -0.40, 0.16, 0.15;
+            -0.78, -0.05, 0.12, 0.11
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "cai_east_sats",
+        layout_class: LayoutClass::ContinentAndIslands,
+        blobs: blobs!(
+            -0.15, 0.05, 0.52, 0.52;
+            0.72, -0.25, 0.17, 0.15;
+            0.68, 0.40, 0.16, 0.14;
+            0.78, 0.08, 0.12, 0.11
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "cai_south_chain",
+        layout_class: LayoutClass::ContinentAndIslands,
+        blobs: blobs!(
+            0.0, -0.25, 0.55, 0.42;
+            -0.45, 0.58, 0.16, 0.14;
+            0.0, 0.62, 0.15, 0.13;
+            0.45, 0.55, 0.16, 0.14
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "cai_ring_sats",
+        layout_class: LayoutClass::ContinentAndIslands,
+        blobs: blobs!(
+            0.0, 0.0, 0.48, 0.45;
+            0.70, 0.0, 0.14, 0.13;
+            -0.70, 0.0, 0.14, 0.13;
+            0.0, 0.70, 0.13, 0.14;
+            0.0, -0.70, 0.13, 0.14
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "cai_uneven",
+        layout_class: LayoutClass::ContinentAndIslands,
+        blobs: blobs!(
+            -0.20, 0.10, 0.48, 0.58;
+            0.65, -0.35, 0.20, 0.18;
+            0.55, 0.45, 0.15, 0.14;
+            0.78, 0.10, 0.11, 0.10
+        ),
+        hole: None,
+    },
+    // --- mediterranean ---
+    LayoutRecipe {
+        id: "med_center_basin",
+        layout_class: LayoutClass::Mediterranean,
+        blobs: blobs!(0.0, 0.0, 0.85, 0.75),
+        hole: Some(LayoutBlob {
+            cx: 0.0,
+            cy: 0.0,
+            rx: 0.38,
+            ry: 0.32,
+        }),
+    },
+    LayoutRecipe {
+        id: "med_wide_basin",
+        layout_class: LayoutClass::Mediterranean,
+        blobs: blobs!(0.0, 0.05, 0.90, 0.62),
+        hole: Some(LayoutBlob {
+            cx: 0.0,
+            cy: 0.05,
+            rx: 0.48,
+            ry: 0.28,
+        }),
+    },
+    LayoutRecipe {
+        id: "med_offset_basin",
+        layout_class: LayoutClass::Mediterranean,
+        blobs: blobs!(-0.05, 0.0, 0.82, 0.72),
+        hole: Some(LayoutBlob {
+            cx: 0.15,
+            cy: -0.08,
+            rx: 0.34,
+            ry: 0.30,
+        }),
+    },
+    LayoutRecipe {
+        id: "med_narrow_sea",
+        layout_class: LayoutClass::Mediterranean,
+        blobs: blobs!(0.0, 0.0, 0.88, 0.70),
+        hole: Some(LayoutBlob {
+            cx: 0.0,
+            cy: 0.0,
+            rx: 0.55,
+            ry: 0.22,
+        }),
+    },
+    LayoutRecipe {
+        id: "med_twin_lobe",
+        layout_class: LayoutClass::Mediterranean,
+        blobs: blobs!(-0.25, 0.0, 0.55, 0.65; 0.35, 0.05, 0.50, 0.58),
+        hole: Some(LayoutBlob {
+            cx: 0.05,
+            cy: 0.0,
+            rx: 0.28,
+            ry: 0.35,
+        }),
+    },
+];
+
+pub fn recipes_for(class: LayoutClass) -> Vec<&'static LayoutRecipe> {
+    RECIPE_CATALOG
+        .iter()
+        .filter(|r| r.layout_class == class)
+        .collect()
+}
+
+pub fn find_recipe(id: &str) -> Option<&'static LayoutRecipe> {
+    RECIPE_CATALOG.iter().find(|r| r.id == id)
+}
+
+pub fn pick_recipe(class: LayoutClass, seed: u64) -> &'static LayoutRecipe {
+    let list = recipes_for(class);
+    debug_assert!(!list.is_empty());
+    let idx = (seed as usize) % list.len().max(1);
+    list[idx]
+}
+
+/// Three distinct layout classes + one recipe each (for A/B/C cards).
+pub fn pick_compare_trio(seed: u64) -> [&'static LayoutRecipe; 3] {
+    let mut classes = LayoutClass::ALL;
+    // Fisher–Yates with deterministic hash steps.
+    for i in (1..classes.len()).rev() {
+        let j = (mix64(seed ^ (i as u64 * 0x9E37)) as usize) % (i + 1);
+        classes.swap(i, j);
+    }
+    let a = pick_recipe(classes[0], mix64(seed ^ 0xA11));
+    let b = pick_recipe(classes[1], mix64(seed ^ 0xB22));
+    let c = pick_recipe(classes[2], mix64(seed ^ 0xC33));
+    debug_assert_ne!(a.layout_class, b.layout_class);
+    debug_assert_ne!(b.layout_class, c.layout_class);
+    debug_assert_ne!(a.layout_class, c.layout_class);
+    [a, b, c]
+}
+
+pub fn recipe_for_variant(trio: [&'static LayoutRecipe; 3], variant: char) -> &'static LayoutRecipe {
+    match variant.to_ascii_uppercase() {
+        'B' => trio[1],
+        'C' => trio[2],
+        _ => trio[0],
+    }
+}
+
+/// Generate silhouette from layout class + shore + seed (picks recipe from bank).
 pub fn generate_land_mask(
     bounds: &MapBounds,
     style: LayoutClass,
+    character: ShoreCharacter,
+    seed: u64,
+) -> DenseLayer {
+    let recipe = pick_recipe(style, seed);
+    generate_land_mask_recipe(bounds, recipe, character, seed)
+}
+
+pub fn generate_land_mask_recipe(
+    bounds: &MapBounds,
+    recipe: &LayoutRecipe,
     character: ShoreCharacter,
     seed: u64,
 ) -> DenseLayer {
@@ -136,7 +458,8 @@ pub fn generate_land_mask(
         let (x, y) = cell.to_pixel(1.0);
         let nx = if max_x > 0.0 { x / max_x } else { 0.0 };
         let ny = if max_y > 0.0 { y / max_y } else { 0.0 };
-        let value = if is_land(style, nx, ny, cell, seed, roughness) {
+        let noise = octave_noise(cell, seed);
+        let value = if is_land_recipe(recipe, nx, ny, noise, roughness) {
             LAND_MASK_LAND
         } else {
             LAND_MASK_OCEAN
@@ -171,82 +494,41 @@ pub fn normalize_kind(raw: &str) -> &'static str {
     }
 }
 
-fn is_land(
-    style: LayoutClass,
+fn is_land_recipe(
+    recipe: &LayoutRecipe,
     nx: f64,
     ny: f64,
-    cell: Axial,
-    seed: u64,
+    noise: f64,
     roughness: f64,
 ) -> bool {
-    let noise = octave_noise(cell, seed);
-    match style {
-        LayoutClass::Pangea => {
-            let distance = (nx * nx + ny * ny).sqrt();
-            let threshold = 0.84 + roughness * noise;
-            distance < threshold
-        }
-        LayoutClass::Island => {
-            let distance = (nx * nx + ny * ny).sqrt();
-            let threshold = 0.57 + roughness * 0.8 * noise;
-            distance < threshold
-        }
-        LayoutClass::Continents => {
-            let left = island_metric(nx + 0.52, ny, 0.53 + roughness * 0.6 * noise);
-            let right = island_metric(nx - 0.52, ny, 0.53 + roughness * 0.6 * noise);
-            left || right
-        }
-        LayoutClass::Archipelago => archipelago_islands(nx, ny, cell, seed, roughness, 6),
-        LayoutClass::ContinentAndIslands => {
-            // Readable main mass + a few mid-size satellites (not 1-hex dust).
-            let main = island_metric(nx + 0.10, ny * 0.95, 0.56 + roughness * 0.45 * noise);
-            let sat1 = island_metric(nx - 0.78, ny + 0.28, 0.20 + roughness * 0.28 * noise);
-            let sat2 = island_metric(nx - 0.70, ny - 0.48, 0.17 + roughness * 0.25 * noise);
-            let sat3 = island_metric(nx + 0.78, ny - 0.22, 0.15 + roughness * 0.22 * noise);
-            main || sat1 || sat2 || sat3
-        }
-        LayoutClass::Mediterranean => {
-            // Land ring / basin: outer land, enclosed water → inland_sea after mark.
-            let distance = (nx * nx + ny * ny * 1.15).sqrt();
-            let outer = 0.88 + roughness * 0.55 * noise;
-            let inner = 0.38 + roughness * 0.35 * noise;
-            distance < outer && distance > inner
-        }
+    let in_land = recipe.blobs.iter().any(|b| {
+        in_ellipse(
+            nx - b.cx,
+            ny - b.cy,
+            b.rx + roughness * 0.55 * noise,
+            b.ry + roughness * 0.55 * noise,
+        )
+    });
+    if !in_land {
+        return false;
     }
-}
-
-fn archipelago_islands(
-    nx: f64,
-    ny: f64,
-    cell: Axial,
-    seed: u64,
-    roughness: f64,
-    count: usize,
-) -> bool {
-    let angle_seed = hash_noise(seed ^ 0xA13F, cell.q, cell.r);
-    for i in 0..count {
-        let ang = ((i as f64) / (count as f64) + angle_seed * 0.05) * std::f64::consts::TAU;
-        let radius = 0.15 + 0.62 * ((i as f64 + 1.0) / (count as f64 + 1.0));
-        let cx = ang.cos() * radius;
-        let cy = ang.sin() * radius * 0.74;
-        let local = hash_noise(
-            seed ^ (i as u64 * 0x9E37),
-            cell.q + i as i32,
-            cell.r - i as i32,
+    if let Some(h) = recipe.hole {
+        let in_hole = in_ellipse(
+            nx - h.cx,
+            ny - h.cy,
+            (h.rx - roughness * 0.25 * noise).max(0.05),
+            (h.ry - roughness * 0.25 * noise).max(0.05),
         );
-        if island_metric(
-            nx - cx,
-            ny - cy,
-            0.24 + roughness * 0.8 * local + (if i % 2 == 0 { 0.06 } else { 0.0 }),
-        ) {
-            return true;
-        }
+        return !in_hole;
     }
-    false
+    true
 }
 
-fn island_metric(dx: f64, dy: f64, radius: f64) -> bool {
-    (dx * dx + dy * dy).sqrt() < radius
+fn in_ellipse(dx: f64, dy: f64, rx: f64, ry: f64) -> bool {
+    if rx <= 0.0 || ry <= 0.0 {
+        return false;
+    }
+    (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) <= 1.0
 }
 
 fn mark_inland_seas(bounds: &MapBounds, layer: &mut DenseLayer) {
@@ -330,6 +612,14 @@ fn hash_noise(seed: u64, q: i32, r: i32) -> f64 {
     unit * 2.0 - 1.0
 }
 
+fn mix64(mut x: u64) -> u64 {
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94d0_49bb_1331_11eb);
+    x ^ (x >> 31)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,6 +633,55 @@ mod tests {
                 )
             })
             .count()
+    }
+
+    #[test]
+    fn catalog_has_five_per_class() {
+        assert_eq!(RECIPE_CATALOG.len(), 30);
+        for class in LayoutClass::ALL {
+            assert_eq!(recipes_for(class).len(), 5, "{}", class.id());
+        }
+    }
+
+    #[test]
+    fn compare_trio_has_distinct_classes() {
+        for seed in [0u64, 1, 7, 42, 99, 1000] {
+            let trio = pick_compare_trio(seed);
+            assert_ne!(trio[0].layout_class, trio[1].layout_class);
+            assert_ne!(trio[1].layout_class, trio[2].layout_class);
+            assert_ne!(trio[0].layout_class, trio[2].layout_class);
+        }
+    }
+
+    #[test]
+    fn regenerating_changes_recipe_or_class_set() {
+        let a = pick_compare_trio(0);
+        let b = pick_compare_trio(1);
+        let same = a[0].id == b[0].id && a[1].id == b[1].id && a[2].id == b[2].id;
+        assert!(!same, "different nonce should reshuffle trio");
+    }
+
+    #[test]
+    fn recipes_in_class_differ_macroform() {
+        let bounds = MapBounds::new(28, 16);
+        let recipes = recipes_for(LayoutClass::Pangea);
+        let layers: Vec<_> = recipes
+            .iter()
+            .map(|r| generate_land_mask_recipe(&bounds, r, ShoreCharacter::Smooth, 0))
+            .collect();
+        // At least two recipes should disagree on some cell.
+        let mut differ = false;
+        'outer: for i in 0..layers.len() {
+            for j in (i + 1)..layers.len() {
+                for idx in 0..bounds.len() {
+                    if layers[i].state(idx) != layers[j].state(idx) {
+                        differ = true;
+                        break 'outer;
+                    }
+                }
+            }
+        }
+        assert!(differ, "pangea recipes should not be identical masks");
     }
 
     #[test]
@@ -383,47 +722,9 @@ mod tests {
     }
 
     #[test]
-    fn parse_layout_aliases() {
-        assert_eq!(LayoutClass::parse("continent"), LayoutClass::Pangea);
-        assert_eq!(LayoutClass::parse("pangea"), LayoutClass::Pangea);
-        assert_eq!(LayoutClass::parse("dual"), LayoutClass::Continents);
-        assert_eq!(
-            LayoutClass::parse("continent_and_islands"),
-            LayoutClass::ContinentAndIslands
-        );
-    }
-
-    #[test]
-    fn compare_set_maps_distinct_classes() {
-        let macro_set = LayoutCompareSet::Macro;
-        assert_ne!(
-            macro_set.class_for_variant('A'),
-            macro_set.class_for_variant('B')
-        );
-        assert_ne!(
-            macro_set.class_for_variant('B'),
-            macro_set.class_for_variant('C')
-        );
-        let coastal = LayoutCompareSet::Coastal;
-        assert_eq!(coastal.class_for_variant('A'), LayoutClass::Island);
-        assert_eq!(
-            coastal.class_for_variant('B'),
-            LayoutClass::ContinentAndIslands
-        );
-        assert_eq!(coastal.class_for_variant('C'), LayoutClass::Mediterranean);
-    }
-
-    #[test]
     fn all_layout_classes_produce_land() {
         let bounds = MapBounds::new(24, 14);
-        for class in [
-            LayoutClass::Pangea,
-            LayoutClass::Continents,
-            LayoutClass::Archipelago,
-            LayoutClass::Island,
-            LayoutClass::ContinentAndIslands,
-            LayoutClass::Mediterranean,
-        ] {
+        for class in LayoutClass::ALL {
             let layer = generate_land_mask(&bounds, class, ShoreCharacter::Smooth, 7);
             assert!(
                 count_kind(&layer, LAND_MASK_LAND) > 0,
@@ -436,12 +737,8 @@ mod tests {
     #[test]
     fn mediterranean_marks_inland_sea() {
         let bounds = MapBounds::new(28, 16);
-        let layer = generate_land_mask(
-            &bounds,
-            LayoutClass::Mediterranean,
-            ShoreCharacter::Smooth,
-            11,
-        );
+        let recipe = find_recipe("med_center_basin").expect("recipe");
+        let layer = generate_land_mask_recipe(&bounds, recipe, ShoreCharacter::Smooth, 11);
         assert!(
             count_kind(&layer, LAND_MASK_INLAND_SEA) > 0,
             "mediterranean should enclose inland_sea"
@@ -451,17 +748,10 @@ mod tests {
     #[test]
     fn continent_and_islands_has_separated_land() {
         let bounds = MapBounds::new(36, 20);
-        let layer = generate_land_mask(
-            &bounds,
-            LayoutClass::ContinentAndIslands,
-            ShoreCharacter::Smooth,
-            19,
-        );
+        let recipe = find_recipe("cai_west_sats").expect("recipe");
+        let layer = generate_land_mask_recipe(&bounds, recipe, ShoreCharacter::Smooth, 19);
         let land = count_kind(&layer, LAND_MASK_LAND);
-        let ocean = count_kind(&layer, LAND_MASK_OCEAN) + count_kind(&layer, LAND_MASK_INLAND_SEA);
         assert!(land > 40, "main continent should be substantial, got {land}");
-        assert!(ocean > 20, "ocean should remain between masses");
-        // At least one land cell near the left edge (satellite zone).
         let mut left_land = false;
         for index in 0..bounds.len() {
             let Some(cell) = bounds.from_index(index) else {

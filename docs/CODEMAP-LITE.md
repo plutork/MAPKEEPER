@@ -12,7 +12,7 @@ Use this first, then open only the needed files.
 - Map state model (dense layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
 - Cell index (`(q,r) <-> linear index`, `MapBounds::index_of`/`from_index`/`len`) -> `crates/core/src/hex.rs`
 - Dense typed-layer model (index-addressed, palette categorical + integer; `read_or_empty`; generic wire `WireCellState`/`LayerCellWrite`) -> `crates/core/src/layer.rs` (`DenseLayer`)
-- Step-3 silhouette model (`land_mask`, six layout classes D-62, shore character, inland sea, elevation sync) -> `crates/core/src/land_mask.rs` (`world-pipeline--land-silhouette-v1`, `step3-geo-variant-classes-v1`)
+- Step-3 silhouette model (`land_mask`, six layout classes + 30-recipe pattern bank, shore character, inland sea, elevation sync) -> `crates/core/src/land_mask.rs` (`world-pipeline--land-silhouette-v1`, `step3-geo-variant-classes-v1`, `step3-layout-pattern-bank-v1`)
 - Elevation/hydro threshold model (`elevation <= 0 => water`) + stamp falloff math -> `crates/core/src/hydro.rs` (`elevation-authoring-v2`: `filled_elevation_layer`, `stamp_delta`)
 - River catalog + `river_id` dense sync (`map/rivers.json`, neighbor chain validation) -> `crates/core/src/rivers.rs` (`river-overlay-layer-v1`, D-54)
 - Elevation-driven river auto-generation (flux, depression fill, confluence, `parent`/`basin`) -> `crates/core/src/river_flux.rs` (`rivers-auto-from-elevation-v1`, D-55)
@@ -37,7 +37,7 @@ Use this first, then open only the needed files.
 - Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, list `build_draft`/`build_step`) -> `crates/server/src/lib.rs` (D-59)
 - Build wizard step-3 API (`POST /api/build/land-mask/generate`, `PUT /api/build/land-mask/cells`) -> `crates/server/src/lib.rs` (`world-pipeline--land-silhouette-v1`)
 - World Build Wizard shell (D-57 + D-59 draft resume): Home **Build World**, fullscreen overlay, Save Draft / wizard resume -> `crates/web/index.html`, `crates/web/src/lib.rs`
-- World Build Wizard step 3 controls (ordered blocks 1..4; compare-set Macro/Coastal; A/B/C = different layout classes; shore orthogonal; Continue only) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`step3-land-silhouette-flow-v2`, `step3-geo-variant-classes-v1`)
+- World Build Wizard step 3 controls (ordered blocks 1..4; A/B/C = distinct layout classes + recipes; Regenerate reshuffles trio; shore orthogonal; Continue only) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`step3-land-silhouette-flow-v2`, `step3-geo-variant-classes-v1`, `step3-layout-pattern-bank-v1`)
 - World scaffold source -> `toolchain/template/world/`
 - CI/build behavior -> `.github/workflows/`
 
