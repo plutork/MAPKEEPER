@@ -297,11 +297,10 @@
   #editor.wizard-active {
     display: grid;
     grid-template-columns: minmax(168px, 200px) 1fr minmax(240px, 280px);
-    grid-template-rows: 48px 1fr auto;
+    grid-template-rows: 48px 1fr;
     grid-template-areas:
       "wiz-top wiz-top wiz-top"
-      "wiz-left map wiz-right"
-      "wiz-bottom wiz-bottom wiz-bottom";
+      "wiz-left map wiz-right";
     height: 100vh;
     width: 100%;
     position: relative;
@@ -437,17 +436,30 @@
     color: #eafff5;
   }
   .wiz-bottom {
-    grid-area: wiz-bottom;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    margin-top: auto;
+    padding-top: 12px;
+    background: transparent;
+    border-top: 1px solid #2a2f36;
+  }
+  .wiz-bottom .wiz-btn-row {
+    justify-content: flex-end;
+    width: 100%;
+  }
+  .wiz-bottom .wiz-label { margin-right: 0; align-self: center; }
+  .wiz-bottom-variants {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
-    padding: 10px 12px;
-    background: rgba(22, 26, 29, 0.97);
-    border-top: 1px solid #2a2f36;
-    z-index: 25;
   }
-  .wiz-bottom .wiz-label { margin-right: 4px; }
+  .wiz-bottom-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
   .wiz-variant-btn {
     min-width: 36px;
     padding: 8px 12px;
@@ -702,19 +714,23 @@
           <button id="wiz-edit-land" class="wiz-style-btn active" type="button" data-wiz-edit-brush="land">Land</button>
           <button id="wiz-edit-ocean" class="wiz-style-btn" type="button" data-wiz-edit-brush="ocean">Ocean</button>
         </div>
+        <footer class="wiz-bottom">
+          <div class="wiz-btn-row wiz-bottom-variants">
+            <span class="wiz-label">Variants</span>
+            <div id="wiz-variants" class="wiz-btn-row">
+              <button id="wiz-variant-a" class="wiz-variant-btn active" type="button" data-wiz-variant="A">A</button>
+              <button id="wiz-variant-b" class="wiz-variant-btn" type="button" data-wiz-variant="B">B</button>
+              <button id="wiz-variant-c" class="wiz-variant-btn" type="button" data-wiz-variant="C">C</button>
+            </div>
+          </div>
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-regenerate" class="wiz-action-btn" type="button">Regenerate</button>
+            <button id="wiz-accept" class="wiz-action-btn" type="button">Accept</button>
+            <button id="wiz-edit" class="wiz-action-btn wiz-disabled" type="button" disabled>Edit</button>
+            <button id="wiz-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
+          </div>
+        </footer>
       </aside>
-      <footer class="wiz-bottom">
-        <span class="wiz-label">Variants</span>
-        <div id="wiz-variants" class="wiz-btn-row">
-          <button id="wiz-variant-a" class="wiz-variant-btn active" type="button" data-wiz-variant="A">A</button>
-          <button id="wiz-variant-b" class="wiz-variant-btn" type="button" data-wiz-variant="B">B</button>
-          <button id="wiz-variant-c" class="wiz-variant-btn" type="button" data-wiz-variant="C">C</button>
-        </div>
-        <button id="wiz-regenerate" class="wiz-action-btn" type="button">Regenerate</button>
-        <button id="wiz-accept" class="wiz-action-btn" type="button">Accept</button>
-        <button id="wiz-edit" class="wiz-action-btn wiz-disabled" type="button" disabled>Edit</button>
-        <button id="wiz-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
-      </footer>
     </div>
   </div>
 

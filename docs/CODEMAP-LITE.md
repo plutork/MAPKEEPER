@@ -36,7 +36,7 @@ Use this first, then open only the needed files.
 - Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, list `build_draft`/`build_step`) -> `crates/server/src/lib.rs` (D-59)
 - Build wizard step-3 API (`POST /api/build/land-mask/generate`, `PUT /api/build/land-mask/cells`) -> `crates/server/src/lib.rs` (`world-pipeline--land-silhouette-v1`)
 - World Build Wizard shell (D-57 + D-59 draft resume): Home **Build World**, fullscreen overlay, Save Draft / wizard resume -> `crates/web/index.html`, `crates/web/src/lib.rs`
-- World Build Wizard step 3 controls (A/B/C, regenerate, accept/edit/finish) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`world-pipeline--land-silhouette-v1`)
+- World Build Wizard step 3 controls (A/B/C, regenerate, accept/edit/finish; action block sits in right panel) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`world-pipeline--land-silhouette-v1`)
 - World scaffold source -> `toolchain/template/world/`
 - CI/build behavior -> `.github/workflows/`
 
