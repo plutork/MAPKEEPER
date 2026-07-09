@@ -1096,6 +1096,45 @@ async fn apply_wizard_preset_if_needed(state: Rc<RefCell<AppState>>, preset: &st
     set_wizard_status("Map size updated. Blank grid ready.");
     true
 }
+
+/// D-69: navigate back one Geo step (3→2→1, 4→3, 5→4). Size change still via step 1 preset.
+async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
+    let from = state.borrow().wizard_step;
+    let to = match from {
+        5 => 4,
+        4 => 3,
+        3 | 2 => from.saturating_sub(1).max(1),
+        _ => 1,
+    };
+    if !persist_build_draft(to).await {
+        set_wizard_status("Could not go back.");
+        return;
+    }
+    {
+        let mut s = state.borrow_mut();
+        s.wizard_step = to;
+        s.wizard_edit_mode = false;
+        if to <= 2 {
+            s.show_grid = true;
+            if let Some(id) = preset_id_for_bounds(&s.map_bounds) {
+                set_select_value("wiz-preset", id);
+            }
+            sync_preset_size_warning("wiz-preset", "wiz-preset-warn");
+        }
+        sync_wizard_actions(&s);
+    }
+    schedule_redraw(state.clone());
+    match to {
+        1 => set_wizard_status(
+            "Map size — change preset to resize (resets Geo if you already generated land).",
+        ),
+        2 => set_wizard_status("Grid preview — Back to size, or Continue to silhouette."),
+        3 => set_wizard_status("Land silhouette — Back to grid/size if the map is too large/small."),
+        4 => set_wizard_status("Tectonics — Back returns to silhouette."),
+        _ => {}
+    }
+}
+
 fn set_wizard_active(active: bool) {
     let Some(editor) = document().get_element_by_id("editor") else {
         return;
@@ -1667,12 +1706,33 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let _ = persist_build_draft(1).await;
-                let mut s = state.borrow_mut();
-                s.wizard_step = 1;
-                sync_wizard_actions(&s);
+                {
+                    let mut s = state.borrow_mut();
+                    s.wizard_step = 1;
+                    s.show_grid = true;
+                    if let Some(id) = preset_id_for_bounds(&s.map_bounds) {
+                        set_select_value("wiz-preset", id);
+                    }
+                    sync_preset_size_warning("wiz-preset", "wiz-preset-warn");
+                    sync_wizard_actions(&s);
+                }
+                schedule_redraw(state);
+                set_wizard_status(
+                    "Map size — change preset to resize (resets Geo if you already generated land).",
+                );
             });
         });
         if let Some(btn) = document().get_element_by_id("wiz-grid-back") {
+            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    for back_id in ["wiz-sil-back", "wiz-geo-back", "wiz-elev-back"] {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            wasm_bindgen_futures::spawn_local(wizard_go_back_one_step(state.clone()));
+        });
+        if let Some(btn) = document().get_element_by_id(back_id) {
             let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
         closure.forget();
