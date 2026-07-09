@@ -1,9 +1,12 @@
 //! World build wizard draft state in `mapkeeper.toml` (D-59, home-build-draft-v1).
+//! Steps 1–2 = size/grid (D-69 wizard-size-grid-step); 3–5 = Geo.
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+pub const BUILD_STEP_SIZE: u32 = 1;
+pub const BUILD_STEP_GRID: u32 = 2;
 pub const BUILD_STEP_LAND_SILHOUETTE: u32 = 3;
 pub const BUILD_STEP_TECTONICS: u32 = 4;
 pub const BUILD_STEP_ELEVATION: u32 = 5;
@@ -62,7 +65,7 @@ pub fn clear_build(world_path: &Path) -> Result<(), String> {
 pub fn manifest_toml_with_build(world_id: &str, draft: bool) -> String {
     if draft {
         format!(
-            "# mapkeeper world project\n\n[world]\nid = \"{world_id}\"\nname = \"{world_id}\"\nversion = \"0.1.0\"\n\n[build]\nstatus = \"draft\"\nstep = {BUILD_STEP_LAND_SILHOUETTE}\n"
+            "# mapkeeper world project\n\n[world]\nid = \"{world_id}\"\nname = \"{world_id}\"\nversion = \"0.1.0\"\n\n[build]\nstatus = \"draft\"\nstep = {BUILD_STEP_SIZE}\n"
         )
     } else {
         crate::world::manifest_toml(world_id)
@@ -86,7 +89,7 @@ mod tests {
         .unwrap();
         let b = read_build(&dir).unwrap();
         assert!(is_draft(&b));
-        assert_eq!(b.step, BUILD_STEP_LAND_SILHOUETTE);
+        assert_eq!(b.step, BUILD_STEP_SIZE);
         clear_build(&dir).unwrap();
         assert!(read_build(&dir).is_none());
         let _ = fs::remove_dir_all(&dir);

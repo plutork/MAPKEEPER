@@ -34,11 +34,11 @@ Use this first, then open only the needed files.
 - Desktop launch defaults (maximized on startup) -> `crates/desktop/src/lib.rs` (`desktop-maximized-default-launch`)
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
 - River dogfood fixture worlds (Small elevation presets) -> `fixtures/worlds/` (`river-dogfood-fixture-worlds`; maintainer/CI — no Home UI per D-59)
-- Build wizard draft state (`[build]` in `mapkeeper.toml`, read/write/clear) -> `crates/core/src/build_state.rs` (`home-build-draft-v1`, D-59)
-- Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, list `build_draft`/`build_step`) -> `crates/server/src/lib.rs` (D-59)
-- Build wizard step-3/4/5 API (`POST /api/build/land-mask/generate` returns seed identity JSON, `PUT /api/build/land-mask/cells`, `POST /api/build/geology/generate`, `POST /api/build/elevation/generate`) -> `crates/server/src/lib.rs` (`world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`, D-68)
-- World Build Wizard shell (D-57 + D-59 draft resume): Home **Build World**, fullscreen overlay, Save Draft / wizard resume -> `crates/web/index.html`, `crates/web/src/lib.rs`
-- World Build Wizard steps 3–5 (silhouette → tectonics tint → elevation generate → Finish; step 3 shows class/recipe/shore/nonce/seed under Regenerate) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`step3-land-silhouette-flow-v2`, D-65/D-66/D-68 picker + organic growth + gen identity, `world-pipeline--tectonics-v1`)
+- Build wizard draft state (`[build]` in `mapkeeper.toml`, steps 1–5, read/write/clear) -> `crates/core/src/build_state.rs` (`home-build-draft-v1`, D-59, D-69)
+- Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, `PUT /api/build/bounds`, list `build_draft`/`build_step`) -> `crates/server/src/lib.rs` (D-59, D-69)
+- Build wizard step-1–5 API (`PUT /api/build/bounds` preset rewrite + Geo reset; `POST /api/build/land-mask/generate` returns seed identity JSON; land-mask cells; geology/elevation generate) -> `crates/server/src/lib.rs` (`wizard-size-grid-step`, `world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`, D-68/D-69)
+- World Build Wizard shell (D-57 + D-59 draft resume + D-69 size/grid before Geo): Home **Build World**, fullscreen overlay, Save Draft / wizard resume -> `crates/web/index.html`, `crates/web/src/lib.rs`
+- World Build Wizard steps 1–5 (size/grid blank preview → silhouette → tectonics → elevation → Finish; step 3 gen identity under Regenerate) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`wizard-size-grid-step`, `step3-land-silhouette-flow-v2`, D-65/D-66/D-68/D-69, `world-pipeline--tectonics-v1`)
 - World scaffold source -> `toolchain/template/world/`
 - CI/build behavior -> `.github/workflows/`
 

@@ -430,6 +430,7 @@
   }
   .wiz-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .wiz-btn-row.hidden { display: none; }
+  #wiz-panel-step1.hidden, #wiz-panel-step2.hidden,
   #wiz-panel-step4.hidden, #wiz-panel-step5.hidden, #wiz-panel-step3.hidden { display: none; }
   .wiz-section {
     display: flex;
@@ -699,9 +700,9 @@
         <div class="wiz-group expanded">
           <button type="button" class="wiz-group-head" data-wiz-group="geo">&#9660; Geo</button>
           <ul class="wiz-steps">
-            <li class="wiz-step done">1 &middot; Size &amp; shape</li>
-            <li class="wiz-step done">2 &middot; Grid</li>
-            <li class="wiz-step active">3 &middot; Land silhouette</li>
+            <li class="wiz-step active">1 &middot; Size &amp; shape</li>
+            <li class="wiz-step locked">2 &middot; Grid</li>
+            <li class="wiz-step locked">3 &middot; Land silhouette</li>
             <li class="wiz-step locked">4 &middot; Tectonics</li>
             <li class="wiz-step locked">5 &middot; Elevation</li>
             <li class="wiz-step locked">6 &middot; Coasts</li>
@@ -715,7 +716,42 @@
         <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Validation</button></div>
       </nav>
       <aside class="wiz-right">
-        <div id="wiz-panel-step3">
+        <div id="wiz-panel-step1">
+          <h2>Map size</h2>
+          <p class="wiz-hint">Confirm the hex map size on a blank grid before generating land.</p>
+          <section class="wiz-section">
+            <p class="wiz-label">Preset</p>
+            <select id="wiz-preset">
+              <option value="small">Small (~112 cells)</option>
+              <option value="medium">Medium (~1,032 cells)</option>
+              <option value="large">Large (~7,722 cells)</option>
+              <option value="epic">Epic (~30,523 cells)</option>
+              <option value="grand">Grand (~50,232 cells)</option>
+              <option value="world">World (~99,777 cells, not stable)</option>
+            </select>
+            <p id="wiz-preset-warn" class="preset-size-warn"></p>
+            <p class="wiz-hint" id="wiz-size-meta">—</p>
+          </section>
+          <section class="wiz-section">
+            <div class="wiz-btn-row wiz-bottom-actions">
+              <button id="wiz-size-continue" class="wiz-action-btn primary" type="button">Continue</button>
+            </div>
+          </section>
+        </div>
+
+        <div id="wiz-panel-step2" class="hidden">
+          <h2>Grid</h2>
+          <p class="wiz-hint">Blank hex grid at the chosen size. Continue to land silhouette when the scale looks right.</p>
+          <section class="wiz-section">
+            <p class="wiz-hint" id="wiz-grid-meta">—</p>
+            <div class="wiz-btn-row wiz-bottom-actions">
+              <button id="wiz-grid-back" class="wiz-action-btn" type="button">Back</button>
+              <button id="wiz-grid-continue" class="wiz-action-btn primary" type="button">Continue</button>
+            </div>
+          </section>
+        </div>
+
+        <div id="wiz-panel-step3" class="hidden">
         <h2>Land silhouette</h2>
         <p class="wiz-hint">Pick a layout class, then regenerate shapes within that class. Shore character is separate.</p>
 

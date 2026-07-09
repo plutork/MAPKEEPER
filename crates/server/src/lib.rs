@@ -26,7 +26,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
-use mapkeeper_core::build_state::{self, BUILD_STEP_LAND_SILHOUETTE};
+use mapkeeper_core::build_state::{self, BUILD_STEP_SIZE};
 use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::geology::{
     elevation_from_land_mask_and_geology, generate_geology, GeologyStyle, GEOLOGY_LAYER_ID,
@@ -157,6 +157,18 @@ struct BuildStateInput {
     step: Option<u32>,
 }
 
+/// wizard-size-grid-step (D-69): change preset mid-draft; hard-resets dense layers.
+#[derive(Deserialize)]
+struct BuildBoundsInput {
+    map_preset: String,
+}
+
+#[derive(Serialize)]
+struct BuildBoundsResponse {
+    bounds: MapBoundsResponse,
+    reset: bool,
+}
+
 #[derive(Deserialize)]
 struct LandMaskGenerateInput {
     /// Explicit layout class (optional if recipe_id present).
@@ -267,21 +279,42 @@ fn legacy_map_folder(world_path: &Path) -> bool {
 }
 
 fn write_map_manifest(world_path: &Path, preset: MapPreset) -> Result<()> {
+    rewrite_world_bounds(world_path, preset, false)?;
+    Ok(())
+}
+
+/// Rewrite manifest bounds; optionally wipe Geo pipeline layers (D-69 / D-46).
+fn rewrite_world_bounds(
+    world_path: &Path,
+    preset: MapPreset,
+    reset_pipeline: bool,
+) -> Result<MapBounds> {
     let (width, height) = preset.dimensions();
     let manifest = MapManifest::default_v0(width, height);
     let path = map_manifest_path(world_path);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, manifest.to_json_pretty()?)?;
-    // elevation-authoring-v2: new worlds start as ocean (programmatic fill).
+    std::fs::write(&path, manifest.to_json_pretty()?)?;
     let bounds = MapBounds::new(width, height);
+    if reset_pipeline {
+        for id in [LAND_MASK_LAYER_ID, GEOLOGY_LAYER_ID, "terrain", RIVER_ID_LAYER_ID] {
+            let _ = std::fs::remove_file(layer_file_path(world_path, id));
+        }
+        let rivers = world_path.join("map").join(RIVER_CATALOG_FILE);
+        let _ = std::fs::remove_file(rivers);
+    }
     let ocean = mapkeeper_core::hydro::filled_elevation_layer(
         &bounds,
         mapkeeper_core::hydro::OCEAN_ELEVATION,
     );
     write_dense_layer(world_path, &ocean).map_err(|e| anyhow::anyhow!(e))?;
-    Ok(())
+    Ok(bounds)
+}
+
+fn pipeline_has_downstream(world_path: &Path) -> bool {
+    layer_file_path(world_path, LAND_MASK_LAYER_ID).exists()
+        || layer_file_path(world_path, GEOLOGY_LAYER_ID).exists()
 }
 
 /// Read hex bounds from disk. Missing manifest => Small rectangle default.
@@ -532,6 +565,10 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         .route("/api/projects/delete", axum::routing::post(delete_project))
         .route("/api/projects/close", axum::routing::post(close_project))
         .route("/api/build", axum::routing::put(put_build_state))
+        .route(
+            "/api/build/bounds",
+            axum::routing::put(put_build_bounds),
+        )
         .route(
             "/api/build/land-mask/generate",
             axum::routing::post(generate_land_mask_handler),
@@ -882,7 +919,7 @@ async fn put_build_state(
     };
     let result = match input.status.as_str() {
         "draft" => {
-            let step = input.step.unwrap_or(BUILD_STEP_LAND_SILHOUETTE);
+            let step = input.step.unwrap_or(BUILD_STEP_SIZE);
             build_state::write_build_draft(&world_path, step)
         }
         "complete" => build_state::clear_build(&world_path),
@@ -891,6 +928,35 @@ async fn put_build_state(
     match result {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+    }
+}
+
+/// wizard-size-grid-step (D-69): set map preset; hard-reset Geo layers when present.
+async fn put_build_bounds(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(input): Json<BuildBoundsInput>,
+) -> impl IntoResponse {
+    let world_path = {
+        let guard = state.lock().unwrap();
+        let Some(active) = guard.active.as_ref() else {
+            return (StatusCode::CONFLICT, "no active world").into_response();
+        };
+        active.path.clone()
+    };
+    let Some(preset) = parse_map_preset(&input.map_preset) else {
+        return (StatusCode::BAD_REQUEST, "unknown map_preset").into_response();
+    };
+    let reset = pipeline_has_downstream(&world_path);
+    match rewrite_world_bounds(&world_path, preset, true) {
+        Ok(bounds) => {
+            let _ = build_state::write_build_draft(&world_path, BUILD_STEP_SIZE);
+            Json(BuildBoundsResponse {
+                bounds: bounds_response(&bounds),
+                reset,
+            })
+            .into_response()
+        }
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     }
 }
 
