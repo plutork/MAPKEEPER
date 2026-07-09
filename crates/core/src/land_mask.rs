@@ -198,7 +198,7 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         primary_count: 2,
         satellite_count: 5,
         merge_bias: 0.15,
-        elongation: 0.45,
+        elongation: 0.28,
         irregularity: 0.55,
     },
     LayoutRecipe {
@@ -210,7 +210,7 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         primary_count: 2,
         satellite_count: 4,
         merge_bias: 0.1,
-        elongation: 0.4,
+        elongation: 0.26,
         irregularity: 0.58,
     },
     LayoutRecipe {
@@ -227,7 +227,7 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         primary_count: 3,
         satellite_count: 4,
         merge_bias: 0.25,
-        elongation: 0.5,
+        elongation: 0.3,
         irregularity: 0.6,
     },
     LayoutRecipe {
@@ -244,7 +244,7 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         primary_count: 2,
         satellite_count: 5,
         merge_bias: 0.2,
-        elongation: 0.42,
+        elongation: 0.28,
         irregularity: 0.55,
     },
     LayoutRecipe {
@@ -256,7 +256,7 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         primary_count: 2,
         satellite_count: 6,
         merge_bias: 0.12,
-        elongation: 0.38,
+        elongation: 0.26,
         irregularity: 0.57,
     },
     LayoutRecipe {
@@ -705,6 +705,18 @@ pub fn generate_land_mask_recipe(
     remove_tiny_islands(bounds, &mut layer, min_island_cells(recipe));
     // Third pass: remember layout_class identity (e.g. Pangea = one mass).
     enforce_layout_class(bounds, &mut layer, recipe.layout_class, seed);
+    // Second mass grows after tip-prune — cut axis corridors only (tips would erase it).
+    prune_axis_corridors(bounds, &mut layer, 8);
+    if recipe.layout_class == LayoutClass::Continents {
+        let comps = land_components(bounds, &layer);
+        let thin = comps.len() < 2
+            || (comps.len() >= 2 && comps[1].len() * 100 / comps[0].len().max(1) < 42);
+        if thin {
+            balance_continents(bounds, &mut layer, seed ^ 0xA11);
+            prune_axis_corridors(bounds, &mut layer, 4);
+        }
+    }
+    apply_shore_fringe(bounds, &mut layer, character, seed ^ 0x51DE);
     mark_inland_seas(bounds, &mut layer);
     layer
 }
@@ -886,6 +898,42 @@ fn prune_thin_corridors(bounds: &MapBounds, layer: &mut DenseLayer, passes: usiz
                 _ => false,
             };
             if kill {
+                drop.push(index);
+            }
+        }
+        if drop.is_empty() {
+            break;
+        }
+        for index in drop {
+            layer.set(
+                index,
+                DenseState::Value(LayerValue::Text(LAND_MASK_OCEAN.to_string())),
+            );
+        }
+    }
+}
+
+/// Only 1-wide opposite corridors (hex-axis fingers) — keeps coastal tips intact.
+fn prune_axis_corridors(bounds: &MapBounds, layer: &mut DenseLayer, passes: usize) {
+    for _ in 0..passes {
+        let mut drop: Vec<usize> = Vec::new();
+        for index in 0..bounds.len() {
+            if !is_land_cell(layer, index) {
+                continue;
+            }
+            let Some(cell) = bounds.from_index(index) else {
+                continue;
+            };
+            let mut land_ns: Vec<Axial> = Vec::new();
+            for nb in cell.neighbors() {
+                let Some(ni) = bounds.index_of(nb) else {
+                    continue;
+                };
+                if is_land_cell(layer, ni) {
+                    land_ns.push(nb);
+                }
+            }
+            if land_ns.len() == 2 && opposite_hex_pair(cell, land_ns[0], land_ns[1]) {
                 drop.push(index);
             }
         }
@@ -1327,9 +1375,9 @@ fn grow_organic_mass(
         &mut heights,
         start,
         0.95,
-        0.87,
-        0.55,
-        0.45,
+        0.89,
+        0.32,
+        0.22,
         ex,
         ey,
         seed,
@@ -1350,7 +1398,7 @@ fn grow_organic_mass(
             })
         })
         .collect();
-    let overlay_n = 4.min(edge_seeds.len().max(1));
+    let overlay_n = 3.min(edge_seeds.len().max(1));
     for i in 0..overlay_n as u64 {
         let s = mix64(seed ^ (i * 0x9E37) ^ 0x0B1);
         let cur = if edge_seeds.is_empty() {
@@ -1361,15 +1409,15 @@ fn grow_organic_mass(
         if avoid_set.contains(&cur) {
             continue;
         }
-        let (ox, oy) = elongation_axis(s ^ 0xE2, 0.55);
+        let (ox, oy) = elongation_axis(s ^ 0xE2, 0.3);
         grow_blob(
             bounds,
             &mut heights,
             cur,
-            0.40 + unit01(s) * 0.25,
-            0.84,
-            0.6,
+            0.45 + unit01(s) * 0.2,
+            0.87,
             0.35,
+            0.2,
             ox,
             oy,
             s,
@@ -1395,8 +1443,8 @@ fn grow_organic_mass(
         }
     }
 
-    // Soft distance falloff from mass centroid — no hard circle clip.
-    let soft_r = ((target as f64 / std::f64::consts::PI).sqrt() * 2.2).max(4.0);
+    // Soft elliptical falloff + wobble — avoids flat circular / chord edges.
+    let soft_r = ((target as f64 / std::f64::consts::PI).sqrt() * 2.5).max(5.0);
     for index in 0..n {
         if heights[index] <= 0.0 {
             continue;
@@ -1405,9 +1453,16 @@ fn grow_organic_mass(
             continue;
         };
         let (x, y) = cell.to_pixel(1.0);
-        let d = (x - sx).hypot(y - sy);
-        if d > soft_r {
-            let t = ((d - soft_r) / (soft_r * 0.55)).clamp(0.0, 1.0);
+        let dx = x - sx;
+        let dy = y - sy;
+        let along = dx * ex + dy * ey;
+        let across = dx * -ey + dy * ex;
+        let d = (along * along + (across * 1.2).powi(2)).sqrt();
+        let wobble =
+            1.0 + 0.2 * (unit01(seed ^ (index as u64).wrapping_mul(0x45) ^ 0xF00D) - 0.5);
+        let r = soft_r * wobble;
+        if d > r {
+            let t = ((d - r) / (r * 0.8)).clamp(0.0, 1.0);
             heights[index] *= 1.0 - t;
         }
     }
@@ -1417,7 +1472,7 @@ fn grow_organic_mass(
     let need = target.saturating_sub(seed_cells.len());
     let threshold = threshold_for_fraction(&heights, target as f64 / n as f64);
     let mut painted = 0usize;
-    // Paint by descending height so we hit ~target with organic outline.
+    // Paint by descending height; prefer cells with ≥2 land neighbors (compact, fewer fingers).
     let mut order: Vec<(i32, usize)> = heights
         .iter()
         .enumerate()
@@ -1432,15 +1487,19 @@ fn grow_organic_mass(
         if is_land_cell(layer, index) || avoid_set.contains(&index) {
             continue;
         }
-        // Stay connected to existing / newly painted mass.
         let Some(cell) = bounds.from_index(index) else {
             continue;
         };
-        let touches = cell
+        let touch_n = cell
             .neighbors()
             .iter()
-            .any(|nb| bounds.index_of(*nb).is_some_and(|ni| grown.contains(&ni)));
-        if !touches {
+            .filter(|nb| bounds.index_of(**nb).is_some_and(|ni| grown.contains(&ni)))
+            .count();
+        // Compact fill: require 2 attachments after the first ring; allow some 1-touch jitter.
+        if touch_n == 0 {
+            continue;
+        }
+        if touch_n == 1 && painted > 6 && unit01(seed ^ (index as u64) ^ 0x71) > 0.28 {
             continue;
         }
         set_land(layer, index);
