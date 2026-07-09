@@ -1197,6 +1197,8 @@ fn sync_wizard_actions(state: &AppState) {
 }
 
 async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
+    set_wizard_generating(true);
+    set_wizard_status("Generating silhouette… (can take a moment on large maps)");
     let (recipe_id, character, layout_class, nonce) = {
         let mut s = state.borrow_mut();
         ensure_wizard_recipe(&mut s);
@@ -1219,6 +1221,11 @@ async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
         .send()
         .await
     else {
+        set_wizard_generating(false);
+        {
+            let s = state.borrow();
+            sync_wizard_actions(&s);
+        }
         set_wizard_status("Generation failed (network).");
         return;
     };
@@ -1227,12 +1234,43 @@ async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
             .text()
             .await
             .unwrap_or_else(|_| "Generation rejected".to_string());
+        set_wizard_generating(false);
+        {
+            let s = state.borrow();
+            sync_wizard_actions(&s);
+        }
         set_wizard_status(&msg);
         return;
     }
     load_elevation(&state).await;
     schedule_redraw(state.clone());
+    set_wizard_generating(false);
+    {
+        let s = state.borrow();
+        sync_wizard_actions(&s);
+    }
     set_wizard_status("Shape generated.");
+}
+
+fn set_wizard_generating(busy: bool) {
+    set_button_disabled("wiz-regenerate", busy);
+    set_button_disabled("wiz-accept", busy);
+    if let Some(el) = document().get_element_by_id("wiz-layout-classes") {
+        if busy {
+            let _ = el.class_list().add_1("wiz-busy");
+            let _ = el.set_attribute("aria-busy", "true");
+        } else {
+            let _ = el.class_list().remove_1("wiz-busy");
+            let _ = el.remove_attribute("aria-busy");
+        }
+    }
+    if let Some(el) = document().get_element_by_id("wizard-status") {
+        if busy {
+            let _ = el.class_list().add_1("busy");
+        } else {
+            let _ = el.class_list().remove_1("busy");
+        }
+    }
 }
 
 async fn generate_wizard_geology(state: Rc<RefCell<AppState>>) {

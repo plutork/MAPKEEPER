@@ -1412,6 +1412,8 @@ fn grow_organic_mass(
         }
     }
 
+    let seed_set: std::collections::HashSet<usize> = seed_cells.iter().copied().collect();
+    let mut grown = seed_set.clone();
     let need = target.saturating_sub(seed_cells.len());
     let threshold = threshold_for_fraction(&heights, target as f64 / n as f64);
     let mut painted = 0usize;
@@ -1419,7 +1421,7 @@ fn grow_organic_mass(
     let mut order: Vec<(i32, usize)> = heights
         .iter()
         .enumerate()
-        .filter(|(i, h)| **h > threshold && !seed_cells.contains(i))
+        .filter(|(i, h)| **h > threshold && !seed_set.contains(i))
         .map(|(i, h)| ((-*h * 1_000_000.0) as i32, i))
         .collect();
     order.sort_unstable();
@@ -1434,19 +1436,21 @@ fn grow_organic_mass(
         let Some(cell) = bounds.from_index(index) else {
             continue;
         };
-        let touches = cell.neighbors().iter().any(|nb| {
-            bounds.index_of(*nb).is_some_and(|ni| {
-                seed_cells.contains(&ni) || is_land_cell(layer, ni)
-            })
-        });
+        let touches = cell
+            .neighbors()
+            .iter()
+            .any(|nb| bounds.index_of(*nb).is_some_and(|ni| grown.contains(&ni)));
         if !touches {
             continue;
         }
         set_land(layer, index);
+        grown.insert(index);
         painted += 1;
     }
 }
 
+/// Peel land from the coast inward until `target` cells remain.
+/// Frontier-based — O(n log n), not O(n²) full rescans (Continents dogfood).
 fn erode_land_mass(
     bounds: &MapBounds,
     layer: &mut DenseLayer,
@@ -1457,31 +1461,61 @@ fn erode_land_mass(
         return;
     }
     let mut alive: std::collections::HashSet<usize> = mass.iter().copied().collect();
-    while alive.len() > target {
-        let mut best: Option<(usize, usize)> = None; // (land_neighbors, index)
-        for &i in &alive {
-            let Some(cell) = bounds.from_index(i) else {
-                continue;
-            };
-            let mut land_n = 0usize;
-            for nb in cell.neighbors() {
-                if bounds.index_of(nb).is_some_and(|ni| alive.contains(&ni)) {
-                    land_n += 1;
-                }
-            }
-            let key = land_n;
-            if best.map(|(b, _)| key < b).unwrap_or(true) {
-                best = Some((key, i));
+    let mut land_n: std::collections::HashMap<usize, usize> =
+        std::collections::HashMap::with_capacity(mass.len());
+    for &i in mass {
+        let Some(cell) = bounds.from_index(i) else {
+            continue;
+        };
+        let mut n = 0usize;
+        for nb in cell.neighbors() {
+            if bounds.index_of(nb).is_some_and(|ni| alive.contains(&ni)) {
+                n += 1;
             }
         }
-        let Some((_, drop_i)) = best else {
+        land_n.insert(i, n);
+    }
+
+    // Min-heap by land-neighbor count (coastal tips first).
+    let mut heap: std::collections::BinaryHeap<std::cmp::Reverse<(usize, usize)>> =
+        std::collections::BinaryHeap::new();
+    for (&i, &n) in &land_n {
+        if n < 6 {
+            heap.push(std::cmp::Reverse((n, i)));
+        }
+    }
+
+    while alive.len() > target {
+        let Some(std::cmp::Reverse((n, drop_i))) = heap.pop() else {
             break;
         };
+        if !alive.contains(&drop_i) {
+            continue;
+        }
+        // Stale heap entry after neighbor updates.
+        if land_n.get(&drop_i).copied() != Some(n) {
+            continue;
+        }
         alive.remove(&drop_i);
+        land_n.remove(&drop_i);
         layer.set(
             drop_i,
             DenseState::Value(LayerValue::Text(LAND_MASK_OCEAN.to_string())),
         );
+        let Some(cell) = bounds.from_index(drop_i) else {
+            continue;
+        };
+        for nb in cell.neighbors() {
+            let Some(ni) = bounds.index_of(nb) else {
+                continue;
+            };
+            if !alive.contains(&ni) {
+                continue;
+            }
+            let entry = land_n.entry(ni).or_insert(0);
+            *entry = entry.saturating_sub(1);
+            heap.push(std::cmp::Reverse((*entry, ni)));
+        }
     }
 }
 
