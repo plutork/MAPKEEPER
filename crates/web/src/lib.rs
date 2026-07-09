@@ -524,6 +524,8 @@ struct AppState {
     wizard_accepted: bool,
     wizard_edit_mode: bool,
     wizard_edit_brush: String,
+    /// D-43 sizes reused in wizard land edit (0..=3 → 1x..4x).
+    wizard_brush_radius: i32,
     /// Build wizard step: 1 size · 2 grid · 3 silhouette · 4 tectonics · 5 elevation (D-69).
     wizard_step: u32,
     wizard_geo_style: String,
@@ -588,6 +590,7 @@ pub fn start() {
         wizard_accepted: false,
         wizard_edit_mode: false,
         wizard_edit_brush: "land".to_string(),
+        wizard_brush_radius: 0,
         wizard_step: 1,
         wizard_geo_style: "belts".to_string(),
         wizard_geo_nonce: 0,
@@ -867,13 +870,19 @@ fn draw_preview_boundary(
     ox: f64,
     oy: f64,
 ) {
-    if matches!(state.brush, Brush::Inspect) || river_brush(&state.brush) {
+    let wizard_edit = wizard_is_active() && state.wizard_edit_mode;
+    if !wizard_edit && (matches!(state.brush, Brush::Inspect) || river_brush(&state.brush)) {
         return;
     }
     let Some(center) = state.hover_cell else {
         return;
     };
-    let cells = paint_stamp_cells(center, state.brush_radius, state.map_bounds);
+    let radius = if wizard_edit {
+        state.wizard_brush_radius
+    } else {
+        state.brush_radius
+    };
+    let cells = paint_stamp_cells(center, radius, state.map_bounds);
     if cells.is_empty() {
         return;
     }
@@ -1380,12 +1389,19 @@ fn sync_wizard_gen_identity(state: &AppState) {
     );
 }
 
-fn sync_wizard_edit_mode_ui(edit_mode: bool, brush: &str) {
-    if let Some(row) = document().get_element_by_id("wiz-edit-brushes") {
-        if edit_mode {
-            let _ = row.class_list().remove_1("hidden");
-        } else {
-            let _ = row.class_list().add_1("hidden");
+fn sync_wizard_edit_mode_ui(edit_mode: bool, brush: &str, brush_radius: i32) {
+    for id in [
+        "wiz-edit-brushes",
+        "wiz-edit-sizes",
+        "wiz-edit-size-label",
+        "wiz-edit-size-hint",
+    ] {
+        if let Some(el) = document().get_element_by_id(id) {
+            if edit_mode {
+                let _ = el.class_list().remove_1("hidden");
+            } else {
+                let _ = el.class_list().add_1("hidden");
+            }
         }
     }
     for (id, kind) in [("wiz-edit-land", "land"), ("wiz-edit-ocean", "ocean")] {
@@ -1398,6 +1414,27 @@ fn sync_wizard_edit_mode_ui(edit_mode: bool, brush: &str) {
             let _ = el.class_list().remove_1("active");
         }
     }
+    if let Ok(Some(root)) = document().query_selector("#wiz-edit-sizes") {
+        if let Ok(list) = root.query_selector_all("[data-wiz-edit-size]") {
+            for i in 0..list.length() {
+                let Some(node) = list.item(i) else {
+                    continue;
+                };
+                let Ok(el) = node.dyn_into::<web_sys::Element>() else {
+                    continue;
+                };
+                let radius = el
+                    .get_attribute("data-wiz-edit-size")
+                    .and_then(|v| v.parse::<i32>().ok())
+                    .unwrap_or(-1);
+                if radius == brush_radius {
+                    let _ = el.class_list().add_1("active");
+                } else {
+                    let _ = el.class_list().remove_1("active");
+                }
+            }
+        }
+    }
 }
 
 fn sync_wizard_actions(state: &AppState) {
@@ -1407,7 +1444,11 @@ fn sync_wizard_actions(state: &AppState) {
     set_button_disabled("wiz-continue", !state.wizard_accepted);
     set_button_disabled("wiz-geo-continue", !state.wizard_geo_accepted);
     sync_wizard_layout_buttons(&state.wizard_layout_class);
-    sync_wizard_edit_mode_ui(state.wizard_edit_mode, &state.wizard_edit_brush);
+    sync_wizard_edit_mode_ui(
+        state.wizard_edit_mode,
+        &state.wizard_edit_brush,
+        state.wizard_brush_radius,
+    );
     sync_wizard_gen_identity(state);
     show_wizard_step(state);
 }
@@ -1579,11 +1620,29 @@ async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
     set_wizard_status("Elevation generated from land + geology.");
 }
 
-async fn wizard_set_land_mask_cell(state: Rc<RefCell<AppState>>, q: i32, r: i32, kind: String) {
-    let payload = vec![WizardLandMaskCellInput { q, r, kind: &kind }];
+async fn wizard_set_land_mask_stamp(
+    state: Rc<RefCell<AppState>>,
+    center: (i32, i32),
+    kind: String,
+) {
+    let cells = {
+        let s = state.borrow();
+        paint_stamp_cells(center, s.wizard_brush_radius, s.map_bounds)
+    };
+    if cells.is_empty() {
+        return;
+    }
+    let payload: Vec<WizardLandMaskCellInput<'_>> = cells
+        .iter()
+        .map(|(q, r)| WizardLandMaskCellInput {
+            q: *q,
+            r: *r,
+            kind: &kind,
+        })
+        .collect();
     let Ok(resp) = gloo_net::http::Request::put("/api/build/land-mask/cells")
         .json(&payload)
-        .expect("serialize wizard land_mask cell")
+        .expect("serialize wizard land_mask stamp")
         .send()
         .await
     else {
@@ -1598,15 +1657,21 @@ async fn wizard_set_land_mask_cell(state: Rc<RefCell<AppState>>, q: i32, r: i32,
         set_wizard_status(&msg);
         return;
     }
-    // local preview + sync with server write model
     {
         let mut s = state.borrow_mut();
         let bounds = s.map_bounds;
         let value = if kind == "land" { 1 } else { 0 };
-        set_elevation_cell(&mut s.elevation, bounds, q, r, value);
+        for (q, r) in cells {
+            set_elevation_cell(&mut s.elevation, bounds, q, r, value);
+        }
         bump_content_rev(&mut s);
     }
     schedule_redraw(state);
+}
+
+fn queue_wizard_land_mask_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32)) {
+    let kind = state.borrow().wizard_edit_brush.clone();
+    wasm_bindgen_futures::spawn_local(wizard_set_land_mask_stamp(state, center, kind));
 }
 
 fn wiz_toggle_style_group(container_id: &str, attr: &str, active: &web_sys::Element) {
@@ -1885,7 +1950,9 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             let edit_now = s.wizard_edit_mode;
             sync_wizard_actions(&s);
             if edit_now {
-                set_wizard_status("Edit mode: click map cells to paint land/ocean.");
+                set_wizard_status(
+                    "Edit mode: paint land/ocean (pick brush size 1x–4x for large maps).",
+                );
             } else {
                 set_wizard_status("Edit mode off.");
             }
@@ -1919,6 +1986,34 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             sync_wizard_actions(&s);
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-edit-brushes") {
+            let _ =
+                root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+
+    // Brush size 1x–4x (D-43) for wizard land edit on large maps.
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else {
+                return;
+            };
+            let Some(el) = click_target_element(&mouse) else {
+                return;
+            };
+            let Some(raw) = el.get_attribute("data-wiz-edit-size") else {
+                return;
+            };
+            let Ok(radius) = raw.parse::<i32>() else {
+                return;
+            };
+            let mut s = state.borrow_mut();
+            s.wizard_brush_radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
+            sync_wizard_actions(&s);
+            schedule_redraw(state.clone());
+        });
+        if let Ok(Some(root)) = document().query_selector("#wiz-edit-sizes") {
             let _ =
                 root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
@@ -3018,17 +3113,10 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
             };
 
             if wizard_is_active() {
-                let (edit_mode, kind) = {
-                    let s = state.borrow();
-                    (s.wizard_edit_mode, s.wizard_edit_brush.clone())
-                };
+                let edit_mode = state.borrow().wizard_edit_mode;
                 if edit_mode {
-                    wasm_bindgen_futures::spawn_local(wizard_set_land_mask_cell(
-                        state.clone(),
-                        q,
-                        r,
-                        kind,
-                    ));
+                    // Drag already painted; click is for single stamp when not dragged.
+                    queue_wizard_land_mask_stamp(state.clone(), (q, r));
                 }
                 return;
             }
@@ -3158,6 +3246,22 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
             if event.button() != 0 {
                 return;
             }
+            // Wizard land edit: same stamp+drag as editor (D-43 sizes).
+            if wizard_is_active() && down_state.borrow().wizard_edit_mode {
+                let Some((q, r)) = cell_from_mouse_event(&down_state, &event) else {
+                    return;
+                };
+                {
+                    let mut s = down_state.borrow_mut();
+                    s.paint_active = true;
+                    s.paint_moved = false;
+                    s.paint_last_cell = Some((q, r));
+                    // mousedown already stamps; skip the following click.
+                    s.suppress_next_click = true;
+                }
+                queue_wizard_land_mask_stamp(down_state.clone(), (q, r));
+                return;
+            }
             let brush = down_state.borrow().brush.clone();
             if let Some(elevation) = brush_absolute_elevation(&brush) {
                 let Some((q, r)) = cell_from_mouse_event(&down_state, &event) else {
@@ -3195,7 +3299,6 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
             if !move_state.borrow().paint_active {
                 return;
             }
-            let brush = move_state.borrow().brush.clone();
             let Some((q, r)) = cell_from_mouse_event(&move_state, &event) else {
                 return;
             };
@@ -3211,6 +3314,12 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
             if !should_paint {
                 return;
             }
+            if wizard_is_active() && move_state.borrow().wizard_edit_mode {
+                queue_wizard_land_mask_stamp(move_state.clone(), (q, r));
+                move_state.borrow_mut().paint_last_cell = Some((q, r));
+                return;
+            }
+            let brush = move_state.borrow().brush.clone();
             if let Some(elevation) = brush_absolute_elevation(&brush) {
                 queue_paint_stamp(move_state.clone(), (q, r), elevation);
             } else if let Some(step_sign) = brush_delta_sign(&brush) {
@@ -3246,7 +3355,9 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
                     s.suppress_next_click = true;
                 }
             }
-            wasm_bindgen_futures::spawn_local(flush_pending_paints(up_state.clone()));
+            if !wizard_is_active() {
+                wasm_bindgen_futures::spawn_local(flush_pending_paints(up_state.clone()));
+            }
         });
     let _ = window().add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
     on_up.forget();
@@ -3256,10 +3367,16 @@ fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
     let move_state = state.clone();
     let on_move =
         Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-            let next_hover = if brush_paints(&move_state.borrow().brush) {
-                cell_from_mouse_event(&move_state, &event)
-            } else {
-                None
+            let next_hover = {
+                let s = move_state.borrow();
+                let show = brush_paints(&s.brush)
+                    || (wizard_is_active() && s.wizard_edit_mode);
+                if show {
+                    drop(s);
+                    cell_from_mouse_event(&move_state, &event)
+                } else {
+                    None
+                }
             };
             let changed = {
                 let mut s = move_state.borrow_mut();
