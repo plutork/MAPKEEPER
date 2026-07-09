@@ -709,40 +709,43 @@
       <aside class="wiz-right">
         <div id="wiz-panel-step3">
         <h2>Land silhouette</h2>
-        <p class="wiz-hint">Follow blocks 1 to 4: set parameters, generate variants, accept/edit, then continue.</p>
+        <p class="wiz-hint">Pick a layout class, then regenerate shapes within that class. Shore character is separate.</p>
 
         <section class="wiz-section">
-          <p class="wiz-label">1. Generation parameters</p>
-          <p class="wiz-label">Shore character</p>
+          <p class="wiz-label">1. Shore character</p>
           <div class="wiz-btn-row" id="wiz-chars">
             <button class="wiz-style-btn active" type="button" data-wiz-char="smooth">Smooth shores</button>
             <button class="wiz-style-btn" type="button" data-wiz-char="jagged">Jagged shores</button>
           </div>
-          <p class="wiz-hint">A/B/C compare three different layout classes. Regenerate reshuffles classes and recipes.</p>
         </section>
 
         <section class="wiz-section">
-          <p class="wiz-label">2. Generation controls</p>
-          <div class="wiz-btn-row wiz-bottom-variants">
-            <span class="wiz-label">Layout variants</span>
-            <div id="wiz-variants" class="wiz-btn-row">
-              <button id="wiz-variant-a" class="wiz-variant-btn active" type="button" data-wiz-variant="A">A</button>
-              <button id="wiz-variant-b" class="wiz-variant-btn" type="button" data-wiz-variant="B">B</button>
-              <button id="wiz-variant-c" class="wiz-variant-btn" type="button" data-wiz-variant="C">C</button>
-            </div>
-          </div>
+          <p class="wiz-label">2. Shape of selected class</p>
           <div class="wiz-btn-row">
-            <button id="wiz-regenerate" class="wiz-action-btn" type="button">Regenerate</button>
+            <button id="wiz-regenerate" class="wiz-action-btn" type="button">Regenerate shape</button>
+          </div>
+          <p class="wiz-hint">Regenerate changes only the selected class shape — layout classes stay put.</p>
+        </section>
+
+        <section class="wiz-section">
+          <p class="wiz-label">3. Layout class</p>
+          <div id="wiz-layout-classes" class="wiz-btn-row" style="flex-wrap:wrap;gap:0.4rem;">
+            <button class="wiz-style-btn active" type="button" data-wiz-layout="pangea">Pangea</button>
+            <button class="wiz-style-btn" type="button" data-wiz-layout="continents">Continents</button>
+            <button class="wiz-style-btn" type="button" data-wiz-layout="archipelago">Archipelago</button>
+            <button class="wiz-style-btn" type="button" data-wiz-layout="island">Island</button>
+            <button class="wiz-style-btn" type="button" data-wiz-layout="continent_and_islands">Continent + islands</button>
+            <button class="wiz-style-btn" type="button" data-wiz-layout="mediterranean">Mediterranean</button>
           </div>
         </section>
 
         <section class="wiz-section">
-          <p class="wiz-label">3. Accept, then Edit</p>
+          <p class="wiz-label">4. Accept, then Edit</p>
           <div class="wiz-btn-row wiz-bottom-actions">
             <button id="wiz-accept" class="wiz-action-btn" type="button">Accept</button>
             <button id="wiz-edit" class="wiz-action-btn wiz-disabled" type="button" disabled>Edit</button>
           </div>
-          <p class="wiz-hint">Edit unlocks after you accept the current variant.</p>
+          <p class="wiz-hint">Edit unlocks after you accept the current shape.</p>
           <p class="wiz-label">Edit brush</p>
           <div class="wiz-btn-row hidden" id="wiz-edit-brushes">
             <button id="wiz-edit-land" class="wiz-style-btn active" type="button" data-wiz-edit-brush="land">Land</button>
@@ -751,11 +754,11 @@
         </section>
 
         <section class="wiz-section">
-          <p class="wiz-label">4. Next step</p>
+          <p class="wiz-label">5. Next step</p>
           <div class="wiz-btn-row wiz-bottom-actions">
             <button id="wiz-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
           </div>
-          <p class="wiz-hint" id="wiz-right-note">Generate A/B/C, accept one, optionally edit, then continue.</p>
+          <p class="wiz-hint" id="wiz-right-note">Pick a class, regenerate until you like the shape, accept, then continue.</p>
         </section>
         </div>
 

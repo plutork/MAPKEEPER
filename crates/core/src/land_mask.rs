@@ -1,7 +1,7 @@
 //! Step 3 world pipeline: land silhouette (`land_mask`) generators.
 //!
-//! Layout classes (D-62) + crude recipe bank (`step3-layout-pattern-bank-v1`):
-//! ~5 blob recipes per class so Regenerate changes macroform, not only shore noise.
+//! Layout classes (D-62) + recipe bank (D-64/D-65): ~5 non-ellipse recipes
+//! per class. Regenerate rotates recipe within the selected class only.
 
 use crate::hex::{Axial, MapBounds};
 use crate::layer::{DenseLayer, DenseState, LayerValue};
@@ -109,278 +109,362 @@ macro_rules! blobs {
     };
 }
 
-/// Static catalog: 5 recipes × 6 classes = 30.
+/// Static catalog (D-65 / step3-layout-picker-ux-v2): distinctive non-ellipse macros.
+/// ~5 recipes × 6 classes. Forms: crescent, C-shape, L-mass, broken chain,
+/// ring-with-gap, multi-blob irregular, hooked island, split basin.
 pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
-    // --- pangea ---
+    // --- pangea: large irregular / L / crescent ---
     LayoutRecipe {
-        id: "pangea_round",
+        id: "pangea_irregular",
         layout_class: LayoutClass::Pangea,
-        blobs: blobs!(0.0, 0.0, 0.82, 0.72),
+        blobs: blobs!(
+            -0.15, 0.05, 0.55, 0.48;
+            0.25, -0.15, 0.48, 0.42;
+            0.05, 0.35, 0.40, 0.32;
+            -0.35, -0.25, 0.32, 0.28
+        ),
         hole: None,
     },
     LayoutRecipe {
-        id: "pangea_wide",
+        id: "pangea_l_mass",
         layout_class: LayoutClass::Pangea,
-        blobs: blobs!(0.0, 0.05, 0.92, 0.55),
+        blobs: blobs!(
+            -0.35, 0.0, 0.32, 0.72;
+            0.15, 0.40, 0.62, 0.28
+        ),
         hole: None,
     },
     LayoutRecipe {
-        id: "pangea_tall",
+        id: "pangea_crescent",
         layout_class: LayoutClass::Pangea,
-        blobs: blobs!(0.0, 0.0, 0.58, 0.88),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "pangea_offset",
-        layout_class: LayoutClass::Pangea,
-        blobs: blobs!(-0.18, 0.12, 0.78, 0.68),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "pangea_bean",
-        layout_class: LayoutClass::Pangea,
-        blobs: blobs!(-0.22, 0.0, 0.55, 0.70; 0.28, 0.08, 0.48, 0.58),
-        hole: None,
-    },
-    // --- continents ---
-    LayoutRecipe {
-        id: "continents_ew",
-        layout_class: LayoutClass::Continents,
-        blobs: blobs!(-0.52, 0.05, 0.42, 0.55; 0.52, -0.05, 0.42, 0.55),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "continents_ns",
-        layout_class: LayoutClass::Continents,
-        blobs: blobs!(0.0, -0.48, 0.55, 0.36; 0.05, 0.50, 0.50, 0.34),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "continents_diag",
-        layout_class: LayoutClass::Continents,
-        blobs: blobs!(-0.48, -0.35, 0.40, 0.42; 0.48, 0.38, 0.42, 0.40),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "continents_uneven",
-        layout_class: LayoutClass::Continents,
-        blobs: blobs!(-0.40, 0.0, 0.52, 0.62; 0.58, 0.15, 0.30, 0.38),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "continents_triple",
-        layout_class: LayoutClass::Continents,
-        blobs: blobs!(-0.55, -0.25, 0.34, 0.40; 0.50, -0.20, 0.34, 0.38; 0.05, 0.52, 0.40, 0.30),
-        hole: None,
-    },
-    // --- archipelago ---
-    LayoutRecipe {
-        id: "archipelago_ring",
-        layout_class: LayoutClass::Archipelago,
-        blobs: blobs!(
-            0.55, 0.0, 0.20, 0.18;
-            -0.55, 0.05, 0.20, 0.18;
-            0.0, 0.55, 0.18, 0.20;
-            0.0, -0.55, 0.18, 0.20;
-            0.38, 0.38, 0.16, 0.15;
-            -0.38, -0.38, 0.16, 0.15
-        ),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "archipelago_chain",
-        layout_class: LayoutClass::Archipelago,
-        blobs: blobs!(
-            -0.70, 0.35, 0.16, 0.14;
-            -0.40, 0.18, 0.18, 0.15;
-            -0.10, 0.0, 0.17, 0.14;
-            0.22, -0.18, 0.18, 0.15;
-            0.52, -0.35, 0.16, 0.14;
-            0.72, -0.48, 0.12, 0.11
-        ),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "archipelago_scatter",
-        layout_class: LayoutClass::Archipelago,
-        blobs: blobs!(
-            -0.60, -0.40, 0.18, 0.16;
-            0.55, -0.45, 0.17, 0.15;
-            -0.35, 0.45, 0.19, 0.16;
-            0.45, 0.40, 0.16, 0.18;
-            0.05, -0.05, 0.14, 0.13;
-            -0.15, 0.15, 0.12, 0.11
-        ),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "archipelago_cluster",
-        layout_class: LayoutClass::Archipelago,
-        blobs: blobs!(
-            -0.35, 0.10, 0.22, 0.20;
-            -0.10, -0.05, 0.18, 0.16;
-            -0.45, -0.20, 0.14, 0.13;
-            0.50, 0.25, 0.20, 0.18;
-            0.65, 0.05, 0.14, 0.13;
-            0.40, 0.45, 0.13, 0.12
-        ),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "archipelago_arc",
-        layout_class: LayoutClass::Archipelago,
-        blobs: blobs!(
-            -0.65, 0.40, 0.15, 0.14;
-            -0.35, 0.50, 0.16, 0.14;
-            0.0, 0.55, 0.17, 0.14;
-            0.35, 0.48, 0.16, 0.14;
-            0.62, 0.32, 0.15, 0.14;
-            0.72, 0.05, 0.13, 0.12
-        ),
-        hole: None,
-    },
-    // --- island ---
-    LayoutRecipe {
-        id: "island_center",
-        layout_class: LayoutClass::Island,
-        blobs: blobs!(0.0, 0.0, 0.42, 0.38),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "island_long",
-        layout_class: LayoutClass::Island,
-        blobs: blobs!(0.05, 0.0, 0.58, 0.28),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "island_tall",
-        layout_class: LayoutClass::Island,
-        blobs: blobs!(0.0, 0.05, 0.28, 0.55),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "island_offset",
-        layout_class: LayoutClass::Island,
-        blobs: blobs!(0.35, -0.25, 0.38, 0.34),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "island_comma",
-        layout_class: LayoutClass::Island,
-        blobs: blobs!(-0.10, 0.05, 0.36, 0.42; 0.28, -0.22, 0.20, 0.18),
-        hole: None,
-    },
-    // --- continent_and_islands ---
-    LayoutRecipe {
-        id: "cai_west_sats",
-        layout_class: LayoutClass::ContinentAndIslands,
-        blobs: blobs!(
-            0.15, 0.0, 0.52, 0.55;
-            -0.72, 0.30, 0.18, 0.16;
-            -0.68, -0.40, 0.16, 0.15;
-            -0.78, -0.05, 0.12, 0.11
-        ),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "cai_east_sats",
-        layout_class: LayoutClass::ContinentAndIslands,
-        blobs: blobs!(
-            -0.15, 0.05, 0.52, 0.52;
-            0.72, -0.25, 0.17, 0.15;
-            0.68, 0.40, 0.16, 0.14;
-            0.78, 0.08, 0.12, 0.11
-        ),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "cai_south_chain",
-        layout_class: LayoutClass::ContinentAndIslands,
-        blobs: blobs!(
-            0.0, -0.25, 0.55, 0.42;
-            -0.45, 0.58, 0.16, 0.14;
-            0.0, 0.62, 0.15, 0.13;
-            0.45, 0.55, 0.16, 0.14
-        ),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "cai_ring_sats",
-        layout_class: LayoutClass::ContinentAndIslands,
-        blobs: blobs!(
-            0.0, 0.0, 0.48, 0.45;
-            0.70, 0.0, 0.14, 0.13;
-            -0.70, 0.0, 0.14, 0.13;
-            0.0, 0.70, 0.13, 0.14;
-            0.0, -0.70, 0.13, 0.14
-        ),
-        hole: None,
-    },
-    LayoutRecipe {
-        id: "cai_uneven",
-        layout_class: LayoutClass::ContinentAndIslands,
-        blobs: blobs!(
-            -0.20, 0.10, 0.48, 0.58;
-            0.65, -0.35, 0.20, 0.18;
-            0.55, 0.45, 0.15, 0.14;
-            0.78, 0.10, 0.11, 0.10
-        ),
-        hole: None,
-    },
-    // --- mediterranean ---
-    LayoutRecipe {
-        id: "med_center_basin",
-        layout_class: LayoutClass::Mediterranean,
-        blobs: blobs!(0.0, 0.0, 0.85, 0.75),
+        blobs: blobs!(0.0, 0.0, 0.78, 0.70),
         hole: Some(LayoutBlob {
-            cx: 0.0,
+            cx: 0.28,
+            cy: 0.05,
+            rx: 0.42,
+            ry: 0.48,
+        }),
+    },
+    LayoutRecipe {
+        id: "pangea_c_shape",
+        layout_class: LayoutClass::Pangea,
+        blobs: blobs!(
+            -0.45, -0.35, 0.35, 0.28;
+            -0.55, 0.05, 0.30, 0.32;
+            -0.40, 0.42, 0.38, 0.26;
+            0.05, 0.50, 0.35, 0.24;
+            0.35, 0.30, 0.28, 0.30
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "pangea_hooked",
+        layout_class: LayoutClass::Pangea,
+        blobs: blobs!(
+            -0.20, 0.0, 0.55, 0.42;
+            0.35, -0.25, 0.38, 0.28;
+            0.50, 0.15, 0.22, 0.35
+        ),
+        hole: None,
+    },
+    // --- continents: dual masses, not twin ellipses ---
+    LayoutRecipe {
+        id: "continents_l_and_blob",
+        layout_class: LayoutClass::Continents,
+        blobs: blobs!(
+            -0.50, -0.10, 0.28, 0.58;
+            -0.20, 0.35, 0.40, 0.24;
+            0.48, 0.05, 0.38, 0.48
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "continents_crescent_pair",
+        layout_class: LayoutClass::Continents,
+        blobs: blobs!(-0.48, 0.0, 0.42, 0.55; 0.48, 0.08, 0.40, 0.50),
+        hole: Some(LayoutBlob {
+            cx: -0.28,
             cy: 0.0,
-            rx: 0.38,
+            rx: 0.22,
             ry: 0.32,
         }),
     },
     LayoutRecipe {
-        id: "med_wide_basin",
-        layout_class: LayoutClass::Mediterranean,
-        blobs: blobs!(0.0, 0.05, 0.90, 0.62),
+        id: "continents_broken_chain",
+        layout_class: LayoutClass::Continents,
+        blobs: blobs!(
+            -0.65, 0.25, 0.28, 0.35;
+            -0.20, -0.15, 0.32, 0.38;
+            0.35, 0.30, 0.30, 0.32;
+            0.68, -0.25, 0.26, 0.30
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "continents_c_and_mass",
+        layout_class: LayoutClass::Continents,
+        blobs: blobs!(
+            -0.55, -0.30, 0.28, 0.24;
+            -0.62, 0.05, 0.24, 0.28;
+            -0.48, 0.38, 0.30, 0.22;
+            0.45, 0.0, 0.42, 0.52
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "continents_irregular_dual",
+        layout_class: LayoutClass::Continents,
+        blobs: blobs!(
+            -0.45, -0.20, 0.38, 0.35;
+            -0.30, 0.25, 0.32, 0.30;
+            0.40, 0.15, 0.35, 0.42;
+            0.55, -0.30, 0.28, 0.26
+        ),
+        hole: None,
+    },
+    // --- archipelago: chains / rings with gap ---
+    LayoutRecipe {
+        id: "archipelago_broken_chain",
+        layout_class: LayoutClass::Archipelago,
+        blobs: blobs!(
+            -0.72, 0.40, 0.14, 0.12;
+            -0.40, 0.22, 0.16, 0.14;
+            -0.05, 0.0, 0.15, 0.13;
+            0.30, -0.22, 0.16, 0.14;
+            0.62, -0.42, 0.14, 0.12
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "archipelago_ring_gap",
+        layout_class: LayoutClass::Archipelago,
+        blobs: blobs!(
+            0.50, 0.15, 0.16, 0.14;
+            0.25, 0.48, 0.15, 0.14;
+            -0.20, 0.50, 0.16, 0.14;
+            -0.52, 0.20, 0.15, 0.14;
+            -0.48, -0.25, 0.15, 0.14;
+            0.10, -0.52, 0.16, 0.14
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "archipelago_c_arc",
+        layout_class: LayoutClass::Archipelago,
+        blobs: blobs!(
+            -0.55, -0.35, 0.15, 0.13;
+            -0.65, 0.0, 0.14, 0.14;
+            -0.50, 0.38, 0.16, 0.13;
+            -0.10, 0.52, 0.15, 0.13;
+            0.30, 0.42, 0.14, 0.13;
+            0.55, 0.15, 0.13, 0.12
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "archipelago_scatter_irregular",
+        layout_class: LayoutClass::Archipelago,
+        blobs: blobs!(
+            -0.60, -0.35, 0.18, 0.14;
+            0.55, -0.40, 0.14, 0.16;
+            -0.25, 0.45, 0.20, 0.14;
+            0.40, 0.35, 0.15, 0.18;
+            0.05, -0.05, 0.12, 0.11;
+            -0.15, 0.10, 0.11, 0.13
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "archipelago_twin_clusters",
+        layout_class: LayoutClass::Archipelago,
+        blobs: blobs!(
+            -0.45, 0.15, 0.18, 0.16;
+            -0.25, -0.05, 0.14, 0.13;
+            -0.55, -0.15, 0.12, 0.11;
+            0.45, 0.20, 0.17, 0.15;
+            0.60, 0.0, 0.13, 0.12;
+            0.35, 0.40, 0.12, 0.11
+        ),
+        hole: None,
+    },
+    // --- island: hooked / crescent / L — not round blob ---
+    LayoutRecipe {
+        id: "island_hooked",
+        layout_class: LayoutClass::Island,
+        blobs: blobs!(
+            -0.15, 0.05, 0.42, 0.22;
+            0.25, -0.05, 0.28, 0.18;
+            0.40, 0.25, 0.16, 0.28
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "island_crescent",
+        layout_class: LayoutClass::Island,
+        blobs: blobs!(0.0, 0.0, 0.48, 0.42),
         hole: Some(LayoutBlob {
-            cx: 0.0,
-            cy: 0.05,
-            rx: 0.48,
-            ry: 0.28,
+            cx: 0.22,
+            cy: 0.0,
+            rx: 0.28,
+            ry: 0.32,
         }),
     },
     LayoutRecipe {
-        id: "med_offset_basin",
-        layout_class: LayoutClass::Mediterranean,
-        blobs: blobs!(-0.05, 0.0, 0.82, 0.72),
+        id: "island_l_mass",
+        layout_class: LayoutClass::Island,
+        blobs: blobs!(
+            -0.15, 0.0, 0.18, 0.45;
+            0.15, 0.25, 0.38, 0.16
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "island_c_shape",
+        layout_class: LayoutClass::Island,
+        blobs: blobs!(
+            -0.25, -0.25, 0.20, 0.16;
+            -0.32, 0.05, 0.16, 0.18;
+            -0.20, 0.30, 0.22, 0.14;
+            0.15, 0.28, 0.18, 0.14
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "island_broken_bar",
+        layout_class: LayoutClass::Island,
+        blobs: blobs!(
+            -0.30, 0.05, 0.22, 0.16;
+            0.05, -0.05, 0.18, 0.14;
+            0.35, 0.10, 0.16, 0.18
+        ),
+        hole: None,
+    },
+    // --- continent_and_islands ---
+    LayoutRecipe {
+        id: "cai_irregular_main",
+        layout_class: LayoutClass::ContinentAndIslands,
+        blobs: blobs!(
+            0.05, 0.0, 0.42, 0.38;
+            -0.15, 0.25, 0.30, 0.28;
+            0.25, -0.25, 0.28, 0.24;
+            -0.70, 0.30, 0.16, 0.14;
+            -0.65, -0.35, 0.14, 0.13
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "cai_l_main_chain",
+        layout_class: LayoutClass::ContinentAndIslands,
+        blobs: blobs!(
+            -0.15, -0.05, 0.28, 0.52;
+            0.20, 0.30, 0.45, 0.22;
+            0.65, -0.35, 0.15, 0.13;
+            0.70, 0.05, 0.12, 0.11;
+            0.55, 0.40, 0.14, 0.12
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "cai_crescent_sats",
+        layout_class: LayoutClass::ContinentAndIslands,
+        blobs: blobs!(
+            0.0, 0.0, 0.52, 0.48;
+            0.70, 0.25, 0.14, 0.12;
+            0.65, -0.30, 0.13, 0.12
+        ),
         hole: Some(LayoutBlob {
-            cx: 0.15,
-            cy: -0.08,
-            rx: 0.34,
+            cx: 0.22,
+            cy: 0.05,
+            rx: 0.28,
             ry: 0.30,
         }),
     },
     LayoutRecipe {
-        id: "med_narrow_sea",
-        layout_class: LayoutClass::Mediterranean,
-        blobs: blobs!(0.0, 0.0, 0.88, 0.70),
-        hole: Some(LayoutBlob {
-            cx: 0.0,
-            cy: 0.0,
-            rx: 0.55,
-            ry: 0.22,
-        }),
+        id: "cai_c_main",
+        layout_class: LayoutClass::ContinentAndIslands,
+        blobs: blobs!(
+            -0.35, -0.30, 0.28, 0.22;
+            -0.45, 0.05, 0.24, 0.26;
+            -0.30, 0.38, 0.30, 0.20;
+            0.10, 0.42, 0.28, 0.18;
+            0.65, -0.20, 0.15, 0.13;
+            0.70, 0.25, 0.13, 0.12
+        ),
+        hole: None,
     },
     LayoutRecipe {
-        id: "med_twin_lobe",
+        id: "cai_hooked_main",
+        layout_class: LayoutClass::ContinentAndIslands,
+        blobs: blobs!(
+            -0.10, 0.0, 0.45, 0.32;
+            0.30, -0.20, 0.28, 0.22;
+            0.42, 0.20, 0.18, 0.30;
+            -0.70, 0.35, 0.14, 0.12;
+            -0.72, -0.25, 0.13, 0.12
+        ),
+        hole: None,
+    },
+    // --- mediterranean: ring/gap / split basin ---
+    LayoutRecipe {
+        id: "med_ring_gap",
         layout_class: LayoutClass::Mediterranean,
-        blobs: blobs!(-0.25, 0.0, 0.55, 0.65; 0.35, 0.05, 0.50, 0.58),
+        blobs: blobs!(
+            -0.45, -0.35, 0.35, 0.28;
+            -0.55, 0.05, 0.30, 0.32;
+            -0.40, 0.42, 0.38, 0.26;
+            0.10, 0.50, 0.40, 0.24;
+            0.45, 0.25, 0.32, 0.30;
+            0.40, -0.35, 0.35, 0.28;
+            0.05, -0.50, 0.38, 0.24
+        ),
+        hole: None,
+    },
+    LayoutRecipe {
+        id: "med_split_basin",
+        layout_class: LayoutClass::Mediterranean,
+        blobs: blobs!(0.0, 0.0, 0.88, 0.72),
         hole: Some(LayoutBlob {
-            cx: 0.05,
+            cx: -0.22,
             cy: 0.0,
             rx: 0.28,
             ry: 0.35,
+        }),
+    },
+    LayoutRecipe {
+        id: "med_c_basin",
+        layout_class: LayoutClass::Mediterranean,
+        blobs: blobs!(0.05, 0.0, 0.82, 0.70),
+        hole: Some(LayoutBlob {
+            cx: 0.25,
+            cy: 0.0,
+            rx: 0.40,
+            ry: 0.42,
+        }),
+    },
+    LayoutRecipe {
+        id: "med_l_frame",
+        layout_class: LayoutClass::Mediterranean,
+        blobs: blobs!(
+            -0.45, 0.0, 0.30, 0.70;
+            0.10, 0.42, 0.65, 0.28;
+            0.45, -0.15, 0.32, 0.35
+        ),
+        hole: Some(LayoutBlob {
+            cx: 0.0,
+            cy: -0.05,
+            rx: 0.32,
+            ry: 0.28,
+        }),
+    },
+    LayoutRecipe {
+        id: "med_twin_split",
+        layout_class: LayoutClass::Mediterranean,
+        blobs: blobs!(-0.25, 0.0, 0.52, 0.62; 0.35, 0.05, 0.48, 0.55),
+        hole: Some(LayoutBlob {
+            cx: 0.05,
+            cy: 0.0,
+            rx: 0.22,
+            ry: 0.38,
         }),
     },
 ];
@@ -403,10 +487,28 @@ pub fn pick_recipe(class: LayoutClass, seed: u64) -> &'static LayoutRecipe {
     list[idx]
 }
 
-/// Three distinct layout classes + one recipe each (for A/B/C cards).
+/// Next recipe for the same class, preferring a different id than `current_id` (D-65).
+pub fn next_recipe(class: LayoutClass, current_id: &str, seed: u64) -> &'static LayoutRecipe {
+    let list = recipes_for(class);
+    if list.is_empty() {
+        return pick_recipe(class, seed);
+    }
+    if list.len() == 1 {
+        return list[0];
+    }
+    let start = (seed as usize) % list.len();
+    for offset in 0..list.len() {
+        let r = list[(start + offset) % list.len()];
+        if r.id != current_id {
+            return r;
+        }
+    }
+    list[start]
+}
+
+/// Deprecated D-64 helper — kept for tests; UI no longer reshuffles classes (D-65).
 pub fn pick_compare_trio(seed: u64) -> [&'static LayoutRecipe; 3] {
     let mut classes = LayoutClass::ALL;
-    // Fisher–Yates with deterministic hash steps.
     for i in (1..classes.len()).rev() {
         let j = (mix64(seed ^ (i as u64 * 0x9E37)) as usize) % (i + 1);
         classes.swap(i, j);
@@ -414,18 +516,7 @@ pub fn pick_compare_trio(seed: u64) -> [&'static LayoutRecipe; 3] {
     let a = pick_recipe(classes[0], mix64(seed ^ 0xA11));
     let b = pick_recipe(classes[1], mix64(seed ^ 0xB22));
     let c = pick_recipe(classes[2], mix64(seed ^ 0xC33));
-    debug_assert_ne!(a.layout_class, b.layout_class);
-    debug_assert_ne!(b.layout_class, c.layout_class);
-    debug_assert_ne!(a.layout_class, c.layout_class);
     [a, b, c]
-}
-
-pub fn recipe_for_variant(trio: [&'static LayoutRecipe; 3], variant: char) -> &'static LayoutRecipe {
-    match variant.to_ascii_uppercase() {
-        'B' => trio[1],
-        'C' => trio[2],
-        _ => trio[0],
-    }
 }
 
 /// Generate silhouette from layout class + shore + seed (picks recipe from bank).
@@ -644,6 +735,14 @@ mod tests {
     }
 
     #[test]
+    fn next_recipe_changes_within_class() {
+        let a = pick_recipe(LayoutClass::Island, 0);
+        let b = next_recipe(LayoutClass::Island, a.id, 1);
+        assert_eq!(a.layout_class, b.layout_class);
+        assert_ne!(a.id, b.id);
+    }
+
+    #[test]
     fn compare_trio_has_distinct_classes() {
         for seed in [0u64, 1, 7, 42, 99, 1000] {
             let trio = pick_compare_trio(seed);
@@ -669,7 +768,6 @@ mod tests {
             .iter()
             .map(|r| generate_land_mask_recipe(&bounds, r, ShoreCharacter::Smooth, 0))
             .collect();
-        // At least two recipes should disagree on some cell.
         let mut differ = false;
         'outer: for i in 0..layers.len() {
             for j in (i + 1)..layers.len() {
@@ -737,7 +835,7 @@ mod tests {
     #[test]
     fn mediterranean_marks_inland_sea() {
         let bounds = MapBounds::new(28, 16);
-        let recipe = find_recipe("med_center_basin").expect("recipe");
+        let recipe = find_recipe("med_c_basin").expect("recipe");
         let layer = generate_land_mask_recipe(&bounds, recipe, ShoreCharacter::Smooth, 11);
         assert!(
             count_kind(&layer, LAND_MASK_INLAND_SEA) > 0,
@@ -748,7 +846,7 @@ mod tests {
     #[test]
     fn continent_and_islands_has_separated_land() {
         let bounds = MapBounds::new(36, 20);
-        let recipe = find_recipe("cai_west_sats").expect("recipe");
+        let recipe = find_recipe("cai_irregular_main").expect("recipe");
         let layer = generate_land_mask_recipe(&bounds, recipe, ShoreCharacter::Smooth, 19);
         let land = count_kind(&layer, LAND_MASK_LAND);
         assert!(land > 40, "main continent should be substantial, got {land}");

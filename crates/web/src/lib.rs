@@ -22,7 +22,7 @@ use elevation_view::{
 use gloo_timers::future::TimeoutFuture;
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::{hydro_from_elevation, stamp_delta, HydroKind};
-use mapkeeper_core::land_mask::{find_recipe, pick_compare_trio};
+use mapkeeper_core::land_mask::{find_recipe, next_recipe, pick_recipe, LayoutClass};
 use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
 use mapkeeper_core::map_preset::MapPreset;
 use mapkeeper_core::profile::CellProfile;
@@ -491,12 +491,11 @@ struct AppState {
     redraw_dirty: bool,
     redraw_raf_pending: bool,
     wizard_character: String,
-    wizard_variant: String,
+    /// Selected layout class id (D-65: six cards always visible).
+    wizard_layout_class: String,
     wizard_regenerate_nonce: u32,
-    /// Recipe ids for A/B/C cards (distinct layout classes).
-    wizard_recipe_a: String,
-    wizard_recipe_b: String,
-    wizard_recipe_c: String,
+    /// Active recipe within the selected class.
+    wizard_recipe_id: String,
     wizard_accepted: bool,
     wizard_edit_mode: bool,
     wizard_edit_brush: String,
@@ -557,11 +556,9 @@ pub fn start() {
         redraw_dirty: false,
         redraw_raf_pending: false,
         wizard_character: "smooth".to_string(),
-        wizard_variant: "A".to_string(),
+        wizard_layout_class: "pangea".to_string(),
         wizard_regenerate_nonce: 0,
-        wizard_recipe_a: String::new(),
-        wizard_recipe_b: String::new(),
-        wizard_recipe_c: String::new(),
+        wizard_recipe_id: String::new(),
         wizard_accepted: false,
         wizard_edit_mode: false,
         wizard_edit_brush: "land".to_string(),
@@ -1113,16 +1110,21 @@ fn set_button_disabled(id: &str, disabled: bool) {
     }
 }
 
-fn sync_wizard_variant_buttons(active: &str) {
-    for (id, name) in [
-        ("wiz-variant-a", "A"),
-        ("wiz-variant-b", "B"),
-        ("wiz-variant-c", "C"),
-    ] {
-        let Some(el) = document().get_element_by_id(id) else {
+fn sync_wizard_layout_buttons(active: &str) {
+    let Ok(Some(root)) = document().query_selector("#wiz-layout-classes") else {
+        return;
+    };
+    let Ok(nodes) = root.query_selector_all("[data-wiz-layout]") else {
+        return;
+    };
+    for i in 0..nodes.length() {
+        let Some(node) = nodes.item(i) else {
             continue;
         };
-        let is_active = name == active;
+        let Ok(el) = node.dyn_into::<Element>() else {
+            continue;
+        };
+        let is_active = el.get_attribute("data-wiz-layout").as_deref() == Some(active);
         if is_active {
             let _ = el.class_list().add_1("active");
         } else {
@@ -1131,48 +1133,36 @@ fn sync_wizard_variant_buttons(active: &str) {
     }
 }
 
-fn sync_wizard_variant_labels(state: &AppState) {
-    for (id, recipe_id, letter) in [
-        ("wiz-variant-a", state.wizard_recipe_a.as_str(), "A"),
-        ("wiz-variant-b", state.wizard_recipe_b.as_str(), "B"),
-        ("wiz-variant-c", state.wizard_recipe_c.as_str(), "C"),
-    ] {
-        let Some(el) = document().get_element_by_id(id) else {
-            continue;
-        };
-        let label = if let Some(recipe) = find_recipe(recipe_id) {
-            format!("{letter} · {}", recipe.layout_class.label())
-        } else {
-            letter.to_string()
-        };
-        el.set_text_content(Some(&label));
+/// Ensure recipe_id matches selected layout class (D-65).
+fn ensure_wizard_recipe(state: &mut AppState) {
+    if !state.wizard_recipe_id.is_empty() {
+        if let Some(recipe) = find_recipe(&state.wizard_recipe_id) {
+            if recipe.layout_class.id() == state.wizard_layout_class {
+                return;
+            }
+        }
     }
-}
-
-fn ensure_wizard_trio(state: &mut AppState) {
-    if !state.wizard_recipe_a.is_empty()
-        && !state.wizard_recipe_b.is_empty()
-        && !state.wizard_recipe_c.is_empty()
-    {
-        return;
-    }
-    reshuffle_wizard_trio(state);
-}
-
-fn reshuffle_wizard_trio(state: &mut AppState) {
+    let class = LayoutClass::parse(&state.wizard_layout_class);
     let seed = (state.wizard_regenerate_nonce as u64).wrapping_mul(0x9E37_79B9) ^ 0xC0FF_EE;
-    let trio = pick_compare_trio(seed);
-    state.wizard_recipe_a = trio[0].id.to_string();
-    state.wizard_recipe_b = trio[1].id.to_string();
-    state.wizard_recipe_c = trio[2].id.to_string();
+    let recipe = pick_recipe(class, seed);
+    state.wizard_layout_class = class.id().to_string();
+    state.wizard_recipe_id = recipe.id.to_string();
 }
 
-fn active_wizard_recipe_id(state: &AppState) -> String {
-    match state.wizard_variant.as_str() {
-        "B" => state.wizard_recipe_b.clone(),
-        "C" => state.wizard_recipe_c.clone(),
-        _ => state.wizard_recipe_a.clone(),
-    }
+fn pick_wizard_recipe_for_class(state: &mut AppState, class_id: &str) {
+    let class = LayoutClass::parse(class_id);
+    let seed = (state.wizard_regenerate_nonce as u64).wrapping_mul(0x9E37_79B9) ^ 0xC0FF_EE;
+    let recipe = pick_recipe(class, seed);
+    state.wizard_layout_class = class.id().to_string();
+    state.wizard_recipe_id = recipe.id.to_string();
+}
+
+fn rotate_wizard_recipe(state: &mut AppState) {
+    let class = LayoutClass::parse(&state.wizard_layout_class);
+    let seed = (state.wizard_regenerate_nonce as u64).wrapping_mul(0x9E37_79B9) ^ 0xBEEF;
+    let recipe = next_recipe(class, &state.wizard_recipe_id, seed);
+    state.wizard_layout_class = class.id().to_string();
+    state.wizard_recipe_id = recipe.id.to_string();
 }
 
 fn sync_wizard_edit_mode_ui(edit_mode: bool, brush: &str) {
@@ -1201,27 +1191,26 @@ fn sync_wizard_actions(state: &AppState) {
     set_button_disabled("wiz-edit", !state.wizard_accepted);
     set_button_disabled("wiz-continue", !state.wizard_accepted);
     set_button_disabled("wiz-geo-continue", !state.wizard_geo_accepted);
-    sync_wizard_variant_labels(state);
-    sync_wizard_variant_buttons(&state.wizard_variant);
+    sync_wizard_layout_buttons(&state.wizard_layout_class);
     sync_wizard_edit_mode_ui(state.wizard_edit_mode, &state.wizard_edit_brush);
     show_wizard_step(state);
 }
 
 async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
-    let (recipe_id, character, variant, nonce) = {
+    let (recipe_id, character, layout_class, nonce) = {
         let mut s = state.borrow_mut();
-        ensure_wizard_trio(&mut s);
+        ensure_wizard_recipe(&mut s);
         (
-            active_wizard_recipe_id(&s),
+            s.wizard_recipe_id.clone(),
             s.wizard_character.clone(),
-            s.wizard_variant.clone(),
+            s.wizard_layout_class.clone(),
             s.wizard_regenerate_nonce,
         )
     };
     let body = WizardLandMaskGenerateInput {
         recipe_id: &recipe_id,
         character: &character,
-        variant: &variant,
+        variant: &layout_class,
         regenerate_nonce: nonce,
     };
     let Ok(resp) = gloo_net::http::Request::post("/api/build/land-mask/generate")
@@ -1243,7 +1232,7 @@ async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
     }
     load_elevation(&state).await;
     schedule_redraw(state.clone());
-    set_wizard_status("Variant generated.");
+    set_wizard_status("Shape generated.");
 }
 
 async fn generate_wizard_geology(state: Rc<RefCell<AppState>>) {
@@ -1424,7 +1413,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             if let Some(character) = el.get_attribute("data-wiz-char") {
                 wiz_toggle_style_group("wiz-chars", "data-wiz-char", &el);
                 state.borrow_mut().wizard_character = character;
-                set_wizard_status("Shore updated. Regenerate or pick a layout variant.");
+                set_wizard_status("Shore updated. Regenerate or pick a layout class.");
             }
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-chars") {
@@ -1434,7 +1423,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // A/B/C variant switch and generation.
+    // Layout class cards (D-65): pick class → recipe for that class → generate.
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
@@ -1444,43 +1433,42 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             let Some(el) = click_target_element(&mouse) else {
                 return;
             };
-            if !el.class_list().contains("wiz-variant-btn") {
+            if !el.class_list().contains("wiz-style-btn") {
                 return;
             }
-            let Some(variant) = el.get_attribute("data-wiz-variant") else {
+            let Some(class_id) = el.get_attribute("data-wiz-layout") else {
                 return;
             };
             {
                 let mut s = state.borrow_mut();
-                s.wizard_variant = variant.clone();
+                pick_wizard_recipe_for_class(&mut s, &class_id);
                 s.wizard_accepted = false;
                 s.wizard_edit_mode = false;
                 sync_wizard_actions(&s);
             }
-            set_wizard_status(&format!("Generating variant {variant}…"));
+            set_wizard_status("Generating selected class…");
             wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
         });
-        if let Ok(Some(root)) = document().query_selector("#wiz-variants") {
+        if let Ok(Some(root)) = document().query_selector("#wiz-layout-classes") {
             let _ =
                 root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
         closure.forget();
     }
 
-    // Regenerate: reshuffle A/B/C classes+recipes, reset accept, generate A.
+    // Regenerate: rotate recipe within selected class only (D-65).
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
             {
                 let mut s = state.borrow_mut();
                 s.wizard_regenerate_nonce = s.wizard_regenerate_nonce.saturating_add(1);
-                reshuffle_wizard_trio(&mut s);
-                s.wizard_variant = "A".to_string();
+                rotate_wizard_recipe(&mut s);
                 s.wizard_accepted = false;
                 s.wizard_edit_mode = false;
                 sync_wizard_actions(&s);
             }
-            set_wizard_status("New comparison set — generating A…");
+            set_wizard_status("New shape for selected class…");
             wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
         });
         document()
@@ -1765,7 +1753,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
 
     {
         let mut s = state.borrow_mut();
-        ensure_wizard_trio(&mut s);
+        ensure_wizard_recipe(&mut s);
         sync_wizard_actions(&s);
     }
 }
@@ -1797,11 +1785,9 @@ async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.legacy_map = false;
     state_mut.wizard_accepted = false;
     state_mut.wizard_edit_mode = false;
-    state_mut.wizard_variant = "A".to_string();
+    state_mut.wizard_layout_class = "pangea".to_string();
     state_mut.wizard_regenerate_nonce = 0;
-    state_mut.wizard_recipe_a.clear();
-    state_mut.wizard_recipe_b.clear();
-    state_mut.wizard_recipe_c.clear();
+    state_mut.wizard_recipe_id.clear();
     state_mut.wizard_step = 3;
     state_mut.wizard_geo_style = "belts".to_string();
     state_mut.wizard_geo_nonce = 0;
@@ -3245,17 +3231,15 @@ fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
                     open_build_wizard();
                     {
                         let mut s = state.borrow_mut();
-                        s.wizard_variant = "A".to_string();
+                        s.wizard_layout_class = "pangea".to_string();
                         s.wizard_regenerate_nonce = 0;
-                        s.wizard_recipe_a.clear();
-                        s.wizard_recipe_b.clear();
-                        s.wizard_recipe_c.clear();
+                        s.wizard_recipe_id.clear();
                         s.wizard_accepted = false;
                         s.wizard_edit_mode = false;
-                        ensure_wizard_trio(&mut s);
+                        ensure_wizard_recipe(&mut s);
                         sync_wizard_actions(&s);
                     }
-                    set_wizard_status("Generating variant A…");
+                    set_wizard_status("Generating Pangea…");
                     wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
                 }
                 Ok(resp) => {
@@ -3836,7 +3820,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                 s.wizard_accepted = resume_step > 3;
                                 s.wizard_edit_mode = false;
                                 s.wizard_geo_accepted = resume_step > 4;
-                                ensure_wizard_trio(&mut s);
+                                ensure_wizard_recipe(&mut s);
                                 sync_wizard_actions(&s);
                             }
                             match resume_step {
@@ -3855,7 +3839,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                         schedule_redraw(state.clone());
                                     });
                                 }
-                                _ => set_wizard_status("Select a variant and accept it to continue."),
+                                _ => set_wizard_status("Pick a class, regenerate until you like the shape, then accept."),
                             }
                         } else {
                             close_build_wizard();
