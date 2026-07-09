@@ -642,19 +642,19 @@
             <button class="swatch" data-brush-step="5" type="button">5</button>
             <button class="swatch" data-brush-step="10" type="button">10</button>
           </div>
-          <p class="pane-label">Brush size</p>
+          <p class="pane-label">Brush size (follows zoom)</p>
           <div class="swatch-row">
-            <button class="swatch active" data-brush-size="0" type="button">1x</button>
-            <button class="swatch" data-brush-size="1" type="button">2x</button>
-            <button class="swatch" data-brush-size="2" type="button">3x</button>
-            <button class="swatch" data-brush-size="3" type="button">4x</button>
+            <button class="swatch active" data-brush-size="0" type="button">S</button>
+            <button class="swatch" data-brush-size="1" type="button">M</button>
+            <button class="swatch" data-brush-size="2" type="button">L</button>
+            <button class="swatch" data-brush-size="3" type="button">XL</button>
           </div>
-          <p class="pane-label">Falloff (raise/lower, 2x–4x)</p>
+          <p class="pane-label">Falloff (raise/lower, M–XL)</p>
           <div class="swatch-row">
             <button class="swatch active" data-falloff="even" type="button">Even</button>
             <button class="swatch" data-falloff="hill" type="button">Hill</button>
           </div>
-          <p class="dock-note">Current: <span id="brush-size-value">1</span>x. Raise/Lower auto-switch to Elevation view.</p>
+          <p class="dock-note">Tier <span id="brush-size-value">S</span> · effective ~<span id="brush-effective-radius">1</span> hex (zoom out = larger). Cap 24.</p>
           <p class="dock-note">Autosave writes on a short cooldown and flushes on mouse release.</p>
         </div>
         <div class="drawer-pane" data-drawer="rivers">
@@ -813,12 +813,12 @@
           </div>
           <p class="wiz-label hidden" id="wiz-edit-size-label">Brush size</p>
           <div class="wiz-btn-row hidden" id="wiz-edit-sizes">
-            <button class="wiz-style-btn active" type="button" data-wiz-edit-size="0">1x</button>
-            <button class="wiz-style-btn" type="button" data-wiz-edit-size="1">2x</button>
-            <button class="wiz-style-btn" type="button" data-wiz-edit-size="2">3x</button>
-            <button class="wiz-style-btn" type="button" data-wiz-edit-size="3">4x</button>
+            <button class="wiz-style-btn active" type="button" data-wiz-edit-size="0">S</button>
+            <button class="wiz-style-btn" type="button" data-wiz-edit-size="1">M</button>
+            <button class="wiz-style-btn" type="button" data-wiz-edit-size="2">L</button>
+            <button class="wiz-style-btn" type="button" data-wiz-edit-size="3">XL</button>
           </div>
-          <p class="wiz-hint hidden" id="wiz-edit-size-hint">Larger brush for big maps — zoom out and paint.</p>
+          <p class="wiz-hint hidden" id="wiz-edit-size-hint">Size follows zoom — zoom out for a larger stamp (cap ~24 hex).</p>
         </section>
 
         <section class="wiz-section">

@@ -38,7 +38,8 @@ Use this first, then open only the needed files.
 - Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, `PUT /api/build/bounds`, list `build_draft`/`build_step`) -> `crates/server/src/lib.rs` (D-59, D-69)
 - Build wizard step-1–5 API (`PUT /api/build/bounds` preset rewrite + Geo reset; `POST /api/build/land-mask/generate` returns seed identity JSON; land-mask cells; geology/elevation generate) -> `crates/server/src/lib.rs` (`wizard-size-grid-step`, `world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`, D-68/D-69)
 - World Build Wizard shell (D-57 + D-59 draft resume + D-69 size/grid before Geo): Home **Build World**, fullscreen overlay, Save Draft / wizard resume -> `crates/web/index.html`, `crates/web/src/lib.rs`
-- World Build Wizard steps 1–5 (size/grid blank preview → silhouette → tectonics → elevation → Finish; Back on steps 2–5; step 3 gen identity + Edit brush sizes 1x–4x stamp/drag) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`wizard-size-grid-step`, `step3-land-silhouette-flow-v2`, D-43/D-65/D-66/D-68/D-69, `world-pipeline--tectonics-v1`)
+- World Build Wizard steps 1–5 (size/grid blank preview → silhouette → tectonics → elevation → Finish; Back on steps 2–5; step 3 gen identity + Edit brush S–XL zoom-adaptive) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`wizard-size-grid-step`, `brush-size--zoom-adaptive`, D-43/D-70/D-65/D-66/D-68/D-69, `world-pipeline--tectonics-v1`)
+- Brush size S–XL screen tiers → effective hex radius from zoom (editor + wizard Edit; cap 24) -> `crates/web/src/lib.rs` (`brush-size--zoom-adaptive`, D-70)
 - World scaffold source -> `toolchain/template/world/`
 - CI/build behavior -> `.github/workflows/`
 

@@ -41,8 +41,16 @@ const PAN_DRAG_THRESHOLD: f64 = 3.0;
 // save-batch--http-endpoint-v1: tuneable write buffering.
 const PAINT_SAVE_COOLDOWN_MS: u32 = 300;
 const PAINT_BATCH_MAX_CELLS: usize = 512;
-const MIN_BRUSH_RADIUS: i32 = 0;
-const MAX_BRUSH_RADIUS: i32 = 3;
+// brush-size--zoom-adaptive (D-70): screen-space tier → cell radius from zoom.
+const MIN_BRUSH_TIER: i32 = 0;
+const MAX_BRUSH_TIER: i32 = 3;
+/// Soft ceiling on effective hex radius (World overview perf guard; tunable).
+const MAX_EFFECTIVE_BRUSH_RADIUS: i32 = 24;
+/// Screen-space brush diameters (px) for tiers S/M/L/XL.
+const BRUSH_SCREEN_DIAMETERS_PX: [f64; 4] = [28.0, 56.0, 96.0, 144.0];
+// Legacy aliases — tier index still stored as brush_radius field.
+const MIN_BRUSH_RADIUS: i32 = MIN_BRUSH_TIER;
+const MAX_BRUSH_RADIUS: i32 = MAX_BRUSH_TIER;
 // perf-100k--canvas-lod-grid-markers: skip per-hex stroke when many cells visible.
 const GRID_STROKE_CELL_THRESHOLD: usize = 10_000;
 // perf-100k--canvas-lod-grid-markers: hide profile dots when zoomed out.
@@ -484,7 +492,7 @@ struct AppState {
     paint_active: bool,
     paint_moved: bool,
     paint_last_cell: Option<(i32, i32)>,
-    /// Brush radius in hex cells (0 = single cell).
+    /// Brush size tier 0..=3 (S/M/L/XL). Effective hex radius from zoom (D-70).
     brush_radius: i32,
     /// Raise/Lower step magnitude (1, 5, or 10).
     brush_step: i32,
@@ -524,7 +532,7 @@ struct AppState {
     wizard_accepted: bool,
     wizard_edit_mode: bool,
     wizard_edit_brush: String,
-    /// D-43 sizes reused in wizard land edit (0..=3 → 1x..4x).
+    /// D-70: screen tier 0..=3 (S–XL); effective radius from zoom.
     wizard_brush_radius: i32,
     /// Build wizard step: 1 size · 2 grid · 3 silhouette · 4 tectonics · 5 elevation (D-69).
     wizard_step: u32,
@@ -839,8 +847,8 @@ fn sync_brush_swatch_active(brush: &Brush) {
 }
 
 fn sync_brush_radius_active(radius: i32) {
-    let radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
-    set_text("brush-size-value", &(radius + 1).to_string());
+    let tier = radius.clamp(MIN_BRUSH_TIER, MAX_BRUSH_TIER);
+    set_text("brush-size-value", brush_tier_label(tier));
     if let Some(drawer) = document().get_element_by_id("dock-drawer") {
         if let Ok(items) = drawer.query_selector_all("[data-brush-size]") {
             for i in 0..items.length() {
@@ -849,7 +857,7 @@ fn sync_brush_radius_active(radius: i32) {
                         let is_active = el
                             .get_attribute("data-brush-size")
                             .and_then(|v| v.parse::<i32>().ok())
-                            .map(|v| v == radius)
+                            .map(|v| v == tier)
                             .unwrap_or(false);
                         if is_active {
                             let _ = el.class_list().add_1("active");
@@ -861,6 +869,11 @@ fn sync_brush_radius_active(radius: i32) {
             }
         }
     }
+}
+
+fn sync_brush_effective_label(state: &AppState) {
+    let eff = effective_paint_radius(state).max(1);
+    set_text("brush-effective-radius", &eff.to_string());
 }
 
 fn draw_preview_boundary(
@@ -877,11 +890,7 @@ fn draw_preview_boundary(
     let Some(center) = state.hover_cell else {
         return;
     };
-    let radius = if wizard_edit {
-        state.wizard_brush_radius
-    } else {
-        state.brush_radius
-    };
+    let radius = effective_paint_radius(state);
     let cells = paint_stamp_cells(center, radius, state.map_bounds);
     if cells.is_empty() {
         return;
@@ -1627,7 +1636,9 @@ async fn wizard_set_land_mask_stamp(
 ) {
     let cells = {
         let s = state.borrow();
-        paint_stamp_cells(center, s.wizard_brush_radius, s.map_bounds)
+        let radius =
+            effective_brush_radius_from_hex_size(s.wizard_brush_radius, current_hex_size_px(&s));
+        paint_stamp_cells(center, radius, s.map_bounds)
     };
     if cells.is_empty() {
         return;
@@ -1951,7 +1962,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             sync_wizard_actions(&s);
             if edit_now {
                 set_wizard_status(
-                    "Edit mode: paint land/ocean (pick brush size 1x–4x for large maps).",
+                    "Edit mode: paint land/ocean — S–XL follows zoom (zoom out = larger stamp).",
                 );
             } else {
                 set_wizard_status("Edit mode off.");
@@ -2329,6 +2340,44 @@ fn clamp_zoom(value: f64) -> f64 {
     value.clamp(MIN_ZOOM, MAX_ZOOM)
 }
 
+/// brush-size--zoom-adaptive (D-70): tier → screen diameter → hex radius from layout size.
+fn brush_tier_screen_diameter(tier: i32) -> f64 {
+    let i = tier.clamp(MIN_BRUSH_TIER, MAX_BRUSH_TIER) as usize;
+    BRUSH_SCREEN_DIAMETERS_PX[i]
+}
+
+fn effective_brush_radius_from_hex_size(tier: i32, hex_size_px: f64) -> i32 {
+    let diameter = brush_tier_screen_diameter(tier);
+    let hex_w = (3f64.sqrt() * hex_size_px).max(1.0);
+    let radius = ((diameter / hex_w) * 0.5).floor() as i32;
+    radius.clamp(0, MAX_EFFECTIVE_BRUSH_RADIUS)
+}
+
+fn current_hex_size_px(state: &AppState) -> f64 {
+    let canvas = canvas();
+    let rect = canvas.get_bounding_client_rect();
+    let (size, _, _) = map_layout(state, rect.width(), rect.height());
+    size
+}
+
+fn effective_paint_radius(state: &AppState) -> i32 {
+    let tier = if wizard_is_active() && state.wizard_edit_mode {
+        state.wizard_brush_radius
+    } else {
+        state.brush_radius
+    };
+    effective_brush_radius_from_hex_size(tier, current_hex_size_px(state))
+}
+
+fn brush_tier_label(tier: i32) -> &'static str {
+    match tier.clamp(MIN_BRUSH_TIER, MAX_BRUSH_TIER) {
+        0 => "S",
+        1 => "M",
+        2 => "L",
+        _ => "XL",
+    }
+}
+
 fn visible_scan_bounds(
     width: f64,
     height: f64,
@@ -2521,7 +2570,9 @@ fn redraw(state: &AppState) -> usize {
         },
     );
     sync_brush_radius_active(state.brush_radius);
-    sync_falloff_active(state.falloff_even, state.brush_radius);
+    sync_brush_effective_label(state);
+    let eff = effective_paint_radius(state);
+    sync_falloff_active(state.falloff_even, eff);
     sync_brush_step_active(state.brush_step);
     drawn_cells
 }
@@ -2961,7 +3012,7 @@ fn paint_stamp_cells(
     brush_radius: i32,
     map_bounds: MapBounds,
 ) -> Vec<(i32, i32)> {
-    let brush = brush_radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
+    let brush = brush_radius.clamp(0, MAX_EFFECTIVE_BRUSH_RADIUS);
     Axial::new(center.0, center.1)
         .range(brush)
         .into_iter()
@@ -2974,7 +3025,8 @@ fn queue_paint_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), new_eleva
     let painted_cells = {
         let mut s = state.borrow_mut();
         let map_bounds = s.map_bounds;
-        let painted = paint_stamp_cells(center, s.brush_radius, map_bounds);
+        let radius = effective_brush_radius_from_hex_size(s.brush_radius, current_hex_size_px(&s));
+        let painted = paint_stamp_cells(center, radius, map_bounds);
         for (q, r) in &painted {
             set_elevation_cell(&mut s.elevation, map_bounds, *q, *r, new_elevation);
             s.pending_paints.insert((*q, *r), new_elevation);
@@ -2994,7 +3046,8 @@ fn queue_paint_delta_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), ste
     let painted_cells = {
         let mut s = state.borrow_mut();
         let map_bounds = s.map_bounds;
-        let brush_radius = s.brush_radius;
+        let brush_radius =
+            effective_brush_radius_from_hex_size(s.brush_radius, current_hex_size_px(&s));
         let step = s.brush_step;
         let even = s.falloff_even || brush_radius == 0;
         let center_axial = Axial::new(center.0, center.1);
@@ -3452,6 +3505,7 @@ fn attach_wheel_zoom(state: Rc<RefCell<AppState>>) {
         s.pan_x = new_ox - base_ox;
         s.pan_y = new_oy - base_oy;
         drop(s);
+        sync_brush_effective_label(&state.borrow());
         schedule_redraw(state.clone());
     });
     let _ = canvas().add_event_listener_with_callback("wheel", closure.as_ref().unchecked_ref());
@@ -3974,11 +4028,12 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                     return;
                 };
                 let even = mode != "hill";
-                if state.borrow().brush_radius == 0 && !even {
+                let eff = effective_paint_radius(&state.borrow());
+                if eff == 0 && !even {
                     return;
                 }
                 state.borrow_mut().falloff_even = even;
-                sync_falloff_active(even, state.borrow().brush_radius);
+                sync_falloff_active(even, eff);
                 return;
             }
 
@@ -3991,13 +4046,18 @@ fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                 };
                 {
                     let mut s = state.borrow_mut();
-                    s.brush_radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
+                    s.brush_radius = radius.clamp(MIN_BRUSH_TIER, MAX_BRUSH_TIER);
                     if s.brush_radius == 0 {
                         s.falloff_even = true;
                     }
                 }
-                sync_brush_radius_active(state.borrow().brush_radius);
-                sync_falloff_active(state.borrow().falloff_even, state.borrow().brush_radius);
+                let s = state.borrow();
+                sync_brush_radius_active(s.brush_radius);
+                sync_brush_effective_label(&s);
+                let eff = effective_paint_radius(&s);
+                sync_falloff_active(s.falloff_even, eff);
+                drop(s);
+                schedule_redraw(state.clone());
                 return;
             }
 
