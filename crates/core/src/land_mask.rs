@@ -704,7 +704,7 @@ pub fn generate_land_mask_recipe(
     prune_thin_corridors(bounds, &mut layer, 4);
     remove_tiny_islands(bounds, &mut layer, min_island_cells(recipe));
     // Third pass: remember layout_class identity (e.g. Pangea = one mass).
-    enforce_layout_class(bounds, &mut layer, recipe.layout_class);
+    enforce_layout_class(bounds, &mut layer, recipe.layout_class, seed);
     mark_inland_seas(bounds, &mut layer);
     layer
 }
@@ -1083,23 +1083,25 @@ fn flood_ocean(layer: &mut DenseLayer, cells: &[usize]) {
 }
 
 /// Third pass after growth: enforce class identity (D-66 dogfood).
-/// Pangea/Island → one mass; Continents → at most two; CAI → main + small sats.
-fn enforce_layout_class(bounds: &MapBounds, layer: &mut DenseLayer, class: LayoutClass) {
+/// Pangea/Island → one mass; Continents → two roughly equal masses; CAI → main + small sats.
+fn enforce_layout_class(
+    bounds: &MapBounds,
+    layer: &mut DenseLayer,
+    class: LayoutClass,
+    seed: u64,
+) {
     let components = land_components(bounds, layer);
     if components.is_empty() {
         return;
     }
     match class {
         LayoutClass::Pangea | LayoutClass::Island | LayoutClass::Mediterranean => {
-            // One dominant landmass (med may enclose inland_sea after this).
             for component in components.into_iter().skip(1) {
                 flood_ocean(layer, &component);
             }
         }
         LayoutClass::Continents => {
-            for component in components.into_iter().skip(2) {
-                flood_ocean(layer, &component);
-            }
+            balance_continents(bounds, layer, seed);
         }
         LayoutClass::ContinentAndIslands => {
             let main_len = components[0].len().max(1);
@@ -1108,15 +1110,231 @@ fn enforce_layout_class(bounds: &MapBounds, layer: &mut DenseLayer, class: Layou
                 if i == 0 {
                     continue;
                 }
-                // Drop second continent-sized masses; keep only small satellites.
                 if component.len() > sat_cap {
                     flood_ocean(layer, &component);
                 }
             }
         }
-        LayoutClass::Archipelago => {
-            // Many islands is the identity — no merge/drop beyond tiny cleanup.
+        LayoutClass::Archipelago => {}
+    }
+}
+
+/// Continents: keep two masses of comparable size (smaller/larger ≥ ~0.45).
+fn balance_continents(bounds: &MapBounds, layer: &mut DenseLayer, seed: u64) {
+    // Drop 3rd+ fragments first.
+    let comps = land_components(bounds, layer);
+    for component in comps.into_iter().skip(2) {
+        flood_ocean(layer, &component);
+    }
+
+    let mut comps = land_components(bounds, layer);
+    if comps.is_empty() {
+        return;
+    }
+
+    // Tiny second mass is noise — remove and regrow.
+    if comps.len() >= 2 && comps[1].len() * 100 / comps[0].len().max(1) < 40 {
+        flood_ocean(layer, &comps[1]);
+        comps = land_components(bounds, layer);
+    }
+
+    if comps.len() == 1 {
+        grow_second_continent(bounds, layer, &comps[0], seed);
+        comps = land_components(bounds, layer);
+    }
+
+    if comps.len() < 2 {
+        return;
+    }
+
+    // Grow the smaller toward ~70% of the larger.
+    let big_n = comps[0].len();
+    let small_n = comps[1].len();
+    if small_n * 100 / big_n.max(1) < 45 {
+        let target = (big_n as f64 * 0.70) as usize;
+        expand_land_mass(bounds, layer, &comps[1], &comps[0], target, seed ^ 0xC071);
+        comps = land_components(bounds, layer);
+    }
+
+    if comps.len() < 2 {
+        return;
+    }
+
+    // Still lopsided → erode the larger down toward ~1.6× the smaller.
+    let big_n = comps[0].len();
+    let small_n = comps[1].len();
+    if small_n * 100 / big_n.max(1) < 45 {
+        let target_big = ((small_n as f64) / 0.55).round() as usize;
+        erode_land_mass(bounds, layer, &comps[0], target_big.max(small_n + 4));
+    }
+
+    // Final: never more than two.
+    let comps = land_components(bounds, layer);
+    for component in comps.into_iter().skip(2) {
+        flood_ocean(layer, &component);
+    }
+}
+
+fn component_centroid(bounds: &MapBounds, cells: &[usize]) -> (f64, f64) {
+    let mut sx = 0.0;
+    let mut sy = 0.0;
+    let mut n = 0.0;
+    for &i in cells {
+        let Some(cell) = bounds.from_index(i) else {
+            continue;
+        };
+        let (x, y) = cell.to_pixel(1.0);
+        sx += x;
+        sy += y;
+        n += 1.0;
+    }
+    if n <= 0.0 {
+        (0.0, 0.0)
+    } else {
+        (sx / n, sy / n)
+    }
+}
+
+fn grow_second_continent(
+    bounds: &MapBounds,
+    layer: &mut DenseLayer,
+    main: &[usize],
+    seed: u64,
+) {
+    let (mx, my) = component_centroid(bounds, main);
+    let mut best = None;
+    let mut best_d = -1.0f64;
+    for index in 0..bounds.len() {
+        if is_land_cell(layer, index) {
+            continue;
         }
+        let Some(cell) = bounds.from_index(index) else {
+            continue;
+        };
+        // Prefer ocean not touching the main mass (keep a channel).
+        let touches_main = cell.neighbors().iter().any(|nb| {
+            bounds
+                .index_of(*nb)
+                .is_some_and(|ni| is_land_cell(layer, ni))
+        });
+        if touches_main {
+            continue;
+        }
+        let (x, y) = cell.to_pixel(1.0);
+        let d = (x - mx).hypot(y - my);
+        let jitter = unit01(seed ^ (index as u64)) * 0.5;
+        let score = d + jitter;
+        if score > best_d {
+            best_d = score;
+            best = Some(index);
+        }
+    }
+    let Some(start) = best else {
+        return;
+    };
+    let target = (main.len() as f64 * 0.75).round() as usize;
+    set_land(layer, start);
+    expand_land_mass(bounds, layer, &[start], main, target.max(8), seed ^ 0x5EC);
+}
+
+fn set_land(layer: &mut DenseLayer, index: usize) {
+    layer.set(
+        index,
+        DenseState::Value(LayerValue::Text(LAND_MASK_LAND.to_string())),
+    );
+}
+
+fn expand_land_mass(
+    bounds: &MapBounds,
+    layer: &mut DenseLayer,
+    seed_cells: &[usize],
+    avoid: &[usize],
+    target: usize,
+    seed: u64,
+) {
+    let avoid_set: std::collections::HashSet<usize> = avoid.iter().copied().collect();
+    let mut in_mass: std::collections::HashSet<usize> = seed_cells.iter().copied().collect();
+    let mut queue: std::collections::VecDeque<usize> = seed_cells.iter().copied().collect();
+    let mut step = 0u64;
+
+    while in_mass.len() < target {
+        let Some(i) = queue.pop_front() else {
+            break;
+        };
+        let Some(cell) = bounds.from_index(i) else {
+            continue;
+        };
+        let mut neigh = cell.neighbors();
+        shuffle_six(&mut neigh, seed ^ step.wrapping_mul(0xA11));
+        for nb in neigh {
+            let Some(ni) = bounds.index_of(nb) else {
+                continue;
+            };
+            if in_mass.contains(&ni) || avoid_set.contains(&ni) || is_land_cell(layer, ni) {
+                continue;
+            }
+            // Keep a water channel: skip cells adjacent to the avoided mass.
+            let touches_avoid = nb.neighbors().iter().any(|n2| {
+                bounds
+                    .index_of(*n2)
+                    .is_some_and(|nj| avoid_set.contains(&nj))
+            });
+            if touches_avoid {
+                continue;
+            }
+            step = step.wrapping_add(1);
+            // Mild preference for farther cells from avoid centroid.
+            if unit01(seed ^ step) < 0.12 {
+                continue;
+            }
+            set_land(layer, ni);
+            in_mass.insert(ni);
+            queue.push_back(ni);
+            if in_mass.len() >= target {
+                break;
+            }
+        }
+    }
+}
+
+fn erode_land_mass(
+    bounds: &MapBounds,
+    layer: &mut DenseLayer,
+    mass: &[usize],
+    target: usize,
+) {
+    if mass.len() <= target {
+        return;
+    }
+    let mut alive: std::collections::HashSet<usize> = mass.iter().copied().collect();
+    while alive.len() > target {
+        let mut best: Option<(usize, usize)> = None; // (land_neighbors, index)
+        for &i in &alive {
+            let Some(cell) = bounds.from_index(i) else {
+                continue;
+            };
+            let mut land_n = 0usize;
+            for nb in cell.neighbors() {
+                if bounds.index_of(nb).is_some_and(|ni| alive.contains(&ni)) {
+                    land_n += 1;
+                }
+            }
+            // Prefer fringe (few land neighbors).
+            let key = land_n;
+            if best.map(|(b, _)| key < b).unwrap_or(true) {
+                best = Some((key, i));
+            }
+        }
+        let Some((_, drop_i)) = best else {
+            break;
+        };
+        // Don't shatter into many pieces: skip cells whose removal disconnects badly
+        // (simple: never drop if land_n >= 4 — only fringe).
+        alive.remove(&drop_i);
+        layer.set(
+            drop_i,
+            DenseState::Value(LayerValue::Text(LAND_MASK_OCEAN.to_string())),
+        );
     }
 }
 
@@ -1446,7 +1664,29 @@ mod tests {
                 DenseState::Value(LayerValue::Text(LAND_MASK_LAND.to_string())),
             );
         }
-        enforce_layout_class(&bounds, &mut layer, LayoutClass::Pangea);
+        enforce_layout_class(&bounds, &mut layer, LayoutClass::Pangea, 0);
         assert_eq!(land_components(&bounds, &layer).len(), 1);
+    }
+
+    #[test]
+    fn continents_masses_are_comparable() {
+        let bounds = MapBounds::new(32, 18);
+        for seed in [0u64, 5, 17, 42, 88] {
+            let layer =
+                generate_land_mask(&bounds, LayoutClass::Continents, ShoreCharacter::Jagged, seed);
+            let comps = land_components(&bounds, &layer);
+            assert!(
+                comps.len() >= 2,
+                "continents seed {seed} should have ≥2 masses, got {}",
+                comps.len()
+            );
+            let ratio = comps[1].len() as f64 / comps[0].len().max(1) as f64;
+            assert!(
+                ratio >= 0.40,
+                "continents seed {seed}: second/first={ratio:.2} ({} vs {})",
+                comps[1].len(),
+                comps[0].len()
+            );
+        }
     }
 }
