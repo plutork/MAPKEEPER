@@ -1157,13 +1157,13 @@ fn balance_continents(bounds: &MapBounds, layer: &mut DenseLayer, seed: u64) {
         comps = land_components(bounds, layer);
     }
 
-    // If still tiny second: compact grow (budget-capped), then re-check.
+    // If still tiny second: organic grow (budget-capped), then re-check.
     if comps.len() >= 2 {
         let big_n = comps[0].len();
         let small_n = comps[1].len();
         if small_n * 100 / big_n.max(1) < 45 {
             let target = (big_n as f64 * 0.65).round() as usize;
-            grow_compact_mass(
+            grow_organic_mass(
                 bounds,
                 layer,
                 &comps[1],
@@ -1270,8 +1270,7 @@ fn grow_second_continent(
     // Cap: second continent must not exceed ~35% of the map (prevents half-fill).
     let map_cap = (bounds.len() as f64 * 0.35).round() as usize;
     let target = target.min(map_cap).max(12);
-    set_land(layer, start);
-    grow_compact_mass(bounds, layer, &[start], main, target, seed ^ 0x5EC);
+    grow_organic_mass(bounds, layer, &[start], main, target, seed ^ 0x5EC);
 }
 
 fn set_land(layer: &mut DenseLayer, index: usize) {
@@ -1281,8 +1280,8 @@ fn set_land(layer: &mut DenseLayer, index: usize) {
     );
 }
 
-/// Compact radial growth from existing seed cells — never flood-fills a map half.
-fn grow_compact_mass(
+/// Grow / expand a land mass via organic blob heights (D-66) — not a radial disk.
+fn grow_organic_mass(
     bounds: &MapBounds,
     layer: &mut DenseLayer,
     seed_cells: &[usize],
@@ -1293,104 +1292,158 @@ fn grow_compact_mass(
     if seed_cells.is_empty() || target <= seed_cells.len() {
         return;
     }
+    let n = bounds.len();
+    let mut heights = vec![0.0f64; n];
     let avoid_set: std::collections::HashSet<usize> = avoid.iter().copied().collect();
-    let (cx, cy) = component_centroid(bounds, seed_cells);
-    let mut in_mass: std::collections::HashSet<usize> = seed_cells.iter().copied().collect();
+    let (ax, ay) = component_centroid(bounds, avoid);
+    let (sx, sy) = component_centroid(bounds, seed_cells);
+    let start = seed_cells[seed_cells.len() / 2];
 
-    // Soft radius from target area (hex area ≈ 1 cell); keep blob roundish.
-    let radius = ((target as f64 / std::f64::consts::PI).sqrt() * 1.35).max(2.0);
+    // Elongation axis roughly away from the main mass (not a perfect circle).
+    let mut ex = sx - ax;
+    let mut ey = sy - ay;
+    let elen = (ex * ex + ey * ey).sqrt().max(1e-6);
+    ex /= elen;
+    ey /= elen;
+    // Twist axis a bit so forms vary.
+    let twist = (unit01(seed ^ 0x71) - 0.5) * 0.8;
+    let (ex, ey) = (
+        ex * twist.cos() - ey * twist.sin(),
+        ex * twist.sin() + ey * twist.cos(),
+    );
 
-    // Candidate ocean cells scored by distance to seed centroid (closer first).
-    let mut candidates: Vec<(i32, u64, usize)> = Vec::new();
-    for index in 0..bounds.len() {
-        if in_mass.contains(&index) || avoid_set.contains(&index) || is_land_cell(layer, index) {
-            continue;
+    // Seed existing / starter cells so growth stays connected to them.
+    for &i in seed_cells {
+        if i < n {
+            heights[i] = 1.0;
+            if !is_land_cell(layer, i) && !avoid_set.contains(&i) {
+                set_land(layer, i);
+            }
         }
-        let Some(cell) = bounds.from_index(index) else {
-            continue;
-        };
-        let touches_avoid = cell.neighbors().iter().any(|n2| {
-            bounds
-                .index_of(*n2)
-                .is_some_and(|nj| avoid_set.contains(&nj))
-        });
-        if touches_avoid {
-            continue;
-        }
-        let (x, y) = cell.to_pixel(1.0);
-        let d = (x - cx).hypot(y - cy);
-        if d > radius * 1.15 {
-            continue;
-        }
-        let jitter = (unit01(seed ^ (index as u64)) * 1000.0) as u64;
-        candidates.push(((d * 100.0) as i32, jitter, index));
     }
-    candidates.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
 
-    for (_, _, index) in candidates {
-        if in_mass.len() >= target {
-            break;
+    grow_blob(
+        bounds,
+        &mut heights,
+        start,
+        0.95,
+        0.87,
+        0.55,
+        0.45,
+        ex,
+        ey,
+        seed,
+    );
+
+    // Extra seeds along the existing mass edge — irregular coastline.
+    let edge_seeds: Vec<usize> = seed_cells
+        .iter()
+        .copied()
+        .filter(|&i| {
+            let Some(cell) = bounds.from_index(i) else {
+                return false;
+            };
+            cell.neighbors().iter().any(|nb| {
+                bounds
+                    .index_of(*nb)
+                    .is_some_and(|ni| !is_land_cell(layer, ni) && !avoid_set.contains(&ni))
+            })
+        })
+        .collect();
+    let overlay_n = 4.min(edge_seeds.len().max(1));
+    for i in 0..overlay_n as u64 {
+        let s = mix64(seed ^ (i * 0x9E37) ^ 0x0B1);
+        let cur = if edge_seeds.is_empty() {
+            start
+        } else {
+            edge_seeds[(s as usize) % edge_seeds.len()]
+        };
+        if avoid_set.contains(&cur) {
+            continue;
         }
-        // Must stay connected to the growing mass.
+        let (ox, oy) = elongation_axis(s ^ 0xE2, 0.55);
+        grow_blob(
+            bounds,
+            &mut heights,
+            cur,
+            0.40 + unit01(s) * 0.25,
+            0.84,
+            0.6,
+            0.35,
+            ox,
+            oy,
+            s,
+        );
+    }
+
+    // Ban cells that touch the avoided mass (keep a channel).
+    for index in 0..n {
+        if avoid_set.contains(&index) {
+            heights[index] = 0.0;
+            continue;
+        }
         let Some(cell) = bounds.from_index(index) else {
             continue;
         };
-        let touches_mass = cell.neighbors().iter().any(|nb| {
+        let touches_avoid = cell.neighbors().iter().any(|nb| {
             bounds
                 .index_of(*nb)
-                .is_some_and(|ni| in_mass.contains(&ni))
+                .is_some_and(|ni| avoid_set.contains(&ni))
         });
-        if !touches_mass && !in_mass.is_empty() {
-            // Allow first ring from seeds only via adjacency.
+        if touches_avoid {
+            heights[index] = 0.0;
+        }
+    }
+
+    // Soft distance falloff from mass centroid — no hard circle clip.
+    let soft_r = ((target as f64 / std::f64::consts::PI).sqrt() * 2.2).max(4.0);
+    for index in 0..n {
+        if heights[index] <= 0.0 {
+            continue;
+        }
+        let Some(cell) = bounds.from_index(index) else {
+            continue;
+        };
+        let (x, y) = cell.to_pixel(1.0);
+        let d = (x - sx).hypot(y - sy);
+        if d > soft_r {
+            let t = ((d - soft_r) / (soft_r * 0.55)).clamp(0.0, 1.0);
+            heights[index] *= 1.0 - t;
+        }
+    }
+
+    let need = target.saturating_sub(seed_cells.len());
+    let threshold = threshold_for_fraction(&heights, target as f64 / n as f64);
+    let mut painted = 0usize;
+    // Paint by descending height so we hit ~target with organic outline.
+    let mut order: Vec<(i32, usize)> = heights
+        .iter()
+        .enumerate()
+        .filter(|(i, h)| **h > threshold && !seed_cells.contains(i))
+        .map(|(i, h)| ((-*h * 1_000_000.0) as i32, i))
+        .collect();
+    order.sort_unstable();
+    for (_, index) in order {
+        if painted >= need {
+            break;
+        }
+        if is_land_cell(layer, index) || avoid_set.contains(&index) {
+            continue;
+        }
+        // Stay connected to existing / newly painted mass.
+        let Some(cell) = bounds.from_index(index) else {
+            continue;
+        };
+        let touches = cell.neighbors().iter().any(|nb| {
+            bounds.index_of(*nb).is_some_and(|ni| {
+                seed_cells.contains(&ni) || is_land_cell(layer, ni)
+            })
+        });
+        if !touches {
             continue;
         }
         set_land(layer, index);
-        in_mass.insert(index);
-    }
-
-    // If still short, one more ring with slightly larger radius (still compact).
-    if in_mass.len() < target {
-        let radius2 = radius * 1.35;
-        let mut more: Vec<(i32, usize)> = Vec::new();
-        for index in 0..bounds.len() {
-            if in_mass.contains(&index) || avoid_set.contains(&index) || is_land_cell(layer, index)
-            {
-                continue;
-            }
-            let Some(cell) = bounds.from_index(index) else {
-                continue;
-            };
-            let touches_avoid = cell.neighbors().iter().any(|n2| {
-                bounds
-                    .index_of(*n2)
-                    .is_some_and(|nj| avoid_set.contains(&nj))
-            });
-            if touches_avoid {
-                continue;
-            }
-            let touches_mass = cell.neighbors().iter().any(|nb| {
-                bounds
-                    .index_of(*nb)
-                    .is_some_and(|ni| in_mass.contains(&ni))
-            });
-            if !touches_mass {
-                continue;
-            }
-            let (x, y) = cell.to_pixel(1.0);
-            let d = (x - cx).hypot(y - cy);
-            if d > radius2 {
-                continue;
-            }
-            more.push(((d * 100.0) as i32, index));
-        }
-        more.sort_by_key(|(d, _)| *d);
-        for (_, index) in more {
-            if in_mass.len() >= target {
-                break;
-            }
-            set_land(layer, index);
-            in_mass.insert(index);
-        }
+        painted += 1;
     }
 }
 
