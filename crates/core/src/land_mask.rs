@@ -700,6 +700,8 @@ pub fn generate_land_mask_recipe(
     }
 
     apply_shore_fringe(bounds, &mut layer, character, seed);
+    // D-66 dogfood: kill 1-hex-wide axis strips left by growth.
+    prune_thin_corridors(bounds, &mut layer, 4);
     remove_tiny_islands(bounds, &mut layer, min_island_cells(recipe));
     mark_inland_seas(bounds, &mut layer);
     layer
@@ -776,6 +778,7 @@ fn nearest_index(bounds: &MapBounds, nx: f64, ny: f64, max_x: f64, max_y: f64) -
 }
 
 /// Azgaar-style blob growth: parent height × decay × sharpness RNG; max-blend layers.
+/// Neighbor order is shuffled each step so hex axes do not form persistent strips (D-66).
 fn grow_blob(
     bounds: &MapBounds,
     heights: &mut [f64],
@@ -795,6 +798,8 @@ fn grow_blob(
     used[start] = true;
     queue.push_back(start);
     let mut step = 0u64;
+    // Mild elongation only — strong axis stretch made comb-like coasts.
+    let elong = (elongation * 0.12).clamp(0.0, 0.12);
     while let Some(index) = queue.pop_front() {
         let Some(cell) = bounds.from_index(index) else {
             continue;
@@ -804,7 +809,9 @@ fn grow_blob(
             continue;
         }
         let (px, py) = cell.to_pixel(1.0);
-        for ncell in cell.neighbors() {
+        let mut neigh = cell.neighbors();
+        shuffle_six(&mut neigh, seed ^ step.wrapping_mul(0xC2B2) ^ (index as u64));
+        for ncell in neigh {
             let Some(ni) = bounds.index_of(ncell) else {
                 continue;
             };
@@ -813,20 +820,23 @@ fn grow_blob(
             }
             used[ni] = true;
             step = step.wrapping_add(1);
+            // Sharpness band kept narrow so ridges cannot runaway along one hex ray.
             let mut mod_v = if sharpness <= 0.05 {
                 1.0
             } else {
-                unit01(seed ^ step.wrapping_mul(0x9E37) ^ (ni as u64)) * sharpness
-                    + (1.1 - sharpness)
+                let band = sharpness.min(0.55);
+                unit01(seed ^ step.wrapping_mul(0x9E37) ^ (ni as u64)) * band + (1.0 - band * 0.5)
             };
-            if elongation > 0.05 {
+            mod_v = mod_v.clamp(0.72, 1.12);
+            if elong > 0.01 {
                 let (nx, ny) = ncell.to_pixel(1.0);
                 let dx = nx - px;
                 let dy = ny - py;
                 let along = (dx * axis_x + dy * axis_y).abs();
                 let across = (dx * -axis_y + dy * axis_x).abs();
-                let stretch = 1.0 + elongation * 0.35 * (along - across).tanh();
+                let stretch = 1.0 + elong * (along - across).tanh();
                 mod_v *= stretch;
+                mod_v = mod_v.clamp(0.70, 1.15);
             }
             let h = parent_h * decay * mod_v;
             if h > heights[ni] {
@@ -837,6 +847,62 @@ fn grow_blob(
             }
         }
     }
+}
+
+fn shuffle_six(items: &mut [Axial; 6], seed: u64) {
+    let mut s = seed;
+    for i in (1..6).rev() {
+        s = mix64(s ^ (i as u64 * 0x9E37));
+        let j = (s as usize) % (i + 1);
+        items.swap(i, j);
+    }
+}
+
+/// Remove 1-cell-wide corridors / tips that read as hex-axis "strips".
+fn prune_thin_corridors(bounds: &MapBounds, layer: &mut DenseLayer, passes: usize) {
+    for _ in 0..passes {
+        let mut drop: Vec<usize> = Vec::new();
+        for index in 0..bounds.len() {
+            if !is_land_cell(layer, index) {
+                continue;
+            }
+            let Some(cell) = bounds.from_index(index) else {
+                continue;
+            };
+            let mut land_ns: Vec<Axial> = Vec::new();
+            for nb in cell.neighbors() {
+                let Some(ni) = bounds.index_of(nb) else {
+                    continue;
+                };
+                if is_land_cell(layer, ni) {
+                    land_ns.push(nb);
+                }
+            }
+            let kill = match land_ns.len() {
+                0 | 1 => true,
+                2 => opposite_hex_pair(cell, land_ns[0], land_ns[1]),
+                _ => false,
+            };
+            if kill {
+                drop.push(index);
+            }
+        }
+        if drop.is_empty() {
+            break;
+        }
+        for index in drop {
+            layer.set(
+                index,
+                DenseState::Value(LayerValue::Text(LAND_MASK_OCEAN.to_string())),
+            );
+        }
+    }
+}
+
+fn opposite_hex_pair(center: Axial, a: Axial, b: Axial) -> bool {
+    let da = (a.q - center.q, a.r - center.r);
+    let db = (b.q - center.q, b.r - center.r);
+    da.0 + db.0 == 0 && da.1 + db.1 == 0
 }
 
 fn carve_pit(
@@ -1165,6 +1231,35 @@ mod tests {
             }
         }
         assert!(differ, "seed should change organic form");
+    }
+
+    #[test]
+    fn prune_removes_opposite_corridor_cell() {
+        let bounds = MapBounds::new(8, 6);
+        let mut layer = DenseLayer::new_categorical(LAND_MASK_LAYER_ID, bounds.len());
+        for index in 0..bounds.len() {
+            layer.set(
+                index,
+                DenseState::Value(LayerValue::Text(LAND_MASK_OCEAN.to_string())),
+            );
+        }
+        // Three-cell diagonal corridor: middle has exactly two opposite land neighbors.
+        let a = Axial { q: 0, r: 0 };
+        let b = Axial { q: 1, r: 0 };
+        let c = Axial { q: 2, r: 0 };
+        for cell in [a, b, c] {
+            let i = bounds.index_of(cell).expect("in bounds");
+            layer.set(
+                i,
+                DenseState::Value(LayerValue::Text(LAND_MASK_LAND.to_string())),
+            );
+        }
+        prune_thin_corridors(&bounds, &mut layer, 4);
+        let mid = bounds.index_of(b).unwrap();
+        assert!(
+            !is_land_cell(&layer, mid),
+            "1-hex-wide corridor middle should be pruned"
+        );
     }
 
     #[test]
