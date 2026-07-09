@@ -335,17 +335,17 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         id: "archipelago_twin_groups",
         layout_class: LayoutClass::Archipelago,
         seed_zones: zones!(
-            -0.5, 0.0, 0.18, 0.22;
-            -0.35, 0.25, 0.12, 0.12;
-            0.4, -0.1, 0.18, 0.20;
-            0.55, 0.2, 0.12, 0.12
+            -0.5, 0.0, 0.14, 0.16;
+            -0.35, 0.25, 0.10, 0.10;
+            0.4, -0.1, 0.14, 0.14;
+            0.55, 0.2, 0.10, 0.10
         ),
         hole: None,
         land_fraction: 0.23,
         primary_count: 4,
         satellite_count: 6,
-        merge_bias: 0.15,
-        elongation: 0.45,
+        merge_bias: 0.06,
+        elongation: 0.35,
         irregularity: 0.6,
     },
     LayoutRecipe {
@@ -630,10 +630,15 @@ pub fn generate_land_mask_recipe(
         ShoreCharacter::Jagged => 1.15,
     };
     let sharpness = (recipe.irregularity * shore_scale).clamp(0.05, 1.2);
-    let decay = match character {
+    let mut decay = match character {
         ShoreCharacter::Smooth => 0.90,
         ShoreCharacter::Jagged => 0.86,
     };
+    // Archipelago: keep blobs small so seeds stay separate islands (D-66).
+    let archipelago = recipe.layout_class == LayoutClass::Archipelago;
+    if archipelago {
+        decay *= 0.93;
+    }
 
     let zones = recipe.seed_zones;
     let zone_n = zones.len().max(1);
@@ -642,7 +647,11 @@ pub fn generate_land_mask_recipe(
         rng = mix64(rng ^ (i as u64 * 0x9E37) ^ 0x0041);
         let zone = &zones[i % zone_n];
         let start = pick_seed_cell(bounds, zone, rng, max_x, max_y, recipe.merge_bias);
-        let h0 = 0.92 + unit01(rng ^ 0xA1) * 0.08;
+        let h0 = if archipelago {
+            0.72 + unit01(rng ^ 0xA1) * 0.12
+        } else {
+            0.92 + unit01(rng ^ 0xA1) * 0.08
+        };
         let (ex, ey) = elongation_axis(rng ^ 0xE1, recipe.elongation);
         grow_blob(
             bounds,
@@ -662,8 +671,12 @@ pub fn generate_land_mask_recipe(
         rng = mix64(rng ^ (i as u64 * 0xC2B2) ^ 0x5A70);
         let zone = &zones[(i + recipe.primary_count as usize) % zone_n];
         let start = pick_seed_cell(bounds, zone, rng, max_x, max_y, recipe.merge_bias);
-        let h0 = 0.35 + unit01(rng ^ 0xB2) * 0.35;
-        let sat_decay = decay * (0.88 + unit01(rng ^ 0xD2) * 0.08);
+        let h0 = if archipelago {
+            0.28 + unit01(rng ^ 0xB2) * 0.22
+        } else {
+            0.35 + unit01(rng ^ 0xB2) * 0.35
+        };
+        let sat_decay = decay * (0.86 + unit01(rng ^ 0xD2) * 0.06);
         let (ex, ey) = elongation_axis(rng ^ 0xE2, recipe.elongation * 0.7);
         grow_blob(
             bounds,
@@ -1163,8 +1176,95 @@ fn enforce_layout_class(
                 }
             }
         }
-        LayoutClass::Archipelago => {}
+        LayoutClass::Archipelago => {
+            balance_archipelago(bounds, layer, seed);
+        }
     }
+}
+
+/// Archipelago: many mid/small islands — not two continent-sized blobs (D-66 dogfood).
+fn balance_archipelago(bounds: &MapBounds, layer: &mut DenseLayer, seed: u64) {
+    let min_islands = 6;
+    let max_island = ((bounds.len() as f64) * 0.07).round() as usize;
+    let max_island = max_island.max(24);
+
+    let mut comps = land_components(bounds, layer);
+    for component in comps.iter() {
+        if component.len() > max_island {
+            erode_land_mass(bounds, layer, component, max_island);
+        }
+    }
+
+    comps = land_components(bounds, layer);
+    // Drop dust after erode.
+    for component in comps.iter() {
+        if component.len() < 3 {
+            flood_ocean(layer, component);
+        }
+    }
+
+    comps = land_components(bounds, layer);
+    let mut rng = seed ^ 0xA2C4;
+    let mut guard = 0u32;
+    while comps.len() < min_islands && guard < 24 {
+        guard += 1;
+        rng = mix64(rng ^ (guard as u64) ^ 0x151);
+        let Some(start) = pick_ocean_seed_away(bounds, layer, rng) else {
+            break;
+        };
+        let target = (max_island / 3).max(10).min(max_island / 2);
+        // Avoid all existing land so new islands stay separate.
+        let avoid: Vec<usize> = comps.iter().flatten().copied().collect();
+        grow_organic_mass(bounds, layer, &[start], &avoid, target, rng ^ 0x151A);
+        comps = land_components(bounds, layer);
+    }
+
+    // Final dust cleanup after seeding.
+    comps = land_components(bounds, layer);
+    for component in comps.iter() {
+        if component.len() < 3 {
+            flood_ocean(layer, component);
+        }
+    }
+}
+
+fn pick_ocean_seed_away(bounds: &MapBounds, layer: &DenseLayer, seed: u64) -> Option<usize> {
+    let n = bounds.len();
+    // Distance to existing land via component centroids (cheap).
+    let comps = land_components(bounds, layer);
+    let cents: Vec<(f64, f64)> = comps
+        .iter()
+        .map(|c| component_centroid(bounds, c))
+        .collect();
+    let mut best = None;
+    let mut best_score = -1.0f64;
+    for k in 0..64u64 {
+        let idx = (mix64(seed ^ k.wrapping_mul(0x9E37)) as usize) % n.max(1);
+        if is_land_cell(layer, idx) {
+            continue;
+        }
+        let Some(cell) = bounds.from_index(idx) else {
+            continue;
+        };
+        let land_n = cell
+            .neighbors()
+            .iter()
+            .filter(|nb| bounds.index_of(**nb).is_some_and(|ni| is_land_cell(layer, ni)))
+            .count();
+        if land_n > 0 {
+            continue;
+        }
+        let (x, y) = cell.to_pixel(1.0);
+        let min_d = cents
+            .iter()
+            .map(|(cx, cy)| (x - cx).hypot(y - cy))
+            .fold(f64::MAX, f64::min);
+        if min_d.is_finite() && min_d > best_score {
+            best_score = min_d;
+            best = Some(idx);
+        }
+    }
+    best
 }
 
 /// Continents: two compact masses of comparable size (not half-map flood).
@@ -2002,6 +2102,30 @@ mod tests {
             "second/first={ratio:.2} ({} vs {})",
             comps[1].len(),
             comps[0].len()
+        );
+    }
+
+    /// Dogfood: archipelago_twin_groups was two continent blobs (seed from UI).
+    #[test]
+    fn archipelago_twin_groups_has_many_islands() {
+        use crate::map_preset::MapPreset;
+        let bounds = MapPreset::Large.bounds();
+        let recipe = find_recipe("archipelago_twin_groups").expect("recipe");
+        let seed = 0xf1e019cdfda6e1c0u64;
+        let layer = generate_land_mask_recipe(&bounds, recipe, ShoreCharacter::Smooth, seed);
+        let comps = land_components(&bounds, &layer);
+        assert!(
+            comps.len() >= 6,
+            "archipelago should have many islands, got {} sizes={:?}",
+            comps.len(),
+            comps.iter().map(|c| c.len()).collect::<Vec<_>>()
+        );
+        let max_ok = ((bounds.len() as f64) * 0.10).round() as usize;
+        assert!(
+            comps[0].len() <= max_ok,
+            "largest island {} exceeds ~10% map ({})",
+            comps[0].len(),
+            max_ok
         );
     }
 }
