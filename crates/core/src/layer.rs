@@ -28,6 +28,7 @@ pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 pub const TERRAIN_LAYER_ID: &str = "terrain";
 pub const ELEVATION_LAYER_ID: &str = "elevation";
 pub const LAND_MASK_LAYER_ID: &str = "land_mask";
+pub const GEOLOGY_LAYER_ID: &str = "geology";
 /// Dense integer layer: 0 = no river, N = river id (river-overlay-layer-v1).
 pub const RIVER_ID_LAYER_ID: &str = "river_id";
 
@@ -82,6 +83,11 @@ impl MapManifest {
                     layer_id: LAND_MASK_LAYER_ID.to_string(),
                     value_type: ValueType::Categorical,
                     file: format!("layers/{LAND_MASK_LAYER_ID}.json"),
+                },
+                LayerRef {
+                    layer_id: GEOLOGY_LAYER_ID.to_string(),
+                    value_type: ValueType::Categorical,
+                    file: format!("layers/{GEOLOGY_LAYER_ID}.json"),
                 },
                 LayerRef {
                     layer_id: TERRAIN_LAYER_ID.to_string(),
@@ -373,14 +379,16 @@ mod tests {
                 height: 8
             }
         );
-        assert_eq!(manifest.layers.len(), 3);
+        assert_eq!(manifest.layers.len(), 4);
         assert_eq!(manifest.layers[0].layer_id, LAND_MASK_LAYER_ID);
         assert_eq!(manifest.layers[0].file, "layers/land_mask.json");
-        assert_eq!(manifest.layers[1].layer_id, TERRAIN_LAYER_ID);
-        assert_eq!(manifest.layers[1].file, "layers/terrain.json");
-        assert_eq!(manifest.layers[2].layer_id, ELEVATION_LAYER_ID);
-        assert_eq!(manifest.layers[2].value_type, ValueType::Integer);
-        assert_eq!(manifest.layers[2].file, "layers/elevation.json");
+        assert_eq!(manifest.layers[1].layer_id, GEOLOGY_LAYER_ID);
+        assert_eq!(manifest.layers[1].file, "layers/geology.json");
+        assert_eq!(manifest.layers[2].layer_id, TERRAIN_LAYER_ID);
+        assert_eq!(manifest.layers[2].file, "layers/terrain.json");
+        assert_eq!(manifest.layers[3].layer_id, ELEVATION_LAYER_ID);
+        assert_eq!(manifest.layers[3].value_type, ValueType::Integer);
+        assert_eq!(manifest.layers[3].file, "layers/elevation.json");
 
         let json = manifest.to_json_pretty().unwrap();
         assert_eq!(MapManifest::from_json(&json).unwrap(), manifest);

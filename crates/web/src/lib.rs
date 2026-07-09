@@ -63,6 +63,21 @@ fn fresh_elevation_layer(bounds: MapBounds) -> DenseLayer {
     DenseLayer::new_integer("elevation", bounds.len())
 }
 
+fn geology_tint(geo: &DenseLayer, bounds: MapBounds, q: i32, r: i32) -> Option<&'static str> {
+    let index = bounds.index_of(Axial::new(q, r))?;
+    match geo.state(index) {
+        DenseState::Value(LayerValue::Text(ref t)) => match t.as_str() {
+            "ridge" => Some("rgba(180, 90, 60, 0.35)"),
+            "rift" => Some("rgba(120, 60, 140, 0.30)"),
+            "basin" => Some("rgba(60, 100, 160, 0.30)"),
+            "volcanic_arc" => Some("rgba(200, 70, 50, 0.40)"),
+            "stable" => Some("rgba(90, 140, 80, 0.18)"),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn elevation_at(layer: &DenseLayer, bounds: MapBounds, q: i32, r: i32) -> i32 {
     let index = bounds.index_of(Axial::new(q, r)).unwrap_or(0);
     layer.int_or(index, DEFAULT_LAND_ELEVATION)
@@ -349,6 +364,17 @@ struct WizardLandMaskGenerateInput<'a> {
 }
 
 #[derive(Serialize)]
+struct WizardGeologyGenerateInput<'a> {
+    style: &'a str,
+    regenerate_nonce: u32,
+}
+
+#[derive(Serialize)]
+struct WizardElevationGenerateInput {
+    style: &'static str,
+}
+
+#[derive(Serialize)]
 struct WizardLandMaskCellInput<'a> {
     q: i32,
     r: i32,
@@ -474,6 +500,13 @@ struct AppState {
     wizard_accepted: bool,
     wizard_edit_mode: bool,
     wizard_edit_brush: String,
+    /// Build wizard step: 3 silhouette · 4 tectonics · 5 elevation.
+    wizard_step: u32,
+    wizard_geo_style: String,
+    wizard_geo_nonce: u32,
+    wizard_geo_accepted: bool,
+    /// Dense geology cache for tint overlay (index → palette string).
+    geology: Option<DenseLayer>,
 }
 
 #[wasm_bindgen(start)]
@@ -532,6 +565,11 @@ pub fn start() {
         wizard_accepted: false,
         wizard_edit_mode: false,
         wizard_edit_brush: "land".to_string(),
+        wizard_step: 3,
+        wizard_geo_style: "belts".to_string(),
+        wizard_geo_nonce: 0,
+        wizard_geo_accepted: false,
+        geology: None,
     }));
 
     redraw(&state.borrow());
@@ -948,8 +986,9 @@ fn show_view(name: &str) {
 
 fn build_step_label(step: u32) -> &'static str {
     match step {
-        3 => "Step 3 · Land silhouette",
-        _ => "Build in progress",
+        4 => "Step 4 · Tectonics",
+        5 => "Step 5 · Elevation",
+        _ => "Step 3 · Land silhouette",
     }
 }
 
@@ -976,7 +1015,6 @@ fn set_wizard_active(active: bool) {
     if active {
         let _ = editor.class_list().add_1("wizard-active");
         set_drawer_open(false);
-        set_wizard_status("Step 3 flow: 1) parameters, 2) generate, 3) accept/edit, 4) continue.");
     } else {
         let _ = editor.class_list().remove_1("wizard-active");
         set_wizard_status("");
@@ -999,6 +1037,65 @@ fn wizard_is_active() -> bool {
     document()
         .get_element_by_id("editor")
         .is_some_and(|el| el.class_list().contains("wizard-active"))
+}
+
+fn set_panel_hidden(id: &str, hidden: bool) {
+    let Some(el) = document().get_element_by_id(id) else {
+        return;
+    };
+    if hidden {
+        let _ = el.class_list().add_1("hidden");
+    } else {
+        let _ = el.class_list().remove_1("hidden");
+    }
+}
+
+fn sync_wizard_nav(step: u32) {
+    if let Some(crumb) = document().query_selector(".wiz-crumb").ok().flatten() {
+        let text = match step {
+            4 => "Geo › Tectonics",
+            5 => "Geo › Elevation",
+            _ => "Geo › Land silhouette",
+        };
+        crumb.set_text_content(Some(text));
+    }
+    if let Ok(Some(list)) = document().query_selector(".wiz-steps") {
+        if let Ok(items) = list.query_selector_all(".wiz-step") {
+            for i in 0..items.length() {
+                let Some(node) = items.item(i) else {
+                    continue;
+                };
+                let Ok(el) = node.dyn_into::<web_sys::Element>() else {
+                    continue;
+                };
+                let _ = el.class_list().remove_1("active");
+                let _ = el.class_list().remove_1("done");
+                let _ = el.class_list().remove_1("locked");
+                // items: 0=size,1=grid,2=land,3=tectonics,4=elev,5=coasts
+                let step_num = i + 1;
+                if step_num < step {
+                    let _ = el.class_list().add_1("done");
+                } else if step_num == step {
+                    let _ = el.class_list().add_1("active");
+                } else {
+                    let _ = el.class_list().add_1("locked");
+                }
+            }
+        }
+    }
+}
+
+fn show_wizard_step(state: &AppState) {
+    let step = state.wizard_step;
+    set_panel_hidden("wiz-panel-step3", step != 3);
+    set_panel_hidden("wiz-panel-step4", step != 4);
+    set_panel_hidden("wiz-panel-step5", step != 5);
+    sync_wizard_nav(step);
+    match step {
+        4 => set_wizard_status("Step 4: generate geology, accept, continue."),
+        5 => set_wizard_status("Step 5: generate elevation from land + geology, then Finish."),
+        _ => set_wizard_status("Step 3 flow: 1) parameters, 2) generate, 3) accept/edit, 4) continue."),
+    }
 }
 
 fn set_button_disabled(id: &str, disabled: bool) {
@@ -1103,9 +1200,11 @@ fn sync_wizard_actions(state: &AppState) {
     set_button_disabled("wiz-accept", false);
     set_button_disabled("wiz-edit", !state.wizard_accepted);
     set_button_disabled("wiz-continue", !state.wizard_accepted);
+    set_button_disabled("wiz-geo-continue", !state.wizard_geo_accepted);
     sync_wizard_variant_labels(state);
     sync_wizard_variant_buttons(&state.wizard_variant);
     sync_wizard_edit_mode_ui(state.wizard_edit_mode, &state.wizard_edit_brush);
+    show_wizard_step(state);
 }
 
 async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
@@ -1145,6 +1244,79 @@ async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
     load_elevation(&state).await;
     schedule_redraw(state.clone());
     set_wizard_status("Variant generated.");
+}
+
+async fn generate_wizard_geology(state: Rc<RefCell<AppState>>) {
+    let (style, nonce) = {
+        let s = state.borrow();
+        (s.wizard_geo_style.clone(), s.wizard_geo_nonce)
+    };
+    let body = WizardGeologyGenerateInput {
+        style: &style,
+        regenerate_nonce: nonce,
+    };
+    let Ok(resp) = gloo_net::http::Request::post("/api/build/geology/generate")
+        .json(&body)
+        .expect("serialize geology generate")
+        .send()
+        .await
+    else {
+        set_wizard_status("Geology generation failed (network).");
+        return;
+    };
+    if !resp.ok() {
+        let msg = resp
+            .text()
+            .await
+            .unwrap_or_else(|_| "Geology generation rejected".to_string());
+        set_wizard_status(&msg);
+        return;
+    }
+    load_geology(&state).await;
+    {
+        let mut s = state.borrow_mut();
+        s.wizard_geo_accepted = false;
+        sync_wizard_actions(&s);
+    }
+    schedule_redraw(state.clone());
+    set_wizard_status("Geology generated — tint shows belts on land.");
+}
+
+async fn load_geology(state: &Rc<RefCell<AppState>>) {
+    let Ok(resp) = gloo_net::http::Request::get("/api/layers/geology").send().await else {
+        return;
+    };
+    if !resp.ok() {
+        return;
+    }
+    let Ok(layer) = resp.json::<DenseLayer>().await else {
+        return;
+    };
+    state.borrow_mut().geology = Some(layer);
+}
+
+async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
+    let body = WizardElevationGenerateInput { style: "default" };
+    let Ok(resp) = gloo_net::http::Request::post("/api/build/elevation/generate")
+        .json(&body)
+        .expect("serialize elevation generate")
+        .send()
+        .await
+    else {
+        set_wizard_status("Elevation generation failed (network).");
+        return;
+    };
+    if !resp.ok() {
+        let msg = resp
+            .text()
+            .await
+            .unwrap_or_else(|_| "Elevation generation rejected".to_string());
+        set_wizard_status(&msg);
+        return;
+    }
+    load_elevation(&state).await;
+    schedule_redraw(state.clone());
+    set_wizard_status("Elevation generated from land + geology.");
 }
 
 async fn wizard_set_land_mask_cell(state: Rc<RefCell<AppState>>, q: i32, r: i32, kind: String) {
@@ -1201,8 +1373,8 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             set_wizard_status("Saving…");
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                flush_pending_paints(state).await;
-                if persist_build_draft(3).await {
+                flush_pending_paints(state.clone()).await;
+                if persist_build_draft(state.borrow().wizard_step.max(3)).await {
                     set_wizard_status("Draft saved.");
                 } else {
                     set_wizard_status("Could not save draft.");
@@ -1389,7 +1561,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Continue closes step 3 draft and exits wizard v1.
+    // Continue: step 3 → draft step 4 (tectonics).
     for id in ["wiz-continue"] {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
@@ -1400,31 +1572,20 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let body = BuildStateInput {
-                    status: "complete",
-                    step: 3,
-                };
-                let Ok(resp) = gloo_net::http::Request::put("/api/build")
-                    .json(&body)
-                    .expect("serialize build complete")
-                    .send()
-                    .await
-                else {
-                    set_wizard_status("Could not finalize build.");
-                    return;
-                };
-                if !resp.ok() {
-                    set_wizard_status("Could not finalize build.");
+                if !persist_build_draft(4).await {
+                    set_wizard_status("Could not advance to tectonics.");
                     return;
                 }
                 {
                     let mut s = state.borrow_mut();
-                    s.wizard_accepted = false;
+                    s.wizard_step = 4;
                     s.wizard_edit_mode = false;
+                    s.wizard_geo_accepted = false;
+                    s.wizard_geo_nonce = 0;
                     sync_wizard_actions(&s);
                 }
-                close_build_wizard();
-                set_wizard_status("Build step completed.");
+                set_wizard_status("Step 4 · Tectonics — generate geology.");
+                wasm_bindgen_futures::spawn_local(generate_wizard_geology(state.clone()));
             });
         });
         document()
@@ -1432,6 +1593,139 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             .expect("missing wizard finalize button")
             .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
             .expect("attach wizard finalize");
+        closure.forget();
+    }
+
+    // Step 4 geology style / generate / accept / continue.
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else {
+                return;
+            };
+            let Some(el) = click_target_element(&mouse) else {
+                return;
+            };
+            if let Some(style) = el.get_attribute("data-wiz-geo-style") {
+                wiz_toggle_style_group("wiz-geo-styles", "data-wiz-geo-style", &el);
+                state.borrow_mut().wizard_geo_style = style;
+                set_wizard_status("Geology style updated — Generate to apply.");
+            }
+        });
+        if let Ok(Some(root)) = document().query_selector("#wiz-geo-styles") {
+            let _ = root
+                .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            {
+                let mut s = state.borrow_mut();
+                s.wizard_geo_nonce = s.wizard_geo_nonce.saturating_add(1);
+                s.wizard_geo_accepted = false;
+                sync_wizard_actions(&s);
+            }
+            set_wizard_status("Generating geology…");
+            wasm_bindgen_futures::spawn_local(generate_wizard_geology(state.clone()));
+        });
+        if let Some(btn) = document().get_element_by_id("wiz-geo-generate") {
+            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            if state.borrow().geology.is_none() {
+                set_wizard_status("Generate geology first.");
+                return;
+            }
+            let mut s = state.borrow_mut();
+            s.wizard_geo_accepted = true;
+            sync_wizard_actions(&s);
+            set_wizard_status("Geology accepted. Continue to elevation.");
+        });
+        if let Some(btn) = document().get_element_by_id("wiz-geo-accept") {
+            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            if !state.borrow().wizard_geo_accepted {
+                set_wizard_status("Accept geology first.");
+                return;
+            }
+            let state = state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if !persist_build_draft(5).await {
+                    set_wizard_status("Could not advance to elevation.");
+                    return;
+                }
+                {
+                    let mut s = state.borrow_mut();
+                    s.wizard_step = 5;
+                    sync_wizard_actions(&s);
+                }
+                wasm_bindgen_futures::spawn_local(generate_wizard_elevation(state.clone()));
+            });
+        });
+        if let Some(btn) = document().get_element_by_id("wiz-geo-continue") {
+            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            set_wizard_status("Generating elevation…");
+            wasm_bindgen_futures::spawn_local(generate_wizard_elevation(state.clone()));
+        });
+        if let Some(btn) = document().get_element_by_id("wiz-elev-generate") {
+            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let state = state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let body = BuildStateInput {
+                    status: "complete",
+                    step: 5,
+                };
+                let Ok(resp) = gloo_net::http::Request::put("/api/build")
+                    .json(&body)
+                    .expect("serialize build complete")
+                    .send()
+                    .await
+                else {
+                    set_wizard_status("Could not finish build.");
+                    return;
+                };
+                if !resp.ok() {
+                    set_wizard_status("Could not finish build.");
+                    return;
+                }
+                {
+                    let mut s = state.borrow_mut();
+                    s.wizard_step = 3;
+                    s.wizard_accepted = false;
+                    s.wizard_geo_accepted = false;
+                    s.wizard_edit_mode = false;
+                    sync_wizard_actions(&s);
+                }
+                close_build_wizard();
+                set_wizard_status("Build finished — edit elevation in the editor.");
+            });
+        });
+        if let Some(btn) = document().get_element_by_id("wiz-finish") {
+            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
         closure.forget();
     }
 
@@ -1478,7 +1772,7 @@ async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
         .get_element_by_id("editor")
         .is_some_and(|el| el.class_list().contains("wizard-active"))
     {
-        let _ = persist_build_draft(3).await;
+        let _ = persist_build_draft(state.borrow().wizard_step.max(3)).await;
     }
     close_build_wizard();
     let _ = gloo_net::http::Request::post("/api/projects/close")
@@ -1505,6 +1799,11 @@ async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.wizard_recipe_a.clear();
     state_mut.wizard_recipe_b.clear();
     state_mut.wizard_recipe_c.clear();
+    state_mut.wizard_step = 3;
+    state_mut.wizard_geo_style = "belts".to_string();
+    state_mut.wizard_geo_nonce = 0;
+    state_mut.wizard_geo_accepted = false;
+    state_mut.geology = None;
     set_drawer_open(false);
     clear_inspect_selection();
     set_world_label("—");
@@ -1673,6 +1972,15 @@ fn redraw(state: &AppState) -> usize {
                 }
             }
             ctx.fill();
+            // world-pipeline--tectonics-v1: subtle geology tint on step 4
+            if wizard_is_active() && state.wizard_step == 4 {
+                if let Some(geo) = state.geology.as_ref() {
+                    if let Some(tint) = geology_tint(geo, bounds, q, r) {
+                        ctx.set_fill_style_str(tint);
+                        ctx.fill();
+                    }
+                }
+            }
             if selected {
                 ctx.set_line_width(3.0);
                 ctx.set_stroke_style_str("#9fe3c4");
@@ -1824,9 +2132,10 @@ fn render_project_list(projects: &[ProjectStatus]) {
         let actions = if p.valid {
             let draft_attr = if p.build_draft { "1" } else { "0" };
             format!(
-                "<button class=\"open-btn\" data-path=\"{path}\" data-build-draft=\"{draft_attr}\" type=\"button\">Open</button><button class=\"manage-btn\" type=\"button\">Manage</button>",
+                "<button class=\"open-btn\" data-path=\"{path}\" data-build-draft=\"{draft_attr}\" data-build-step=\"{step}\" type=\"button\">Open</button><button class=\"manage-btn\" type=\"button\">Manage</button>",
                 path = html_escape(&p.path),
-                draft_attr = draft_attr
+                draft_attr = draft_attr,
+                step = p.build_step.unwrap_or(3)
             )
         } else {
             format!(
@@ -3493,6 +3802,11 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                 return;
             };
             let resume_wizard = button.get_attribute("data-build-draft").as_deref() == Some("1");
+            let resume_step = button
+                .get_attribute("data-build-step")
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(3)
+                .clamp(3, 5);
 
             let state = state.clone();
             set_text("home-status", "Opening…");
@@ -3515,12 +3829,31 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                             open_build_wizard();
                             {
                                 let mut s = state.borrow_mut();
-                                s.wizard_accepted = false;
+                                s.wizard_step = resume_step;
+                                s.wizard_accepted = resume_step > 3;
                                 s.wizard_edit_mode = false;
+                                s.wizard_geo_accepted = resume_step > 4;
                                 ensure_wizard_trio(&mut s);
                                 sync_wizard_actions(&s);
                             }
-                            set_wizard_status("Select a variant and accept it to continue.");
+                            match resume_step {
+                                4 => {
+                                    set_wizard_status("Resumed at tectonics — generate or accept geology.");
+                                    wasm_bindgen_futures::spawn_local(async move {
+                                        load_geology(&state).await;
+                                        schedule_redraw(state.clone());
+                                    });
+                                }
+                                5 => {
+                                    set_wizard_status("Resumed at elevation — generate or Finish.");
+                                    wasm_bindgen_futures::spawn_local(async move {
+                                        load_geology(&state).await;
+                                        load_elevation(&state).await;
+                                        schedule_redraw(state.clone());
+                                    });
+                                }
+                                _ => set_wizard_status("Select a variant and accept it to continue."),
+                            }
                         } else {
                             close_build_wizard();
                         }

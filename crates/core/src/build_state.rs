@@ -5,6 +5,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 pub const BUILD_STEP_LAND_SILHOUETTE: u32 = 3;
+pub const BUILD_STEP_TECTONICS: u32 = 4;
+pub const BUILD_STEP_ELEVATION: u32 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuildSection {

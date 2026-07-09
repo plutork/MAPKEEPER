@@ -28,6 +28,9 @@ use axum::routing::get;
 use axum::{Json, Router};
 use mapkeeper_core::build_state::{self, BUILD_STEP_LAND_SILHOUETTE};
 use mapkeeper_core::cell_id::CellId;
+use mapkeeper_core::geology::{
+    elevation_from_land_mask_and_geology, generate_geology, GeologyStyle, GEOLOGY_LAYER_ID,
+};
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::land_mask::{
     elevation_from_land_mask, find_recipe, generate_land_mask, generate_land_mask_recipe,
@@ -168,6 +171,21 @@ struct LandMaskGenerateInput {
     variant: Option<String>,
     #[serde(default)]
     regenerate_nonce: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct GeologyGenerateInput {
+    #[serde(default)]
+    style: Option<String>,
+    #[serde(default)]
+    regenerate_nonce: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct ElevationGenerateInput {
+    #[serde(default)]
+    #[allow(dead_code)]
+    style: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -511,6 +529,14 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         .route(
             "/api/build/land-mask/cells",
             axum::routing::put(put_land_mask_cells),
+        )
+        .route(
+            "/api/build/geology/generate",
+            axum::routing::post(generate_geology_handler),
+        )
+        .route(
+            "/api/build/elevation/generate",
+            axum::routing::post(generate_elevation_handler),
         )
         .route("/api/fixture-worlds", get(list_fixture_worlds_handler))
         .route(
@@ -920,6 +946,53 @@ async fn generate_land_mask_handler(
     StatusCode::NO_CONTENT.into_response()
 }
 
+/// world-pipeline--tectonics-v1: generate step-4 `geology` from accepted land_mask.
+/// Does not write elevation.
+async fn generate_geology_handler(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(input): Json<GeologyGenerateInput>,
+) -> impl IntoResponse {
+    let (world_path, world_id) = {
+        let guard = state.lock().unwrap();
+        let Some(active) = guard.active.as_ref() else {
+            return (StatusCode::CONFLICT, "no active world").into_response();
+        };
+        (active.path.clone(), active.id.clone())
+    };
+    let bounds = map_bounds(&world_path);
+    let mask = read_dense_layer(&world_path, LAND_MASK_LAYER_ID, &bounds);
+    let style = GeologyStyle::parse(input.style.as_deref().unwrap_or("belts"));
+    let nonce = input.regenerate_nonce.unwrap_or(0) as u64;
+    let seed = geology_seed(&world_id, style, nonce);
+    let geology = generate_geology(&bounds, &mask, style, seed);
+    if let Err(err) = write_dense_layer(&world_path, &geology) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// Step 5: elevation from land_mask + geology (bridge).
+async fn generate_elevation_handler(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(_input): Json<ElevationGenerateInput>,
+) -> impl IntoResponse {
+    let world_path = {
+        let guard = state.lock().unwrap();
+        let Some(active) = guard.active.as_ref() else {
+            return (StatusCode::CONFLICT, "no active world").into_response();
+        };
+        active.path.clone()
+    };
+    let bounds = map_bounds(&world_path);
+    let mask = read_dense_layer(&world_path, LAND_MASK_LAYER_ID, &bounds);
+    let geology = read_dense_layer(&world_path, GEOLOGY_LAYER_ID, &bounds);
+    let elevation = elevation_from_land_mask_and_geology(&bounds, &mask, &geology);
+    if let Err(err) = write_dense_layer(&world_path, &elevation) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
 /// Step-3 edit brush writes land/ocean into `land_mask` and keeps elevation in sync.
 async fn put_land_mask_cells(
     State(state): State<Arc<Mutex<AppState>>>,
@@ -1106,6 +1179,19 @@ fn write_dense_layer(world_path: &Path, layer: &DenseLayer) -> Result<(), String
     }
     let body = layer.to_json_pretty().map_err(|e| e.to_string())?;
     std::fs::write(&path, body).map_err(|e| e.to_string())
+}
+
+fn geology_seed(world_id: &str, style: GeologyStyle, regenerate_nonce: u64) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for b in world_id.bytes() {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    for b in style.id().bytes() {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash ^ regenerate_nonce
 }
 
 fn silhouette_seed(

@@ -422,6 +422,7 @@
   }
   .wiz-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .wiz-btn-row.hidden { display: none; }
+  #wiz-panel-step4.hidden, #wiz-panel-step5.hidden, #wiz-panel-step3.hidden { display: none; }
   .wiz-section {
     display: flex;
     flex-direction: column;
@@ -706,6 +707,7 @@
         <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Validation</button></div>
       </nav>
       <aside class="wiz-right">
+        <div id="wiz-panel-step3">
         <h2>Land silhouette</h2>
         <p class="wiz-hint">Follow blocks 1 to 4: set parameters, generate variants, accept/edit, then continue.</p>
 
@@ -755,6 +757,54 @@
           </div>
           <p class="wiz-hint" id="wiz-right-note">Generate A/B/C, accept one, optionally edit, then continue.</p>
         </section>
+        </div>
+
+        <div id="wiz-panel-step4" class="hidden">
+        <h2>Tectonics</h2>
+        <p class="wiz-hint">Thin geology pass: generate belts that explain later elevation. No geology brush in v1.</p>
+        <section class="wiz-section">
+          <p class="wiz-label">1. Geology style</p>
+          <div class="wiz-btn-row" id="wiz-geo-styles">
+            <button class="wiz-style-btn active" type="button" data-wiz-geo-style="belts">Belts</button>
+            <button class="wiz-style-btn" type="button" data-wiz-geo-style="shields">Shields</button>
+            <button class="wiz-style-btn" type="button" data-wiz-geo-style="arcs">Arcs</button>
+          </div>
+        </section>
+        <section class="wiz-section">
+          <p class="wiz-label">2. Generate</p>
+          <div class="wiz-btn-row">
+            <button id="wiz-geo-generate" class="wiz-action-btn" type="button">Generate geology</button>
+          </div>
+          <p class="wiz-hint">Tint overlay shows ridge / basin / arc classes on land.</p>
+        </section>
+        <section class="wiz-section">
+          <p class="wiz-label">3. Accept</p>
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-geo-accept" class="wiz-action-btn" type="button">Accept</button>
+          </div>
+        </section>
+        <section class="wiz-section">
+          <p class="wiz-label">4. Next step</p>
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-geo-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
+          </div>
+        </section>
+        </div>
+
+        <div id="wiz-panel-step5" class="hidden">
+        <h2>Elevation</h2>
+        <p class="wiz-hint">Elevation is generated from land silhouette + geology. Edit heights in the editor after Finish.</p>
+        <section class="wiz-section">
+          <div class="wiz-btn-row">
+            <button id="wiz-elev-generate" class="wiz-action-btn" type="button">Generate elevation</button>
+          </div>
+        </section>
+        <section class="wiz-section">
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-finish" class="wiz-action-btn primary" type="button">Finish</button>
+          </div>
+        </section>
+        </div>
 
       </aside>
     </div>
