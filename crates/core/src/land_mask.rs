@@ -1,7 +1,7 @@
 //! Step 3 world pipeline: land silhouette (`land_mask`) generators.
 //!
-//! Layout classes (D-62) + recipe bank (D-64/D-65): ~5 non-ellipse recipes
-//! per class. Regenerate rotates recipe within the selected class only.
+//! D-66 / step3-organic-silhouette-v1: layout_class → growth recipe (bias) →
+//! seeded layered land growth → cleanup → land_mask. Not ellipse-union drawings.
 
 use crate::hex::{Axial, MapBounds};
 use crate::layer::{DenseLayer, DenseState, LayerValue};
@@ -84,7 +84,7 @@ impl ShoreCharacter {
     }
 }
 
-/// Elliptical land (or hole) blob in normalized map space (~[-1,1]).
+/// Bias zone in normalized map space (~[-1,1]) — seed placement, not final land.
 #[derive(Debug, Clone, Copy)]
 pub struct LayoutBlob {
     pub cx: f64,
@@ -93,379 +93,463 @@ pub struct LayoutBlob {
     pub ry: f64,
 }
 
-/// Crude macro recipe tagged with a layout class (step3-layout-pattern-bank-v1).
+/// Growth plan / bias skeleton for a layout class (D-66).
 #[derive(Debug, Clone, Copy)]
 pub struct LayoutRecipe {
     pub id: &'static str,
     pub layout_class: LayoutClass,
-    pub blobs: &'static [LayoutBlob],
-    /// Optional water hole (mediterranean inland basin).
+    /// Preferred seed zones (centers + soft radii for jitter).
+    pub seed_zones: &'static [LayoutBlob],
+    /// Optional basin seed (mediterranean / crescent carve).
     pub hole: Option<LayoutBlob>,
+    /// Target land fraction of map cells (approx).
+    pub land_fraction: f64,
+    /// Primary growth blobs (large).
+    pub primary_count: u8,
+    /// Smaller overlay / satellite blobs.
+    pub satellite_count: u8,
+    /// 0 = keep masses apart · 1 = allow merge.
+    pub merge_bias: f64,
+    /// Stretch growth along a seeded axis (0..1).
+    pub elongation: f64,
+    /// Base coastal irregularity (shore character scales this).
+    pub irregularity: f64,
 }
 
-macro_rules! blobs {
+macro_rules! zones {
     ($($cx:expr, $cy:expr, $rx:expr, $ry:expr);+ $(;)?) => {
         &[$(LayoutBlob { cx: $cx, cy: $cy, rx: $rx, ry: $ry }),+]
     };
 }
 
-/// Static catalog (D-65 / step3-layout-picker-ux-v2): distinctive non-ellipse macros.
-/// ~5 recipes × 6 classes. Forms: crescent, C-shape, L-mass, broken chain,
-/// ring-with-gap, multi-blob irregular, hooked island, split basin.
+/// Growth-plan catalog (D-66): ~5 plans × 6 classes. Zones bias seeds; growth makes form.
 pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
-    // --- pangea: large irregular / L / crescent ---
     LayoutRecipe {
         id: "pangea_irregular",
         layout_class: LayoutClass::Pangea,
-        blobs: blobs!(
-            -0.15, 0.05, 0.55, 0.48;
-            0.25, -0.15, 0.48, 0.42;
-            0.05, 0.35, 0.40, 0.32;
-            -0.35, -0.25, 0.32, 0.28
-        ),
+        seed_zones: zones!(-0.1, 0.05, 0.35, 0.30; 0.25, -0.1, 0.28, 0.25),
         hole: None,
+        land_fraction: 0.52,
+        primary_count: 1,
+        satellite_count: 8,
+        merge_bias: 0.85,
+        elongation: 0.35,
+        irregularity: 0.55,
     },
     LayoutRecipe {
         id: "pangea_l_mass",
         layout_class: LayoutClass::Pangea,
-        blobs: blobs!(
-            -0.35, 0.0, 0.32, 0.72;
-            0.15, 0.40, 0.62, 0.28
-        ),
+        seed_zones: zones!(-0.35, 0.0, 0.22, 0.45; 0.15, 0.35, 0.40, 0.20),
         hole: None,
+        land_fraction: 0.48,
+        primary_count: 2,
+        satellite_count: 6,
+        merge_bias: 0.9,
+        elongation: 0.55,
+        irregularity: 0.5,
     },
     LayoutRecipe {
         id: "pangea_crescent",
         layout_class: LayoutClass::Pangea,
-        blobs: blobs!(0.0, 0.0, 0.78, 0.70),
-        hole: Some(LayoutBlob {
-            cx: 0.28,
-            cy: 0.05,
-            rx: 0.42,
-            ry: 0.48,
-        }),
+        seed_zones: zones!(0.0, 0.0, 0.45, 0.40),
+        hole: Some(LayoutBlob { cx: 0.28, cy: 0.05, rx: 0.28, ry: 0.32 }),
+        land_fraction: 0.50,
+        primary_count: 1,
+        satellite_count: 7,
+        merge_bias: 0.8,
+        elongation: 0.4,
+        irregularity: 0.6,
     },
     LayoutRecipe {
         id: "pangea_c_shape",
         layout_class: LayoutClass::Pangea,
-        blobs: blobs!(
-            -0.45, -0.35, 0.35, 0.28;
-            -0.55, 0.05, 0.30, 0.32;
-            -0.40, 0.42, 0.38, 0.26;
-            0.05, 0.50, 0.35, 0.24;
-            0.35, 0.30, 0.28, 0.30
+        seed_zones: zones!(
+            -0.45, -0.3, 0.22, 0.18;
+            -0.5, 0.05, 0.20, 0.22;
+            -0.35, 0.4, 0.25, 0.18;
+            0.15, 0.45, 0.22, 0.16
         ),
         hole: None,
+        land_fraction: 0.46,
+        primary_count: 3,
+        satellite_count: 5,
+        merge_bias: 0.75,
+        elongation: 0.45,
+        irregularity: 0.58,
     },
     LayoutRecipe {
         id: "pangea_hooked",
         layout_class: LayoutClass::Pangea,
-        blobs: blobs!(
-            -0.20, 0.0, 0.55, 0.42;
-            0.35, -0.25, 0.38, 0.28;
-            0.50, 0.15, 0.22, 0.35
-        ),
+        seed_zones: zones!(-0.2, 0.0, 0.35, 0.28; 0.4, -0.2, 0.22, 0.18; 0.5, 0.2, 0.15, 0.22),
         hole: None,
+        land_fraction: 0.47,
+        primary_count: 2,
+        satellite_count: 7,
+        merge_bias: 0.7,
+        elongation: 0.5,
+        irregularity: 0.62,
     },
-    // --- continents: dual masses, not twin ellipses ---
     LayoutRecipe {
         id: "continents_l_and_blob",
         layout_class: LayoutClass::Continents,
-        blobs: blobs!(
-            -0.50, -0.10, 0.28, 0.58;
-            -0.20, 0.35, 0.40, 0.24;
-            0.48, 0.05, 0.38, 0.48
-        ),
+        seed_zones: zones!(-0.5, -0.05, 0.22, 0.38; 0.48, 0.08, 0.28, 0.32),
         hole: None,
+        land_fraction: 0.42,
+        primary_count: 2,
+        satellite_count: 5,
+        merge_bias: 0.15,
+        elongation: 0.45,
+        irregularity: 0.55,
     },
     LayoutRecipe {
         id: "continents_crescent_pair",
         layout_class: LayoutClass::Continents,
-        blobs: blobs!(-0.48, 0.0, 0.42, 0.55; 0.48, 0.08, 0.40, 0.50),
-        hole: Some(LayoutBlob {
-            cx: -0.28,
-            cy: 0.0,
-            rx: 0.22,
-            ry: 0.32,
-        }),
+        seed_zones: zones!(-0.48, 0.0, 0.28, 0.35; 0.48, 0.08, 0.26, 0.32),
+        hole: Some(LayoutBlob { cx: -0.28, cy: 0.0, rx: 0.16, ry: 0.22 }),
+        land_fraction: 0.40,
+        primary_count: 2,
+        satellite_count: 4,
+        merge_bias: 0.1,
+        elongation: 0.4,
+        irregularity: 0.58,
     },
     LayoutRecipe {
         id: "continents_broken_chain",
         layout_class: LayoutClass::Continents,
-        blobs: blobs!(
-            -0.65, 0.25, 0.28, 0.35;
-            -0.20, -0.15, 0.32, 0.38;
-            0.35, 0.30, 0.30, 0.32;
-            0.68, -0.25, 0.26, 0.30
+        seed_zones: zones!(
+            -0.65, 0.2, 0.18, 0.22;
+            -0.2, -0.15, 0.20, 0.24;
+            0.35, 0.25, 0.18, 0.20;
+            0.68, -0.2, 0.16, 0.18
         ),
         hole: None,
+        land_fraction: 0.38,
+        primary_count: 3,
+        satellite_count: 4,
+        merge_bias: 0.25,
+        elongation: 0.5,
+        irregularity: 0.6,
     },
     LayoutRecipe {
         id: "continents_c_and_mass",
         layout_class: LayoutClass::Continents,
-        blobs: blobs!(
-            -0.55, -0.30, 0.28, 0.24;
-            -0.62, 0.05, 0.24, 0.28;
-            -0.48, 0.38, 0.30, 0.22;
-            0.45, 0.0, 0.42, 0.52
+        seed_zones: zones!(
+            -0.55, -0.25, 0.18, 0.16;
+            -0.58, 0.1, 0.16, 0.20;
+            -0.45, 0.38, 0.20, 0.14;
+            0.45, 0.0, 0.30, 0.35
         ),
         hole: None,
+        land_fraction: 0.40,
+        primary_count: 2,
+        satellite_count: 5,
+        merge_bias: 0.2,
+        elongation: 0.42,
+        irregularity: 0.55,
     },
     LayoutRecipe {
         id: "continents_irregular_dual",
         layout_class: LayoutClass::Continents,
-        blobs: blobs!(
-            -0.45, -0.20, 0.38, 0.35;
-            -0.30, 0.25, 0.32, 0.30;
-            0.40, 0.15, 0.35, 0.42;
-            0.55, -0.30, 0.28, 0.26
-        ),
+        seed_zones: zones!(-0.4, -0.1, 0.28, 0.28; 0.42, 0.12, 0.26, 0.30),
         hole: None,
+        land_fraction: 0.41,
+        primary_count: 2,
+        satellite_count: 6,
+        merge_bias: 0.12,
+        elongation: 0.38,
+        irregularity: 0.57,
     },
-    // --- archipelago: chains / rings with gap ---
     LayoutRecipe {
-        id: "archipelago_broken_chain",
+        id: "archipelago_chain",
         layout_class: LayoutClass::Archipelago,
-        blobs: blobs!(
-            -0.72, 0.40, 0.14, 0.12;
-            -0.40, 0.22, 0.16, 0.14;
-            -0.05, 0.0, 0.15, 0.13;
-            0.30, -0.22, 0.16, 0.14;
-            0.62, -0.42, 0.14, 0.12
+        seed_zones: zones!(
+            -0.55, 0.2, 0.12, 0.12;
+            -0.25, -0.15, 0.12, 0.12;
+            0.05, 0.25, 0.12, 0.12;
+            0.35, -0.1, 0.12, 0.12;
+            0.6, 0.15, 0.12, 0.12
         ),
         hole: None,
+        land_fraction: 0.22,
+        primary_count: 5,
+        satellite_count: 6,
+        merge_bias: 0.08,
+        elongation: 0.55,
+        irregularity: 0.65,
     },
     LayoutRecipe {
         id: "archipelago_ring_gap",
         layout_class: LayoutClass::Archipelago,
-        blobs: blobs!(
-            0.50, 0.15, 0.16, 0.14;
-            0.25, 0.48, 0.15, 0.14;
-            -0.20, 0.50, 0.16, 0.14;
-            -0.52, 0.20, 0.15, 0.14;
-            -0.48, -0.25, 0.15, 0.14;
-            0.10, -0.52, 0.16, 0.14
+        seed_zones: zones!(
+            0.0, -0.45, 0.12, 0.10;
+            0.4, -0.15, 0.12, 0.10;
+            0.35, 0.35, 0.12, 0.10;
+            -0.35, 0.35, 0.12, 0.10;
+            -0.4, -0.15, 0.12, 0.10
         ),
         hole: None,
+        land_fraction: 0.20,
+        primary_count: 5,
+        satellite_count: 4,
+        merge_bias: 0.05,
+        elongation: 0.35,
+        irregularity: 0.62,
     },
     LayoutRecipe {
-        id: "archipelago_c_arc",
+        id: "archipelago_cluster_west",
         layout_class: LayoutClass::Archipelago,
-        blobs: blobs!(
-            -0.55, -0.35, 0.15, 0.13;
-            -0.65, 0.0, 0.14, 0.14;
-            -0.50, 0.38, 0.16, 0.13;
-            -0.10, 0.52, 0.15, 0.13;
-            0.30, 0.42, 0.14, 0.13;
-            0.55, 0.15, 0.13, 0.12
+        seed_zones: zones!(
+            -0.45, -0.2, 0.14, 0.14;
+            -0.55, 0.15, 0.12, 0.12;
+            -0.25, 0.25, 0.12, 0.12;
+            0.35, 0.0, 0.14, 0.14;
+            0.55, -0.25, 0.10, 0.10
         ),
         hole: None,
+        land_fraction: 0.21,
+        primary_count: 4,
+        satellite_count: 7,
+        merge_bias: 0.12,
+        elongation: 0.4,
+        irregularity: 0.6,
     },
     LayoutRecipe {
-        id: "archipelago_scatter_irregular",
+        id: "archipelago_scattered",
         layout_class: LayoutClass::Archipelago,
-        blobs: blobs!(
-            -0.60, -0.35, 0.18, 0.14;
-            0.55, -0.40, 0.14, 0.16;
-            -0.25, 0.45, 0.20, 0.14;
-            0.40, 0.35, 0.15, 0.18;
-            0.05, -0.05, 0.12, 0.11;
-            -0.15, 0.10, 0.11, 0.13
+        seed_zones: zones!(
+            -0.6, -0.3, 0.10, 0.10;
+            -0.15, 0.35, 0.10, 0.10;
+            0.2, -0.35, 0.10, 0.10;
+            0.55, 0.25, 0.10, 0.10;
+            0.0, 0.0, 0.10, 0.10
         ),
         hole: None,
+        land_fraction: 0.18,
+        primary_count: 5,
+        satellite_count: 5,
+        merge_bias: 0.05,
+        elongation: 0.3,
+        irregularity: 0.68,
     },
     LayoutRecipe {
-        id: "archipelago_twin_clusters",
+        id: "archipelago_twin_groups",
         layout_class: LayoutClass::Archipelago,
-        blobs: blobs!(
-            -0.45, 0.15, 0.18, 0.16;
-            -0.25, -0.05, 0.14, 0.13;
-            -0.55, -0.15, 0.12, 0.11;
-            0.45, 0.20, 0.17, 0.15;
-            0.60, 0.0, 0.13, 0.12;
-            0.35, 0.40, 0.12, 0.11
+        seed_zones: zones!(
+            -0.5, 0.0, 0.18, 0.22;
+            -0.35, 0.25, 0.12, 0.12;
+            0.4, -0.1, 0.18, 0.20;
+            0.55, 0.2, 0.12, 0.12
         ),
         hole: None,
+        land_fraction: 0.23,
+        primary_count: 4,
+        satellite_count: 6,
+        merge_bias: 0.15,
+        elongation: 0.45,
+        irregularity: 0.6,
     },
-    // --- island: hooked / crescent / L — not round blob ---
     LayoutRecipe {
         id: "island_hooked",
         layout_class: LayoutClass::Island,
-        blobs: blobs!(
-            -0.15, 0.05, 0.42, 0.22;
-            0.25, -0.05, 0.28, 0.18;
-            0.40, 0.25, 0.16, 0.28
-        ),
+        seed_zones: zones!(-0.05, 0.0, 0.22, 0.18; 0.25, -0.15, 0.12, 0.10),
         hole: None,
+        land_fraction: 0.14,
+        primary_count: 1,
+        satellite_count: 4,
+        merge_bias: 0.7,
+        elongation: 0.55,
+        irregularity: 0.65,
     },
     LayoutRecipe {
         id: "island_crescent",
         layout_class: LayoutClass::Island,
-        blobs: blobs!(0.0, 0.0, 0.48, 0.42),
-        hole: Some(LayoutBlob {
-            cx: 0.22,
-            cy: 0.0,
-            rx: 0.28,
-            ry: 0.32,
-        }),
+        seed_zones: zones!(0.0, 0.05, 0.22, 0.20),
+        hole: Some(LayoutBlob { cx: 0.12, cy: 0.0, rx: 0.12, ry: 0.14 }),
+        land_fraction: 0.13,
+        primary_count: 1,
+        satellite_count: 3,
+        merge_bias: 0.75,
+        elongation: 0.45,
+        irregularity: 0.62,
     },
     LayoutRecipe {
         id: "island_l_mass",
         layout_class: LayoutClass::Island,
-        blobs: blobs!(
-            -0.15, 0.0, 0.18, 0.45;
-            0.15, 0.25, 0.38, 0.16
-        ),
+        seed_zones: zones!(-0.1, -0.05, 0.14, 0.22; 0.12, 0.15, 0.18, 0.10),
         hole: None,
+        land_fraction: 0.13,
+        primary_count: 1,
+        satellite_count: 3,
+        merge_bias: 0.8,
+        elongation: 0.5,
+        irregularity: 0.6,
     },
     LayoutRecipe {
-        id: "island_c_shape",
+        id: "island_long",
         layout_class: LayoutClass::Island,
-        blobs: blobs!(
-            -0.25, -0.25, 0.20, 0.16;
-            -0.32, 0.05, 0.16, 0.18;
-            -0.20, 0.30, 0.22, 0.14;
-            0.15, 0.28, 0.18, 0.14
-        ),
+        seed_zones: zones!(0.0, 0.0, 0.32, 0.12),
         hole: None,
+        land_fraction: 0.12,
+        primary_count: 1,
+        satellite_count: 3,
+        merge_bias: 0.85,
+        elongation: 0.75,
+        irregularity: 0.58,
     },
     LayoutRecipe {
-        id: "island_broken_bar",
+        id: "island_irregular",
         layout_class: LayoutClass::Island,
-        blobs: blobs!(
-            -0.30, 0.05, 0.22, 0.16;
-            0.05, -0.05, 0.18, 0.14;
-            0.35, 0.10, 0.16, 0.18
-        ),
+        seed_zones: zones!(0.05, -0.05, 0.20, 0.18),
         hole: None,
+        land_fraction: 0.15,
+        primary_count: 1,
+        satellite_count: 5,
+        merge_bias: 0.7,
+        elongation: 0.4,
+        irregularity: 0.7,
     },
-    // --- continent_and_islands ---
     LayoutRecipe {
         id: "cai_irregular_main",
         layout_class: LayoutClass::ContinentAndIslands,
-        blobs: blobs!(
-            0.05, 0.0, 0.42, 0.38;
-            -0.15, 0.25, 0.30, 0.28;
-            0.25, -0.25, 0.28, 0.24;
-            -0.70, 0.30, 0.16, 0.14;
-            -0.65, -0.35, 0.14, 0.13
+        seed_zones: zones!(
+            0.15, 0.0, 0.32, 0.30;
+            -0.55, -0.2, 0.12, 0.12;
+            -0.6, 0.25, 0.10, 0.10
         ),
         hole: None,
+        land_fraction: 0.36,
+        primary_count: 1,
+        satellite_count: 7,
+        merge_bias: 0.2,
+        elongation: 0.4,
+        irregularity: 0.58,
     },
     LayoutRecipe {
-        id: "cai_l_main_chain",
+        id: "cai_west_sats",
         layout_class: LayoutClass::ContinentAndIslands,
-        blobs: blobs!(
-            -0.15, -0.05, 0.28, 0.52;
-            0.20, 0.30, 0.45, 0.22;
-            0.65, -0.35, 0.15, 0.13;
-            0.70, 0.05, 0.12, 0.11;
-            0.55, 0.40, 0.14, 0.12
+        seed_zones: zones!(
+            0.25, 0.05, 0.30, 0.28;
+            -0.55, 0.0, 0.14, 0.16;
+            -0.65, -0.3, 0.10, 0.10;
+            -0.45, 0.3, 0.10, 0.10
         ),
         hole: None,
+        land_fraction: 0.35,
+        primary_count: 1,
+        satellite_count: 8,
+        merge_bias: 0.15,
+        elongation: 0.42,
+        irregularity: 0.6,
     },
     LayoutRecipe {
         id: "cai_crescent_sats",
         layout_class: LayoutClass::ContinentAndIslands,
-        blobs: blobs!(
-            0.0, 0.0, 0.52, 0.48;
-            0.70, 0.25, 0.14, 0.12;
-            0.65, -0.30, 0.13, 0.12
-        ),
-        hole: Some(LayoutBlob {
-            cx: 0.22,
-            cy: 0.05,
-            rx: 0.28,
-            ry: 0.30,
-        }),
+        seed_zones: zones!(0.1, 0.0, 0.32, 0.28; -0.55, 0.15, 0.12, 0.12),
+        hole: Some(LayoutBlob { cx: 0.28, cy: 0.05, rx: 0.14, ry: 0.16 }),
+        land_fraction: 0.34,
+        primary_count: 1,
+        satellite_count: 6,
+        merge_bias: 0.18,
+        elongation: 0.45,
+        irregularity: 0.62,
     },
     LayoutRecipe {
-        id: "cai_c_main",
+        id: "cai_south_chain",
         layout_class: LayoutClass::ContinentAndIslands,
-        blobs: blobs!(
-            -0.35, -0.30, 0.28, 0.22;
-            -0.45, 0.05, 0.24, 0.26;
-            -0.30, 0.38, 0.30, 0.20;
-            0.10, 0.42, 0.28, 0.18;
-            0.65, -0.20, 0.15, 0.13;
-            0.70, 0.25, 0.13, 0.12
+        seed_zones: zones!(
+            0.0, -0.15, 0.35, 0.28;
+            -0.4, 0.4, 0.10, 0.10;
+            0.0, 0.45, 0.10, 0.10;
+            0.4, 0.4, 0.10, 0.10
         ),
         hole: None,
+        land_fraction: 0.35,
+        primary_count: 1,
+        satellite_count: 7,
+        merge_bias: 0.12,
+        elongation: 0.4,
+        irregularity: 0.58,
     },
     LayoutRecipe {
-        id: "cai_hooked_main",
+        id: "cai_split_main",
         layout_class: LayoutClass::ContinentAndIslands,
-        blobs: blobs!(
-            -0.10, 0.0, 0.45, 0.32;
-            0.30, -0.20, 0.28, 0.22;
-            0.42, 0.20, 0.18, 0.30;
-            -0.70, 0.35, 0.14, 0.12;
-            -0.72, -0.25, 0.13, 0.12
+        seed_zones: zones!(
+            -0.15, 0.1, 0.28, 0.26;
+            0.35, -0.15, 0.22, 0.22;
+            -0.6, -0.25, 0.10, 0.10
         ),
         hole: None,
+        land_fraction: 0.37,
+        primary_count: 2,
+        satellite_count: 5,
+        merge_bias: 0.35,
+        elongation: 0.38,
+        irregularity: 0.55,
     },
-    // --- mediterranean: ring/gap / split basin ---
     LayoutRecipe {
         id: "med_ring_gap",
         layout_class: LayoutClass::Mediterranean,
-        blobs: blobs!(
-            -0.45, -0.35, 0.35, 0.28;
-            -0.55, 0.05, 0.30, 0.32;
-            -0.40, 0.42, 0.38, 0.26;
-            0.10, 0.50, 0.40, 0.24;
-            0.45, 0.25, 0.32, 0.30;
-            0.40, -0.35, 0.35, 0.28;
-            0.05, -0.50, 0.38, 0.24
-        ),
-        hole: None,
+        seed_zones: zones!(0.0, 0.0, 0.48, 0.42),
+        hole: Some(LayoutBlob { cx: 0.0, cy: 0.0, rx: 0.28, ry: 0.24 }),
+        land_fraction: 0.44,
+        primary_count: 1,
+        satellite_count: 6,
+        merge_bias: 0.85,
+        elongation: 0.35,
+        irregularity: 0.55,
     },
     LayoutRecipe {
-        id: "med_split_basin",
+        id: "med_center_basin",
         layout_class: LayoutClass::Mediterranean,
-        blobs: blobs!(0.0, 0.0, 0.88, 0.72),
-        hole: Some(LayoutBlob {
-            cx: -0.22,
-            cy: 0.0,
-            rx: 0.28,
-            ry: 0.35,
-        }),
+        seed_zones: zones!(0.0, 0.05, 0.50, 0.40),
+        hole: Some(LayoutBlob { cx: 0.05, cy: 0.0, rx: 0.32, ry: 0.26 }),
+        land_fraction: 0.46,
+        primary_count: 1,
+        satellite_count: 5,
+        merge_bias: 0.9,
+        elongation: 0.3,
+        irregularity: 0.5,
     },
     LayoutRecipe {
         id: "med_c_basin",
         layout_class: LayoutClass::Mediterranean,
-        blobs: blobs!(0.05, 0.0, 0.82, 0.70),
-        hole: Some(LayoutBlob {
-            cx: 0.25,
-            cy: 0.0,
-            rx: 0.40,
-            ry: 0.42,
-        }),
+        seed_zones: zones!(
+            -0.35, -0.25, 0.22, 0.18;
+            -0.4, 0.15, 0.20, 0.22;
+            0.1, 0.35, 0.28, 0.18;
+            0.35, -0.1, 0.22, 0.24
+        ),
+        hole: Some(LayoutBlob { cx: -0.05, cy: 0.05, rx: 0.22, ry: 0.20 }),
+        land_fraction: 0.42,
+        primary_count: 3,
+        satellite_count: 4,
+        merge_bias: 0.8,
+        elongation: 0.4,
+        irregularity: 0.58,
     },
     LayoutRecipe {
-        id: "med_l_frame",
+        id: "med_offset_basin",
         layout_class: LayoutClass::Mediterranean,
-        blobs: blobs!(
-            -0.45, 0.0, 0.30, 0.70;
-            0.10, 0.42, 0.65, 0.28;
-            0.45, -0.15, 0.32, 0.35
-        ),
-        hole: Some(LayoutBlob {
-            cx: 0.0,
-            cy: -0.05,
-            rx: 0.32,
-            ry: 0.28,
-        }),
+        seed_zones: zones!(0.1, -0.05, 0.48, 0.40),
+        hole: Some(LayoutBlob { cx: -0.15, cy: 0.1, rx: 0.24, ry: 0.22 }),
+        land_fraction: 0.43,
+        primary_count: 1,
+        satellite_count: 6,
+        merge_bias: 0.85,
+        elongation: 0.42,
+        irregularity: 0.55,
     },
     LayoutRecipe {
         id: "med_twin_split",
         layout_class: LayoutClass::Mediterranean,
-        blobs: blobs!(-0.25, 0.0, 0.52, 0.62; 0.35, 0.05, 0.48, 0.55),
-        hole: Some(LayoutBlob {
-            cx: 0.05,
-            cy: 0.0,
-            rx: 0.22,
-            ry: 0.38,
-        }),
+        seed_zones: zones!(-0.25, 0.0, 0.32, 0.38; 0.35, 0.05, 0.28, 0.32),
+        hole: Some(LayoutBlob { cx: 0.05, cy: 0.0, rx: 0.18, ry: 0.28 }),
+        land_fraction: 0.45,
+        primary_count: 2,
+        satellite_count: 5,
+        merge_bias: 0.7,
+        elongation: 0.4,
+        irregularity: 0.55,
     },
 ];
 
@@ -487,7 +571,7 @@ pub fn pick_recipe(class: LayoutClass, seed: u64) -> &'static LayoutRecipe {
     list[idx]
 }
 
-/// Next recipe for the same class, preferring a different id than `current_id` (D-65).
+/// Next growth plan for the same class (D-65/D-66).
 pub fn next_recipe(class: LayoutClass, current_id: &str, seed: u64) -> &'static LayoutRecipe {
     let list = recipes_for(class);
     if list.is_empty() {
@@ -506,7 +590,7 @@ pub fn next_recipe(class: LayoutClass, current_id: &str, seed: u64) -> &'static 
     list[start]
 }
 
-/// Deprecated D-64 helper — kept for tests; UI no longer reshuffles classes (D-65).
+/// Deprecated D-64 helper — kept for tests.
 pub fn pick_compare_trio(seed: u64) -> [&'static LayoutRecipe; 3] {
     let mut classes = LayoutClass::ALL;
     for i in (1..classes.len()).rev() {
@@ -519,7 +603,6 @@ pub fn pick_compare_trio(seed: u64) -> [&'static LayoutRecipe; 3] {
     [a, b, c]
 }
 
-/// Generate silhouette from layout class + shore + seed (picks recipe from bank).
 pub fn generate_land_mask(
     bounds: &MapBounds,
     style: LayoutClass,
@@ -530,27 +613,82 @@ pub fn generate_land_mask(
     generate_land_mask_recipe(bounds, recipe, character, seed)
 }
 
+/// D-66 Track A: seeded layered land growth from growth-plan recipe.
 pub fn generate_land_mask_recipe(
     bounds: &MapBounds,
     recipe: &LayoutRecipe,
     character: ShoreCharacter,
     seed: u64,
 ) -> DenseLayer {
-    let mut layer = DenseLayer::new_categorical(LAND_MASK_LAYER_ID, bounds.len());
+    let n = bounds.len();
+    let mut heights = vec![0.0f64; n];
     let (max_x, max_y) = half_extent(bounds);
-    let roughness = match character {
-        ShoreCharacter::Smooth => 0.13,
-        ShoreCharacter::Jagged => 0.29,
+    let mut rng = seed ^ 0xD660_06A1_1C00;
+
+    let shore_scale = match character {
+        ShoreCharacter::Smooth => 0.55,
+        ShoreCharacter::Jagged => 1.15,
     };
-    for index in 0..bounds.len() {
-        let Some(cell) = bounds.from_index(index) else {
-            continue;
-        };
-        let (x, y) = cell.to_pixel(1.0);
-        let nx = if max_x > 0.0 { x / max_x } else { 0.0 };
-        let ny = if max_y > 0.0 { y / max_y } else { 0.0 };
-        let noise = octave_noise(cell, seed);
-        let value = if is_land_recipe(recipe, nx, ny, noise, roughness) {
+    let sharpness = (recipe.irregularity * shore_scale).clamp(0.05, 1.2);
+    let decay = match character {
+        ShoreCharacter::Smooth => 0.90,
+        ShoreCharacter::Jagged => 0.86,
+    };
+
+    let zones = recipe.seed_zones;
+    let zone_n = zones.len().max(1);
+
+    for i in 0..recipe.primary_count as usize {
+        rng = mix64(rng ^ (i as u64 * 0x9E37) ^ 0x0041);
+        let zone = &zones[i % zone_n];
+        let start = pick_seed_cell(bounds, zone, rng, max_x, max_y, recipe.merge_bias);
+        let h0 = 0.92 + unit01(rng ^ 0xA1) * 0.08;
+        let (ex, ey) = elongation_axis(rng ^ 0xE1, recipe.elongation);
+        grow_blob(
+            bounds,
+            &mut heights,
+            start,
+            h0,
+            decay,
+            sharpness,
+            recipe.elongation,
+            ex,
+            ey,
+            rng,
+        );
+    }
+
+    for i in 0..recipe.satellite_count as usize {
+        rng = mix64(rng ^ (i as u64 * 0xC2B2) ^ 0x5A70);
+        let zone = &zones[(i + recipe.primary_count as usize) % zone_n];
+        let start = pick_seed_cell(bounds, zone, rng, max_x, max_y, recipe.merge_bias);
+        let h0 = 0.35 + unit01(rng ^ 0xB2) * 0.35;
+        let sat_decay = decay * (0.88 + unit01(rng ^ 0xD2) * 0.08);
+        let (ex, ey) = elongation_axis(rng ^ 0xE2, recipe.elongation * 0.7);
+        grow_blob(
+            bounds,
+            &mut heights,
+            start,
+            h0,
+            sat_decay,
+            sharpness * 0.9,
+            recipe.elongation * 0.7,
+            ex,
+            ey,
+            rng,
+        );
+    }
+
+    if let Some(hole) = recipe.hole {
+        rng = mix64(rng ^ 0x401E);
+        let start = pick_seed_cell(bounds, &hole, rng, max_x, max_y, 1.0);
+        carve_pit(bounds, &mut heights, start, 0.55, 0.88, rng);
+    }
+
+    let threshold = threshold_for_fraction(&heights, recipe.land_fraction);
+    let mut layer = DenseLayer::new_categorical(LAND_MASK_LAYER_ID, n);
+    for index in 0..n {
+        let value = if heights[index] > threshold {
             LAND_MASK_LAND
         } else {
             LAND_MASK_OCEAN
@@ -560,6 +698,9 @@ pub fn generate_land_mask_recipe(
             DenseState::Value(LayerValue::Text(value.to_string())),
         );
     }
+
+    apply_shore_fringe(bounds, &mut layer, character, seed);
+    remove_tiny_islands(bounds, &mut layer, min_island_cells(recipe));
     mark_inland_seas(bounds, &mut layer);
     layer
 }
@@ -585,41 +726,284 @@ pub fn normalize_kind(raw: &str) -> &'static str {
     }
 }
 
-fn is_land_recipe(
-    recipe: &LayoutRecipe,
-    nx: f64,
-    ny: f64,
-    noise: f64,
-    roughness: f64,
-) -> bool {
-    let in_land = recipe.blobs.iter().any(|b| {
-        in_ellipse(
-            nx - b.cx,
-            ny - b.cy,
-            b.rx + roughness * 0.55 * noise,
-            b.ry + roughness * 0.55 * noise,
-        )
-    });
-    if !in_land {
-        return false;
+fn min_island_cells(recipe: &LayoutRecipe) -> usize {
+    match recipe.layout_class {
+        LayoutClass::Archipelago => 2,
+        LayoutClass::Island => 3,
+        _ => 4,
     }
-    if let Some(h) = recipe.hole {
-        let in_hole = in_ellipse(
-            nx - h.cx,
-            ny - h.cy,
-            (h.rx - roughness * 0.25 * noise).max(0.05),
-            (h.ry - roughness * 0.25 * noise).max(0.05),
-        );
-        return !in_hole;
-    }
-    true
 }
 
-fn in_ellipse(dx: f64, dy: f64, rx: f64, ry: f64) -> bool {
-    if rx <= 0.0 || ry <= 0.0 {
-        return false;
+fn elongation_axis(seed: u64, amount: f64) -> (f64, f64) {
+    if amount < 0.05 {
+        return (1.0, 0.0);
     }
-    (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) <= 1.0
+    let angle = unit01(seed) * std::f64::consts::TAU;
+    (angle.cos(), angle.sin())
+}
+
+fn pick_seed_cell(
+    bounds: &MapBounds,
+    zone: &LayoutBlob,
+    seed: u64,
+    max_x: f64,
+    max_y: f64,
+    merge_bias: f64,
+) -> usize {
+    let jitter = 0.35 + (1.0 - merge_bias) * 0.4;
+    let nx = zone.cx + (unit01(seed ^ 0x11) * 2.0 - 1.0) * zone.rx * jitter;
+    let ny = zone.cy + (unit01(seed ^ 0x22) * 2.0 - 1.0) * zone.ry * jitter;
+    nearest_index(bounds, nx, ny, max_x, max_y)
+}
+
+fn nearest_index(bounds: &MapBounds, nx: f64, ny: f64, max_x: f64, max_y: f64) -> usize {
+    let mut best = 0usize;
+    let mut best_d = f64::MAX;
+    for index in 0..bounds.len() {
+        let Some(cell) = bounds.from_index(index) else {
+            continue;
+        };
+        let (x, y) = cell.to_pixel(1.0);
+        let cx = if max_x > 0.0 { x / max_x } else { 0.0 };
+        let cy = if max_y > 0.0 { y / max_y } else { 0.0 };
+        let d = (cx - nx).hypot(cy - ny);
+        if d < best_d {
+            best_d = d;
+            best = index;
+        }
+    }
+    best
+}
+
+/// Azgaar-style blob growth: parent height × decay × sharpness RNG; max-blend layers.
+fn grow_blob(
+    bounds: &MapBounds,
+    heights: &mut [f64],
+    start: usize,
+    start_h: f64,
+    decay: f64,
+    sharpness: f64,
+    elongation: f64,
+    axis_x: f64,
+    axis_y: f64,
+    seed: u64,
+) {
+    let n = heights.len();
+    let mut used = vec![false; n];
+    let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+    heights[start] = heights[start].max(start_h);
+    used[start] = true;
+    queue.push_back(start);
+    let mut step = 0u64;
+    while let Some(index) = queue.pop_front() {
+        let Some(cell) = bounds.from_index(index) else {
+            continue;
+        };
+        let parent_h = heights[index];
+        if parent_h < 0.02 {
+            continue;
+        }
+        let (px, py) = cell.to_pixel(1.0);
+        for ncell in cell.neighbors() {
+            let Some(ni) = bounds.index_of(ncell) else {
+                continue;
+            };
+            if used[ni] {
+                continue;
+            }
+            used[ni] = true;
+            step = step.wrapping_add(1);
+            let mut mod_v = if sharpness <= 0.05 {
+                1.0
+            } else {
+                unit01(seed ^ step.wrapping_mul(0x9E37) ^ (ni as u64)) * sharpness
+                    + (1.1 - sharpness)
+            };
+            if elongation > 0.05 {
+                let (nx, ny) = ncell.to_pixel(1.0);
+                let dx = nx - px;
+                let dy = ny - py;
+                let along = (dx * axis_x + dy * axis_y).abs();
+                let across = (dx * -axis_y + dy * axis_x).abs();
+                let stretch = 1.0 + elongation * 0.35 * (along - across).tanh();
+                mod_v *= stretch;
+            }
+            let h = parent_h * decay * mod_v;
+            if h > heights[ni] {
+                heights[ni] = h;
+            }
+            if h > 0.02 {
+                queue.push_back(ni);
+            }
+        }
+    }
+}
+
+fn carve_pit(
+    bounds: &MapBounds,
+    heights: &mut [f64],
+    start: usize,
+    strength: f64,
+    decay: f64,
+    seed: u64,
+) {
+    let n = heights.len();
+    let mut used = vec![false; n];
+    let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+    let mut power = strength;
+    heights[start] = (heights[start] - power).max(0.0);
+    used[start] = true;
+    queue.push_back(start);
+    let mut step = 0u64;
+    while let Some(index) = queue.pop_front() {
+        let Some(cell) = bounds.from_index(index) else {
+            continue;
+        };
+        power *= decay;
+        if power < 0.03 {
+            continue;
+        }
+        for ncell in cell.neighbors() {
+            let Some(ni) = bounds.index_of(ncell) else {
+                continue;
+            };
+            if used[ni] {
+                continue;
+            }
+            used[ni] = true;
+            step = step.wrapping_add(1);
+            let mod_v = 0.85 + unit01(seed ^ step) * 0.3;
+            let cut = power * mod_v;
+            heights[ni] = (heights[ni] - cut).max(0.0);
+            if cut > 0.03 {
+                queue.push_back(ni);
+            }
+        }
+    }
+}
+
+fn threshold_for_fraction(heights: &[f64], target: f64) -> f64 {
+    if heights.is_empty() {
+        return 0.2;
+    }
+    let mut sorted: Vec<f64> = heights.iter().copied().filter(|h| *h > 0.0).collect();
+    if sorted.is_empty() {
+        return 1.0;
+    }
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let want = (target.clamp(0.05, 0.85) * heights.len() as f64) as usize;
+    let land_from_positive = want.min(sorted.len());
+    if land_from_positive == 0 {
+        return sorted[sorted.len() - 1] + 0.01;
+    }
+    let idx = sorted.len() - land_from_positive;
+    sorted[idx] * 0.999
+}
+
+fn apply_shore_fringe(
+    bounds: &MapBounds,
+    layer: &mut DenseLayer,
+    character: ShoreCharacter,
+    seed: u64,
+) {
+    let chance = match character {
+        ShoreCharacter::Smooth => 0.04,
+        ShoreCharacter::Jagged => 0.11,
+    };
+    let n = bounds.len();
+    let mut flips: Vec<(usize, bool)> = Vec::new();
+    for index in 0..n {
+        let Some(cell) = bounds.from_index(index) else {
+            continue;
+        };
+        let is_land = matches!(
+            layer.state(index),
+            DenseState::Value(LayerValue::Text(ref t)) if t == LAND_MASK_LAND
+        );
+        let mut land_n = 0;
+        let mut ocean_n = 0;
+        for nb in cell.neighbors() {
+            let Some(ni) = bounds.index_of(nb) else {
+                continue;
+            };
+            if matches!(
+                layer.state(ni),
+                DenseState::Value(LayerValue::Text(ref t)) if t == LAND_MASK_LAND
+            ) {
+                land_n += 1;
+            } else {
+                ocean_n += 1;
+            }
+        }
+        let on_shore = land_n > 0 && ocean_n > 0;
+        if !on_shore {
+            continue;
+        }
+        let u = unit01(seed ^ (index as u64).wrapping_mul(0x85EB));
+        if u > chance {
+            continue;
+        }
+        if is_land && land_n <= 3 {
+            flips.push((index, false));
+        } else if !is_land && land_n >= 2 {
+            flips.push((index, true));
+        }
+    }
+    for (index, to_land) in flips {
+        let value = if to_land {
+            LAND_MASK_LAND
+        } else {
+            LAND_MASK_OCEAN
+        };
+        layer.set(
+            index,
+            DenseState::Value(LayerValue::Text(value.to_string())),
+        );
+    }
+}
+
+fn remove_tiny_islands(bounds: &MapBounds, layer: &mut DenseLayer, min_cells: usize) {
+    let n = bounds.len();
+    let mut seen = vec![false; n];
+    for start in 0..n {
+        if seen[start] || !is_land_cell(layer, start) {
+            continue;
+        }
+        let mut stack = vec![start];
+        let mut component = Vec::new();
+        seen[start] = true;
+        while let Some(i) = stack.pop() {
+            component.push(i);
+            let Some(cell) = bounds.from_index(i) else {
+                continue;
+            };
+            for nb in cell.neighbors() {
+                let Some(ni) = bounds.index_of(nb) else {
+                    continue;
+                };
+                if seen[ni] || !is_land_cell(layer, ni) {
+                    continue;
+                }
+                seen[ni] = true;
+                stack.push(ni);
+            }
+        }
+        if component.len() < min_cells {
+            for i in component {
+                layer.set(
+                    i,
+                    DenseState::Value(LayerValue::Text(LAND_MASK_OCEAN.to_string())),
+                );
+            }
+        }
+    }
+}
+
+fn is_land_cell(layer: &DenseLayer, index: usize) -> bool {
+    matches!(
+        layer.state(index),
+        DenseState::Value(LayerValue::Text(kind)) if kind == LAND_MASK_LAND
+    )
 }
 
 fn mark_inland_seas(bounds: &MapBounds, layer: &mut DenseLayer) {
@@ -683,24 +1067,9 @@ fn half_extent(bounds: &MapBounds) -> (f64, f64) {
     (max_x.max(1.0), max_y.max(1.0))
 }
 
-fn octave_noise(cell: Axial, seed: u64) -> f64 {
-    let n1 = hash_noise(seed ^ 0x9E37_79B9, cell.q, cell.r);
-    let n2 = hash_noise(seed ^ 0x85EB_CA6B, cell.q * 2, cell.r * 2);
-    let n3 = hash_noise(seed ^ 0xC2B2_AE35, cell.q * 4, cell.r * 4);
-    (n1 * 0.58 + n2 * 0.29 + n3 * 0.13).clamp(-1.0, 1.0)
-}
-
-fn hash_noise(seed: u64, q: i32, r: i32) -> f64 {
-    let mut x = seed
-        ^ ((q as i64 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15))
-        ^ ((r as i64 as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F));
-    x ^= x >> 33;
-    x = x.wrapping_mul(0xff51afd7ed558ccd);
-    x ^= x >> 33;
-    x = x.wrapping_mul(0xc4ceb9fe1a85ec53);
-    x ^= x >> 33;
-    let unit = (x as f64) / (u64::MAX as f64);
-    unit * 2.0 - 1.0
+fn unit01(seed: u64) -> f64 {
+    let x = mix64(seed);
+    (x as f64) / (u64::MAX as f64)
 }
 
 fn mix64(mut x: u64) -> u64 {
@@ -779,7 +1148,23 @@ mod tests {
                 }
             }
         }
-        assert!(differ, "pangea recipes should not be identical masks");
+        assert!(differ, "pangea growth plans should not be identical masks");
+    }
+
+    #[test]
+    fn different_seeds_change_form() {
+        let bounds = MapBounds::new(28, 16);
+        let recipe = find_recipe("island_irregular").expect("recipe");
+        let a = generate_land_mask_recipe(&bounds, recipe, ShoreCharacter::Smooth, 1);
+        let b = generate_land_mask_recipe(&bounds, recipe, ShoreCharacter::Smooth, 99);
+        let mut differ = false;
+        for idx in 0..bounds.len() {
+            if a.state(idx) != b.state(idx) {
+                differ = true;
+                break;
+            }
+        }
+        assert!(differ, "seed should change organic form");
     }
 
     #[test]
