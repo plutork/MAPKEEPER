@@ -703,6 +703,8 @@ pub fn generate_land_mask_recipe(
     // D-66 dogfood: kill 1-hex-wide axis strips left by growth.
     prune_thin_corridors(bounds, &mut layer, 4);
     remove_tiny_islands(bounds, &mut layer, min_island_cells(recipe));
+    // Third pass: remember layout_class identity (e.g. Pangea = one mass).
+    enforce_layout_class(bounds, &mut layer, recipe.layout_class);
     mark_inland_seas(bounds, &mut layer);
     layer
 }
@@ -1029,8 +1031,19 @@ fn apply_shore_fringe(
 }
 
 fn remove_tiny_islands(bounds: &MapBounds, layer: &mut DenseLayer, min_cells: usize) {
+    let components = land_components(bounds, layer);
+    for component in components {
+        if component.len() < min_cells {
+            flood_ocean(layer, &component);
+        }
+    }
+}
+
+/// Connected land components, largest first.
+fn land_components(bounds: &MapBounds, layer: &DenseLayer) -> Vec<Vec<usize>> {
     let n = bounds.len();
     let mut seen = vec![false; n];
+    let mut out: Vec<Vec<usize>> = Vec::new();
     for start in 0..n {
         if seen[start] || !is_land_cell(layer, start) {
             continue;
@@ -1054,13 +1067,55 @@ fn remove_tiny_islands(bounds: &MapBounds, layer: &mut DenseLayer, min_cells: us
                 stack.push(ni);
             }
         }
-        if component.len() < min_cells {
-            for i in component {
-                layer.set(
-                    i,
-                    DenseState::Value(LayerValue::Text(LAND_MASK_OCEAN.to_string())),
-                );
+        out.push(component);
+    }
+    out.sort_by_key(|c| std::cmp::Reverse(c.len()));
+    out
+}
+
+fn flood_ocean(layer: &mut DenseLayer, cells: &[usize]) {
+    for &i in cells {
+        layer.set(
+            i,
+            DenseState::Value(LayerValue::Text(LAND_MASK_OCEAN.to_string())),
+        );
+    }
+}
+
+/// Third pass after growth: enforce class identity (D-66 dogfood).
+/// Pangea/Island → one mass; Continents → at most two; CAI → main + small sats.
+fn enforce_layout_class(bounds: &MapBounds, layer: &mut DenseLayer, class: LayoutClass) {
+    let components = land_components(bounds, layer);
+    if components.is_empty() {
+        return;
+    }
+    match class {
+        LayoutClass::Pangea | LayoutClass::Island | LayoutClass::Mediterranean => {
+            // One dominant landmass (med may enclose inland_sea after this).
+            for component in components.into_iter().skip(1) {
+                flood_ocean(layer, &component);
             }
+        }
+        LayoutClass::Continents => {
+            for component in components.into_iter().skip(2) {
+                flood_ocean(layer, &component);
+            }
+        }
+        LayoutClass::ContinentAndIslands => {
+            let main_len = components[0].len().max(1);
+            let sat_cap = (main_len / 4).max(8);
+            for (i, component) in components.into_iter().enumerate() {
+                if i == 0 {
+                    continue;
+                }
+                // Drop second continent-sized masses; keep only small satellites.
+                if component.len() > sat_cap {
+                    flood_ocean(layer, &component);
+                }
+            }
+        }
+        LayoutClass::Archipelago => {
+            // Many islands is the identity — no merge/drop beyond tiny cleanup.
         }
     }
 }
@@ -1349,5 +1404,49 @@ mod tests {
             }
         }
         assert!(left_land, "expected satellite land on the far side");
+    }
+
+    #[test]
+    fn pangea_is_single_landmass() {
+        let bounds = MapBounds::new(28, 16);
+        for seed in [0u64, 3, 11, 42, 99] {
+            let layer = generate_land_mask(&bounds, LayoutClass::Pangea, ShoreCharacter::Jagged, seed);
+            let comps = land_components(&bounds, &layer);
+            assert_eq!(
+                comps.len(),
+                1,
+                "pangea seed {seed} should be one mass, got {}",
+                comps.len()
+            );
+        }
+    }
+
+    #[test]
+    fn enforce_keeps_largest_only_for_pangea() {
+        let bounds = MapBounds::new(10, 8);
+        let mut layer = DenseLayer::new_categorical(LAND_MASK_LAYER_ID, bounds.len());
+        for index in 0..bounds.len() {
+            layer.set(
+                index,
+                DenseState::Value(LayerValue::Text(LAND_MASK_OCEAN.to_string())),
+            );
+        }
+        // Two separate blobs.
+        for cell in [Axial { q: -2, r: 0 }, Axial { q: -1, r: 0 }, Axial { q: 0, r: 0 }] {
+            let i = bounds.index_of(cell).expect("in bounds");
+            layer.set(
+                i,
+                DenseState::Value(LayerValue::Text(LAND_MASK_LAND.to_string())),
+            );
+        }
+        for cell in [Axial { q: 3, r: 1 }, Axial { q: 4, r: 1 }] {
+            let i = bounds.index_of(cell).expect("in bounds");
+            layer.set(
+                i,
+                DenseState::Value(LayerValue::Text(LAND_MASK_LAND.to_string())),
+            );
+        }
+        enforce_layout_class(&bounds, &mut layer, LayoutClass::Pangea);
+        assert_eq!(land_components(&bounds, &layer).len(), 1);
     }
 }
