@@ -188,6 +188,16 @@ struct ElevationGenerateInput {
     style: Option<String>,
 }
 
+/// step3-recipe-seed-debug-line (D-68): generation identity for wizard dogfood.
+#[derive(Serialize)]
+struct LandMaskGenerateResponse {
+    seed: u64,
+    recipe_id: String,
+    layout_class: String,
+    character: String,
+    regenerate_nonce: u64,
+}
+
 #[derive(Deserialize)]
 struct LandMaskCellInput {
     q: i32,
@@ -923,13 +933,14 @@ async fn generate_land_mask_handler(
                 .map(LayoutClass::parse)
         })
         .unwrap_or(LayoutClass::Pangea);
+    let recipe_id = recipe.map(|r| r.id).unwrap_or("").to_string();
     let seed = silhouette_seed(
         &world_id,
         style,
         character,
         variant,
         nonce,
-        recipe.map(|r| r.id).unwrap_or(""),
+        &recipe_id,
     );
     let mask = if let Some(recipe) = recipe {
         generate_land_mask_recipe(&bounds, recipe, character, seed)
@@ -943,7 +954,18 @@ async fn generate_land_mask_handler(
     if let Err(err) = write_dense_layer(&world_path, &elevation) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
-    StatusCode::NO_CONTENT.into_response()
+    // D-68: return identity so wizard can show recipe/seed without rehashing.
+    Json(LandMaskGenerateResponse {
+        seed,
+        recipe_id,
+        layout_class: style.id().to_string(),
+        character: match character {
+            ShoreCharacter::Smooth => "smooth".to_string(),
+            ShoreCharacter::Jagged => "jagged".to_string(),
+        },
+        regenerate_nonce: nonce,
+    })
+    .into_response()
 }
 
 /// world-pipeline--tectonics-v1: generate step-4 `geology` from accepted land_mask.

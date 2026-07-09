@@ -12,7 +12,7 @@ Use this first, then open only the needed files.
 - Map state model (dense layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
 - Cell index (`(q,r) <-> linear index`, `MapBounds::index_of`/`from_index`/`len`) -> `crates/core/src/hex.rs`
 - Dense typed-layer model (index-addressed, palette categorical + integer; `read_or_empty`; generic wire `WireCellState`/`LayerCellWrite`) -> `crates/core/src/layer.rs` (`DenseLayer`)
-- Step-3 silhouette model (`land_mask`, six layout classes + growth-plan catalog, seeded layered land growth → cleanup, shore character, inland sea, elevation sync; UI: 6 class cards + recipe-only Regenerate below cards) -> `crates/core/src/land_mask.rs` (`world-pipeline--land-silhouette-v1`, D-62…D-66 / `step3-organic-silhouette-v1`)
+- Step-3 silhouette model (`land_mask`, six layout classes + growth-plan catalog, seeded layered land growth → cleanup, shore character, inland sea, elevation sync; UI: 6 class cards + recipe-only Regenerate below cards + always-visible gen identity line) -> `crates/core/src/land_mask.rs` (`world-pipeline--land-silhouette-v1`, D-62…D-66 / D-68 / `step3-organic-silhouette-v1`)
 - Step-4 geology model (`geology` categorical, styles belts/shields/arcs, elevation bridge) -> `crates/core/src/geology.rs` (`world-pipeline--tectonics-v1`, D-63)
 - Elevation/hydro threshold model (`elevation <= 0 => water`) + stamp falloff math -> `crates/core/src/hydro.rs` (`elevation-authoring-v2`: `filled_elevation_layer`, `stamp_delta`)
 - River catalog + `river_id` dense sync (`map/rivers.json`, neighbor chain validation) -> `crates/core/src/rivers.rs` (`river-overlay-layer-v1`, D-54)
@@ -36,9 +36,9 @@ Use this first, then open only the needed files.
 - River dogfood fixture worlds (Small elevation presets) -> `fixtures/worlds/` (`river-dogfood-fixture-worlds`; maintainer/CI — no Home UI per D-59)
 - Build wizard draft state (`[build]` in `mapkeeper.toml`, read/write/clear) -> `crates/core/src/build_state.rs` (`home-build-draft-v1`, D-59)
 - Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, list `build_draft`/`build_step`) -> `crates/server/src/lib.rs` (D-59)
-- Build wizard step-3/4/5 API (`POST /api/build/land-mask/generate`, `PUT /api/build/land-mask/cells`, `POST /api/build/geology/generate`, `POST /api/build/elevation/generate`) -> `crates/server/src/lib.rs` (`world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`)
+- Build wizard step-3/4/5 API (`POST /api/build/land-mask/generate` returns seed identity JSON, `PUT /api/build/land-mask/cells`, `POST /api/build/geology/generate`, `POST /api/build/elevation/generate`) -> `crates/server/src/lib.rs` (`world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`, D-68)
 - World Build Wizard shell (D-57 + D-59 draft resume): Home **Build World**, fullscreen overlay, Save Draft / wizard resume -> `crates/web/index.html`, `crates/web/src/lib.rs`
-- World Build Wizard steps 3–5 (silhouette → tectonics tint → elevation generate → Finish) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`step3-land-silhouette-flow-v2`, D-65/D-66 picker + organic growth, `world-pipeline--tectonics-v1`)
+- World Build Wizard steps 3–5 (silhouette → tectonics tint → elevation generate → Finish; step 3 shows class/recipe/shore/nonce/seed under Regenerate) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`step3-land-silhouette-flow-v2`, D-65/D-66/D-68 picker + organic growth + gen identity, `world-pipeline--tectonics-v1`)
 - World scaffold source -> `toolchain/template/world/`
 - CI/build behavior -> `.github/workflows/`
 

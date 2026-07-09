@@ -363,6 +363,16 @@ struct WizardLandMaskGenerateInput<'a> {
     regenerate_nonce: u32,
 }
 
+/// D-68: identity echoed from land-mask generate.
+#[derive(Deserialize)]
+struct WizardLandMaskGenerateResponse {
+    seed: u64,
+    recipe_id: String,
+    layout_class: String,
+    character: String,
+    regenerate_nonce: u64,
+}
+
 #[derive(Serialize)]
 struct WizardGeologyGenerateInput<'a> {
     style: &'a str,
@@ -496,6 +506,8 @@ struct AppState {
     wizard_regenerate_nonce: u32,
     /// Active recipe within the selected class.
     wizard_recipe_id: String,
+    /// Effective silhouette seed from last generate (D-68).
+    wizard_gen_seed: Option<u64>,
     wizard_accepted: bool,
     wizard_edit_mode: bool,
     wizard_edit_brush: String,
@@ -559,6 +571,7 @@ pub fn start() {
         wizard_layout_class: "pangea".to_string(),
         wizard_regenerate_nonce: 0,
         wizard_recipe_id: String::new(),
+        wizard_gen_seed: None,
         wizard_accepted: false,
         wizard_edit_mode: false,
         wizard_edit_brush: "land".to_string(),
@@ -1165,6 +1178,26 @@ fn rotate_wizard_recipe(state: &mut AppState) {
     state.wizard_recipe_id = recipe.id.to_string();
 }
 
+/// D-68: quiet identity line under Regenerate (dogfood chrome).
+fn sync_wizard_gen_identity(state: &AppState) {
+    let recipe = if state.wizard_recipe_id.is_empty() {
+        "—"
+    } else {
+        state.wizard_recipe_id.as_str()
+    };
+    let seed = state
+        .wizard_gen_seed
+        .map(|s| format!("0x{s:016x}"))
+        .unwrap_or_else(|| "—".to_string());
+    set_text(
+        "wiz-gen-identity",
+        &format!(
+            "class: {} · recipe: {} · shore: {} · nonce: {} · seed: {}",
+            state.wizard_layout_class, recipe, state.wizard_character, state.wizard_regenerate_nonce, seed
+        ),
+    );
+}
+
 fn sync_wizard_edit_mode_ui(edit_mode: bool, brush: &str) {
     if let Some(row) = document().get_element_by_id("wiz-edit-brushes") {
         if edit_mode {
@@ -1193,6 +1226,7 @@ fn sync_wizard_actions(state: &AppState) {
     set_button_disabled("wiz-geo-continue", !state.wizard_geo_accepted);
     sync_wizard_layout_buttons(&state.wizard_layout_class);
     sync_wizard_edit_mode_ui(state.wizard_edit_mode, &state.wizard_edit_brush);
+    sync_wizard_gen_identity(state);
     show_wizard_step(state);
 }
 
@@ -1241,6 +1275,20 @@ async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
         }
         set_wizard_status(&msg);
         return;
+    }
+    if let Ok(identity) = resp.json::<WizardLandMaskGenerateResponse>().await {
+        let mut s = state.borrow_mut();
+        s.wizard_gen_seed = Some(identity.seed);
+        if !identity.recipe_id.is_empty() {
+            s.wizard_recipe_id = identity.recipe_id;
+        }
+        if !identity.layout_class.is_empty() {
+            s.wizard_layout_class = identity.layout_class;
+        }
+        if !identity.character.is_empty() {
+            s.wizard_character = identity.character;
+        }
+        s.wizard_regenerate_nonce = identity.regenerate_nonce as u32;
     }
     load_elevation(&state).await;
     schedule_redraw(state.clone());
@@ -1450,7 +1498,10 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
             if let Some(character) = el.get_attribute("data-wiz-char") {
                 wiz_toggle_style_group("wiz-chars", "data-wiz-char", &el);
-                state.borrow_mut().wizard_character = character;
+                let mut s = state.borrow_mut();
+                s.wizard_character = character;
+                s.wizard_gen_seed = None;
+                sync_wizard_gen_identity(&s);
                 set_wizard_status("Shore updated. Regenerate or pick a layout class.");
             }
         });
@@ -1826,6 +1877,7 @@ async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.wizard_layout_class = "pangea".to_string();
     state_mut.wizard_regenerate_nonce = 0;
     state_mut.wizard_recipe_id.clear();
+    state_mut.wizard_gen_seed = None;
     state_mut.wizard_step = 3;
     state_mut.wizard_geo_style = "belts".to_string();
     state_mut.wizard_geo_nonce = 0;
@@ -3272,6 +3324,7 @@ fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
                         s.wizard_layout_class = "pangea".to_string();
                         s.wizard_regenerate_nonce = 0;
                         s.wizard_recipe_id.clear();
+                        s.wizard_gen_seed = None;
                         s.wizard_accepted = false;
                         s.wizard_edit_mode = false;
                         ensure_wizard_recipe(&mut s);
