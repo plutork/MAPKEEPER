@@ -1195,17 +1195,8 @@ fn balance_continents(bounds: &MapBounds, layer: &mut DenseLayer, seed: u64) {
         return;
     }
 
-    // Prefer shrinking the oversized mass over flooding ocean (avoids half-map fill).
-    let big_n = comps[0].len();
-    let small_n = comps[1].len();
-    if small_n * 100 / big_n.max(1) < 45 {
-        let target_big = ((small_n as f64) / 0.55).round() as usize;
-        let floor = (small_n + small_n / 2).max(small_n + 8);
-        erode_land_mass(bounds, layer, &comps[0], target_big.max(floor));
-        comps = land_components(bounds, layer);
-    }
-
-    // If still tiny second: organic grow (budget-capped), then re-check.
+    // Grow the thin second first — never crush the main mass to match a speck
+    // (Large dogfood: erode-before-grow left ~1% land / empty Continents).
     if comps.len() >= 2 {
         let big_n = comps[0].len();
         let small_n = comps[1].len();
@@ -1223,17 +1214,47 @@ fn balance_continents(bounds: &MapBounds, layer: &mut DenseLayer, seed: u64) {
         }
     }
 
+    // Only then shrink an oversized first — floor keeps map-scale land (D-66).
     if comps.len() >= 2 {
         let big_n = comps[0].len();
         let small_n = comps[1].len();
         if small_n * 100 / big_n.max(1) < 45 {
             let target_big = ((small_n as f64) / 0.55).round() as usize;
-            erode_land_mass(
+            let floor = (small_n + small_n / 2)
+                .max(small_n + 8)
+                .max((bounds.len() as f64 * 0.12).round() as usize);
+            erode_land_mass(bounds, layer, &comps[0], target_big.max(floor));
+            comps = land_components(bounds, layer);
+        }
+    }
+
+    // If total land collapsed below ~28% of map, top up both masses (Large dogfood).
+    if comps.len() >= 2 {
+        let total = comps[0].len() + comps[1].len();
+        let want = ((bounds.len() as f64) * 0.34).round() as usize;
+        if total < want {
+            let extra = want - total;
+            let add_big = (extra as f64 * 0.55).round() as usize;
+            let add_small = extra.saturating_sub(add_big);
+            grow_organic_mass(
                 bounds,
                 layer,
                 &comps[0],
-                target_big.max(small_n + 8),
+                &comps[1],
+                comps[0].len() + add_big,
+                seed ^ 0x70F1,
             );
+            comps = land_components(bounds, layer);
+            if comps.len() >= 2 {
+                grow_organic_mass(
+                    bounds,
+                    layer,
+                    &comps[1],
+                    &comps[0],
+                    comps[1].len() + add_small,
+                    seed ^ 0x70F2,
+                );
+            }
         }
     }
 
@@ -1328,6 +1349,13 @@ fn set_land(layer: &mut DenseLayer, index: usize) {
     );
 }
 
+/// Decay so blob radius roughly covers `target` cells (D-66 Large Continents).
+fn blob_decay_for_target(target: usize) -> f64 {
+    let need_r = ((target as f64 / std::f64::consts::PI).sqrt()).max(4.0);
+    // parent≈0.95, stop≈0.02 → decay^r ≈ 0.02/0.95
+    (0.02f64 / 0.95).powf(1.0 / need_r).clamp(0.88, 0.975)
+}
+
 /// Grow / expand a land mass via organic blob heights (D-66) — not a radial disk.
 fn grow_organic_mass(
     bounds: &MapBounds,
@@ -1375,7 +1403,8 @@ fn grow_organic_mass(
         &mut heights,
         start,
         0.95,
-        0.89,
+        // Scale decay so height field covers ~target cells (fixed 0.89 stalled on Large).
+        blob_decay_for_target(target),
         0.32,
         0.22,
         ex,
@@ -1444,7 +1473,8 @@ fn grow_organic_mass(
     }
 
     // Soft elliptical falloff + wobble — avoids flat circular / chord edges.
-    let soft_r = ((target as f64 / std::f64::consts::PI).sqrt() * 2.5).max(5.0);
+    // Radius scales with target so Large Continents can actually fill budget.
+    let soft_r = ((target as f64 / std::f64::consts::PI).sqrt() * 3.2).max(8.0);
     for index in 0..n {
         if heights[index] <= 0.0 {
             continue;
@@ -1470,13 +1500,15 @@ fn grow_organic_mass(
     let seed_set: std::collections::HashSet<usize> = seed_cells.iter().copied().collect();
     let mut grown = seed_set.clone();
     let need = target.saturating_sub(seed_cells.len());
-    let threshold = threshold_for_fraction(&heights, target as f64 / n as f64);
+    // Prefer cells above a soft floor; do not use map-fraction threshold (stalls when
+    // height field is smaller than the map — Large Continents dogfood).
+    let h_floor = 0.04;
     let mut painted = 0usize;
     // Paint by descending height; prefer cells with ≥2 land neighbors (compact, fewer fingers).
     let mut order: Vec<(i32, usize)> = heights
         .iter()
         .enumerate()
-        .filter(|(i, h)| **h > threshold && !seed_set.contains(i))
+        .filter(|(i, h)| **h > h_floor && !seed_set.contains(i))
         .map(|(i, h)| ((-*h * 1_000_000.0) as i32, i))
         .collect();
     order.sort_unstable();
@@ -1490,6 +1522,14 @@ fn grow_organic_mass(
         let Some(cell) = bounds.from_index(index) else {
             continue;
         };
+        // Keep channel vs avoided mass.
+        if cell.neighbors().iter().any(|nb| {
+            bounds
+                .index_of(*nb)
+                .is_some_and(|ni| avoid_set.contains(&ni))
+        }) {
+            continue;
+        }
         let touch_n = cell
             .neighbors()
             .iter()
@@ -1934,5 +1974,34 @@ mod tests {
                 "continents seed {seed}: largest mass fills {frac:.2} of map"
             );
         }
+    }
+
+    /// Dogfood: erode-before-grow crushed Large Continents to ~1% land (seed from UI).
+    #[test]
+    fn continents_l_and_blob_keeps_land_fraction_on_large() {
+        use crate::map_preset::MapPreset;
+        let bounds = MapPreset::Large.bounds();
+        let recipe = find_recipe("continents_l_and_blob").expect("recipe");
+        let seed = 0xec3d502bf050082au64;
+        let layer = generate_land_mask_recipe(&bounds, recipe, ShoreCharacter::Smooth, seed);
+        let land = count_kind(&layer, LAND_MASK_LAND);
+        let frac = land as f64 / bounds.len() as f64;
+        assert!(
+            frac >= 0.25,
+            "expected substantial Continents land, got {land} ({frac:.3})"
+        );
+        let comps = land_components(&bounds, &layer);
+        assert!(
+            comps.len() >= 2,
+            "expected ≥2 masses, got {}",
+            comps.len()
+        );
+        let ratio = comps[1].len() as f64 / comps[0].len().max(1) as f64;
+        assert!(
+            ratio >= 0.35,
+            "second/first={ratio:.2} ({} vs {})",
+            comps[1].len(),
+            comps[0].len()
+        );
     }
 }
