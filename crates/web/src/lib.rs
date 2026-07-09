@@ -1292,7 +1292,10 @@ async fn load_geology(state: &Rc<RefCell<AppState>>) {
     let Ok(layer) = resp.json::<DenseLayer>().await else {
         return;
     };
-    state.borrow_mut().geology = Some(layer);
+    // world-pipeline--tectonics-v1: tint overlay depends on content_rev in DrawSnapshot
+    let mut s = state.borrow_mut();
+    s.geology = Some(layer);
+    bump_content_rev(&mut s);
 }
 
 async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
