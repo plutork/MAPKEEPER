@@ -503,6 +503,16 @@
     border-radius: 6px;
   }
   .wiz-action-btn.primary { background: #3ac886; color: #04140b; }
+  .wiz-action-btn.warn {
+    background: #c45a12;
+    color: #fff8f0;
+    border: 1px solid #e07a2f;
+  }
+  .wiz-back-top {
+    margin: 0 0 0.75rem;
+    padding-bottom: 0.65rem;
+    border-bottom: 1px solid #3a424c;
+  }
   button:disabled, button.wiz-disabled {
     opacity: 0.42;
     cursor: not-allowed;
@@ -740,18 +750,23 @@
         </div>
 
         <div id="wiz-panel-step2" class="hidden">
+          <div class="wiz-btn-row wiz-back-top">
+            <button id="wiz-grid-back" class="wiz-action-btn warn" type="button">Back</button>
+          </div>
           <h2>Grid</h2>
           <p class="wiz-hint">Blank hex grid at the chosen size. Continue to land silhouette when the scale looks right.</p>
           <section class="wiz-section">
             <p class="wiz-hint" id="wiz-grid-meta">—</p>
             <div class="wiz-btn-row wiz-bottom-actions">
-              <button id="wiz-grid-back" class="wiz-action-btn" type="button">Back</button>
               <button id="wiz-grid-continue" class="wiz-action-btn primary" type="button">Continue</button>
             </div>
           </section>
         </div>
 
         <div id="wiz-panel-step3" class="hidden">
+        <div class="wiz-btn-row wiz-back-top">
+          <button id="wiz-sil-back" class="wiz-action-btn warn" type="button">Back</button>
+        </div>
         <h2>Land silhouette</h2>
         <p class="wiz-hint">Pick a layout class, then regenerate shapes within that class. Shore character is separate.</p>
 
@@ -801,14 +816,16 @@
         <section class="wiz-section">
           <p class="wiz-label">5. Next step</p>
           <div class="wiz-btn-row wiz-bottom-actions">
-            <button id="wiz-sil-back" class="wiz-action-btn" type="button">Back</button>
             <button id="wiz-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
           </div>
-          <p class="wiz-hint" id="wiz-right-note">Pick a class, regenerate until you like the shape, accept, then continue. Back returns to size/grid (changing size resets Geo).</p>
+          <p class="wiz-hint" id="wiz-right-note">Pick a class, regenerate until you like the shape, accept, then continue. Orange Back (top) returns to grid/size — confirm required; changing size resets Geo.</p>
         </section>
         </div>
 
         <div id="wiz-panel-step4" class="hidden">
+        <div class="wiz-btn-row wiz-back-top">
+          <button id="wiz-geo-back" class="wiz-action-btn warn" type="button">Back</button>
+        </div>
         <h2>Tectonics</h2>
         <p class="wiz-hint">Thin geology pass: generate belts that explain later elevation. No geology brush in v1.</p>
         <section class="wiz-section">
@@ -835,13 +852,15 @@
         <section class="wiz-section">
           <p class="wiz-label">4. Next step</p>
           <div class="wiz-btn-row wiz-bottom-actions">
-            <button id="wiz-geo-back" class="wiz-action-btn" type="button">Back</button>
             <button id="wiz-geo-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
           </div>
         </section>
         </div>
 
         <div id="wiz-panel-step5" class="hidden">
+        <div class="wiz-btn-row wiz-back-top">
+          <button id="wiz-elev-back" class="wiz-action-btn warn" type="button">Back</button>
+        </div>
         <h2>Elevation</h2>
         <p class="wiz-hint">Elevation is generated from land silhouette + geology. Edit heights in the editor after Finish.</p>
         <section class="wiz-section">
@@ -851,7 +870,6 @@
         </section>
         <section class="wiz-section">
           <div class="wiz-btn-row wiz-bottom-actions">
-            <button id="wiz-elev-back" class="wiz-action-btn" type="button">Back</button>
             <button id="wiz-finish" class="wiz-action-btn primary" type="button">Finish</button>
           </div>
         </section>

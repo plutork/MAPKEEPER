@@ -1097,9 +1097,27 @@ async fn apply_wizard_preset_if_needed(state: Rc<RefCell<AppState>>, preset: &st
     true
 }
 
+fn confirm_wizard_back(from_step: u32) -> bool {
+    let msg = match from_step {
+        5 => "Go back to tectonics? You can regenerate elevation later.",
+        4 => "Go back to land silhouette? Geology accept state stays until you regenerate.",
+        3 => "Go back to grid/size? Changing map size will reset land and later Geo layers.",
+        2 => "Go back to map size? Changing the preset will reset Geo if land already exists.",
+        _ => "Go back to the previous wizard step?",
+    };
+    web_sys::window()
+        .expect("window")
+        .confirm_with_message(msg)
+        .unwrap_or(false)
+}
+
 /// D-69: navigate back one Geo step (3→2→1, 4→3, 5→4). Size change still via step 1 preset.
 async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
     let from = state.borrow().wizard_step;
+    if !confirm_wizard_back(from) {
+        set_wizard_status("Back cancelled.");
+        return;
+    }
     let to = match from {
         5 => 4,
         4 => 3,
@@ -1705,21 +1723,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         let closure = Closure::<dyn FnMut()>::new(move || {
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let _ = persist_build_draft(1).await;
-                {
-                    let mut s = state.borrow_mut();
-                    s.wizard_step = 1;
-                    s.show_grid = true;
-                    if let Some(id) = preset_id_for_bounds(&s.map_bounds) {
-                        set_select_value("wiz-preset", id);
-                    }
-                    sync_preset_size_warning("wiz-preset", "wiz-preset-warn");
-                    sync_wizard_actions(&s);
-                }
-                schedule_redraw(state);
-                set_wizard_status(
-                    "Map size — change preset to resize (resets Geo if you already generated land).",
-                );
+                wizard_go_back_one_step(state).await;
             });
         });
         if let Some(btn) = document().get_element_by_id("wiz-grid-back") {
