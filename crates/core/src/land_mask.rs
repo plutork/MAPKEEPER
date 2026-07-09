@@ -1119,7 +1119,7 @@ fn enforce_layout_class(
     }
 }
 
-/// Continents: keep two masses of comparable size (smaller/larger ≥ ~0.45).
+/// Continents: two compact masses of comparable size (not half-map flood).
 fn balance_continents(bounds: &MapBounds, layer: &mut DenseLayer, seed: u64) {
     // Drop 3rd+ fragments first.
     let comps = land_components(bounds, layer);
@@ -1132,7 +1132,7 @@ fn balance_continents(bounds: &MapBounds, layer: &mut DenseLayer, seed: u64) {
         return;
     }
 
-    // Tiny second mass is noise — remove and regrow.
+    // Tiny second mass is noise — remove and regrow compactly.
     if comps.len() >= 2 && comps[1].len() * 100 / comps[0].len().max(1) < 40 {
         flood_ocean(layer, &comps[1]);
         comps = land_components(bounds, layer);
@@ -1147,25 +1147,46 @@ fn balance_continents(bounds: &MapBounds, layer: &mut DenseLayer, seed: u64) {
         return;
     }
 
-    // Grow the smaller toward ~70% of the larger.
-    let big_n = comps[0].len();
-    let small_n = comps[1].len();
-    if small_n * 100 / big_n.max(1) < 45 {
-        let target = (big_n as f64 * 0.70) as usize;
-        expand_land_mass(bounds, layer, &comps[1], &comps[0], target, seed ^ 0xC071);
-        comps = land_components(bounds, layer);
-    }
-
-    if comps.len() < 2 {
-        return;
-    }
-
-    // Still lopsided → erode the larger down toward ~1.6× the smaller.
+    // Prefer shrinking the oversized mass over flooding ocean (avoids half-map fill).
     let big_n = comps[0].len();
     let small_n = comps[1].len();
     if small_n * 100 / big_n.max(1) < 45 {
         let target_big = ((small_n as f64) / 0.55).round() as usize;
-        erode_land_mass(bounds, layer, &comps[0], target_big.max(small_n + 4));
+        let floor = (small_n + small_n / 2).max(small_n + 8);
+        erode_land_mass(bounds, layer, &comps[0], target_big.max(floor));
+        comps = land_components(bounds, layer);
+    }
+
+    // If still tiny second: compact grow (budget-capped), then re-check.
+    if comps.len() >= 2 {
+        let big_n = comps[0].len();
+        let small_n = comps[1].len();
+        if small_n * 100 / big_n.max(1) < 45 {
+            let target = (big_n as f64 * 0.65).round() as usize;
+            grow_compact_mass(
+                bounds,
+                layer,
+                &comps[1],
+                &comps[0],
+                target.max(small_n + 4),
+                seed ^ 0xC071,
+            );
+            comps = land_components(bounds, layer);
+        }
+    }
+
+    if comps.len() >= 2 {
+        let big_n = comps[0].len();
+        let small_n = comps[1].len();
+        if small_n * 100 / big_n.max(1) < 45 {
+            let target_big = ((small_n as f64) / 0.55).round() as usize;
+            erode_land_mass(
+                bounds,
+                layer,
+                &comps[0],
+                target_big.max(small_n + 8),
+            );
+        }
     }
 
     // Final: never more than two.
@@ -1202,39 +1223,55 @@ fn grow_second_continent(
     seed: u64,
 ) {
     let (mx, my) = component_centroid(bounds, main);
-    let mut best = None;
-    let mut best_d = -1.0f64;
-    for index in 0..bounds.len() {
+    let (max_x, max_y) = half_extent(bounds);
+    // Seed in the opposite half of the map from the main centroid.
+    let target_nx = if mx >= 0.0 { -0.45 } else { 0.45 };
+    let target_ny = (unit01(seed ^ 0x71) * 0.6 - 0.3) + if my >= 0.0 { -0.1 } else { 0.1 };
+    let mut start = nearest_index(bounds, target_nx, target_ny, max_x, max_y);
+
+    let start_ok = |index: usize| -> bool {
         if is_land_cell(layer, index) {
-            continue;
+            return false;
         }
         let Some(cell) = bounds.from_index(index) else {
-            continue;
+            return false;
         };
-        // Prefer ocean not touching the main mass (keep a channel).
-        let touches_main = cell.neighbors().iter().any(|nb| {
+        !cell.neighbors().iter().any(|nb| {
             bounds
                 .index_of(*nb)
                 .is_some_and(|ni| is_land_cell(layer, ni))
-        });
-        if touches_main {
-            continue;
-        }
-        let (x, y) = cell.to_pixel(1.0);
-        let d = (x - mx).hypot(y - my);
-        let jitter = unit01(seed ^ (index as u64)) * 0.5;
-        let score = d + jitter;
-        if score > best_d {
-            best_d = score;
-            best = Some(index);
-        }
-    }
-    let Some(start) = best else {
-        return;
+        })
     };
-    let target = (main.len() as f64 * 0.75).round() as usize;
+
+    if !start_ok(start) {
+        let mut best = None;
+        let mut best_d = -1.0f64;
+        for index in 0..bounds.len() {
+            if !start_ok(index) {
+                continue;
+            }
+            let Some(cell) = bounds.from_index(index) else {
+                continue;
+            };
+            let (x, y) = cell.to_pixel(1.0);
+            let d = (x - mx).hypot(y - my);
+            if d > best_d {
+                best_d = d;
+                best = Some(index);
+            }
+        }
+        let Some(s) = best else {
+            return;
+        };
+        start = s;
+    }
+
+    let target = (main.len() as f64 * 0.70).round() as usize;
+    // Cap: second continent must not exceed ~35% of the map (prevents half-fill).
+    let map_cap = (bounds.len() as f64 * 0.35).round() as usize;
+    let target = target.min(map_cap).max(12);
     set_land(layer, start);
-    expand_land_mass(bounds, layer, &[start], main, target.max(8), seed ^ 0x5EC);
+    grow_compact_mass(bounds, layer, &[start], main, target, seed ^ 0x5EC);
 }
 
 fn set_land(layer: &mut DenseLayer, index: usize) {
@@ -1244,7 +1281,8 @@ fn set_land(layer: &mut DenseLayer, index: usize) {
     );
 }
 
-fn expand_land_mass(
+/// Compact radial growth from existing seed cells — never flood-fills a map half.
+fn grow_compact_mass(
     bounds: &MapBounds,
     layer: &mut DenseLayer,
     seed_cells: &[usize],
@@ -1252,29 +1290,77 @@ fn expand_land_mass(
     target: usize,
     seed: u64,
 ) {
+    if seed_cells.is_empty() || target <= seed_cells.len() {
+        return;
+    }
     let avoid_set: std::collections::HashSet<usize> = avoid.iter().copied().collect();
+    let (cx, cy) = component_centroid(bounds, seed_cells);
     let mut in_mass: std::collections::HashSet<usize> = seed_cells.iter().copied().collect();
-    let mut queue: std::collections::VecDeque<usize> = seed_cells.iter().copied().collect();
-    let mut step = 0u64;
 
-    while in_mass.len() < target {
-        let Some(i) = queue.pop_front() else {
-            break;
-        };
-        let Some(cell) = bounds.from_index(i) else {
+    // Soft radius from target area (hex area ≈ 1 cell); keep blob roundish.
+    let radius = ((target as f64 / std::f64::consts::PI).sqrt() * 1.35).max(2.0);
+
+    // Candidate ocean cells scored by distance to seed centroid (closer first).
+    let mut candidates: Vec<(i32, u64, usize)> = Vec::new();
+    for index in 0..bounds.len() {
+        if in_mass.contains(&index) || avoid_set.contains(&index) || is_land_cell(layer, index) {
+            continue;
+        }
+        let Some(cell) = bounds.from_index(index) else {
             continue;
         };
-        let mut neigh = cell.neighbors();
-        shuffle_six(&mut neigh, seed ^ step.wrapping_mul(0xA11));
-        for nb in neigh {
-            let Some(ni) = bounds.index_of(nb) else {
-                continue;
-            };
-            if in_mass.contains(&ni) || avoid_set.contains(&ni) || is_land_cell(layer, ni) {
+        let touches_avoid = cell.neighbors().iter().any(|n2| {
+            bounds
+                .index_of(*n2)
+                .is_some_and(|nj| avoid_set.contains(&nj))
+        });
+        if touches_avoid {
+            continue;
+        }
+        let (x, y) = cell.to_pixel(1.0);
+        let d = (x - cx).hypot(y - cy);
+        if d > radius * 1.15 {
+            continue;
+        }
+        let jitter = (unit01(seed ^ (index as u64)) * 1000.0) as u64;
+        candidates.push(((d * 100.0) as i32, jitter, index));
+    }
+    candidates.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    for (_, _, index) in candidates {
+        if in_mass.len() >= target {
+            break;
+        }
+        // Must stay connected to the growing mass.
+        let Some(cell) = bounds.from_index(index) else {
+            continue;
+        };
+        let touches_mass = cell.neighbors().iter().any(|nb| {
+            bounds
+                .index_of(*nb)
+                .is_some_and(|ni| in_mass.contains(&ni))
+        });
+        if !touches_mass && !in_mass.is_empty() {
+            // Allow first ring from seeds only via adjacency.
+            continue;
+        }
+        set_land(layer, index);
+        in_mass.insert(index);
+    }
+
+    // If still short, one more ring with slightly larger radius (still compact).
+    if in_mass.len() < target {
+        let radius2 = radius * 1.35;
+        let mut more: Vec<(i32, usize)> = Vec::new();
+        for index in 0..bounds.len() {
+            if in_mass.contains(&index) || avoid_set.contains(&index) || is_land_cell(layer, index)
+            {
                 continue;
             }
-            // Keep a water channel: skip cells adjacent to the avoided mass.
-            let touches_avoid = nb.neighbors().iter().any(|n2| {
+            let Some(cell) = bounds.from_index(index) else {
+                continue;
+            };
+            let touches_avoid = cell.neighbors().iter().any(|n2| {
                 bounds
                     .index_of(*n2)
                     .is_some_and(|nj| avoid_set.contains(&nj))
@@ -1282,17 +1368,28 @@ fn expand_land_mass(
             if touches_avoid {
                 continue;
             }
-            step = step.wrapping_add(1);
-            // Mild preference for farther cells from avoid centroid.
-            if unit01(seed ^ step) < 0.12 {
+            let touches_mass = cell.neighbors().iter().any(|nb| {
+                bounds
+                    .index_of(*nb)
+                    .is_some_and(|ni| in_mass.contains(&ni))
+            });
+            if !touches_mass {
                 continue;
             }
-            set_land(layer, ni);
-            in_mass.insert(ni);
-            queue.push_back(ni);
+            let (x, y) = cell.to_pixel(1.0);
+            let d = (x - cx).hypot(y - cy);
+            if d > radius2 {
+                continue;
+            }
+            more.push(((d * 100.0) as i32, index));
+        }
+        more.sort_by_key(|(d, _)| *d);
+        for (_, index) in more {
             if in_mass.len() >= target {
                 break;
             }
+            set_land(layer, index);
+            in_mass.insert(index);
         }
     }
 }
@@ -1319,7 +1416,6 @@ fn erode_land_mass(
                     land_n += 1;
                 }
             }
-            // Prefer fringe (few land neighbors).
             let key = land_n;
             if best.map(|(b, _)| key < b).unwrap_or(true) {
                 best = Some((key, i));
@@ -1328,8 +1424,6 @@ fn erode_land_mass(
         let Some((_, drop_i)) = best else {
             break;
         };
-        // Don't shatter into many pieces: skip cells whose removal disconnects badly
-        // (simple: never drop if land_n >= 4 — only fringe).
         alive.remove(&drop_i);
         layer.set(
             drop_i,
@@ -1686,6 +1780,12 @@ mod tests {
                 "continents seed {seed}: second/first={ratio:.2} ({} vs {})",
                 comps[1].len(),
                 comps[0].len()
+            );
+            // No half-map flood: largest mass must stay under ~55% of map cells.
+            let frac = comps[0].len() as f64 / bounds.len() as f64;
+            assert!(
+                frac < 0.55,
+                "continents seed {seed}: largest mass fills {frac:.2} of map"
             );
         }
     }
