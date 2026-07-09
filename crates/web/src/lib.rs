@@ -1111,13 +1111,9 @@ fn confirm_wizard_back(from_step: u32) -> bool {
         .unwrap_or(false)
 }
 
-/// D-69: navigate back one Geo step (3→2→1, 4→3, 5→4). Size change still via step 1 preset.
+/// D-69: navigate back one Geo step (3→2→1, 4→3, 5→4). Caller must confirm first (sync click).
 async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
     let from = state.borrow().wizard_step;
-    if !confirm_wizard_back(from) {
-        set_wizard_status("Back cancelled.");
-        return;
-    }
     let to = match from {
         5 => 4,
         4 => 3,
@@ -1721,10 +1717,12 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
-            let state = state.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                wizard_go_back_one_step(state).await;
-            });
+            // confirm must stay sync in the click gesture (async spawn loses it → always cancel).
+            let from = state.borrow().wizard_step;
+            if !confirm_wizard_back(from) {
+                return;
+            }
+            wasm_bindgen_futures::spawn_local(wizard_go_back_one_step(state.clone()));
         });
         if let Some(btn) = document().get_element_by_id("wiz-grid-back") {
             let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
@@ -1734,6 +1732,10 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
     for back_id in ["wiz-sil-back", "wiz-geo-back", "wiz-elev-back"] {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
+            let from = state.borrow().wizard_step;
+            if !confirm_wizard_back(from) {
+                return;
+            }
             wasm_bindgen_futures::spawn_local(wizard_go_back_one_step(state.clone()));
         });
         if let Some(btn) = document().get_element_by_id(back_id) {
