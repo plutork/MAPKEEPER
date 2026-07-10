@@ -19,8 +19,8 @@ Your lore lives in your world folder, not in this product repository.
 
 ## Install (Windows alpha 0.2)
 
-1. Open [GitHub Releases](https://github.com/plutork/MAPKEEPER/releases).
-2. Download the latest `mapkeeper_*_x64-setup.exe` asset.
+1. Download **current alpha**: [mapkeeper_0.2.0_x64-setup.exe](https://github.com/plutork/MAPKEEPER/releases/download/v0.2.0/mapkeeper_0.2.0_x64-setup.exe).
+2. Or browse all releases: [GitHub Releases](https://github.com/plutork/MAPKEEPER/releases).
 3. Install and launch from Start menu / desktop shortcut.
 
 Unsigned alpha builds may show SmartScreen:
