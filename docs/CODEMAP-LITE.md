@@ -39,26 +39,29 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Build wizard draft state (`[build]` in `mapkeeper.toml`, steps 1–4 + `scheme`, read/write/clear/normalize) -> `crates/core/src/build_state.rs` (`home-build-draft-v1`, D-59, D-69, D-71)
 - Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, `PUT /api/build/bounds`, list `build_draft`/`build_step`) -> `crates/server/src/lib.rs` (D-59, D-69, D-71)
 - Build wizard step-1–4 API (`PUT /api/build/bounds` preset rewrite + Geo reset; `POST /api/build/land-mask/generate` returns seed identity JSON; land-mask cells; geology/elevation generate) -> `crates/server/src/lib.rs` (`wizard-merge-size-grid`, `world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`, D-68/D-69/D-71)
-- World Build Wizard shell (D-57 + D-59 draft resume + D-71 size+grid one screen): Home **Build World**, fullscreen overlay, Save Draft / wizard resume + Home footer version row -> `crates/web/index.html`, `crates/web/src/lib.rs`
-- Home footer updates check + app version label (D-76): `Check for updates` button, GitHub Releases query, `Open download page` CTA, and version text synced from `APP_VERSION` -> `crates/web/index.html`, `crates/web/src/lib.rs`
+- World Build Wizard shell (D-57 + D-59 draft resume + D-71 size+grid one screen): Home **Build World**, fullscreen overlay, Save Draft / wizard resume + Home footer version label -> `crates/web/index.html`, `crates/web/src/lib.rs`
+- Home version label only (D-80 supersedes D-76 Check-for-updates CTA for alpha; updates via `/mk-update`) -> `crates/web/index.html`, `crates/web/src/lib.rs`
 - Tester first-run flow (D-77): empty Home primary CTA `Create your first world` -> Build wizard defaults; blank Create demoted to advanced; post-Finish next-step note -> `crates/web/index.html`, `crates/web/src/lib.rs`
+- Agent-managed alpha (D-80): Cursor source-run kit — `AGENTS.md`, `.cursor/commands/mk-*.md`, `scripts/*-windows.ps1`, `docs/CURSOR-ALPHA.md`
 - World Build Wizard steps 1–4 (size+blank grid → silhouette → tectonics → elevation → Finish; Back on steps 2–4 via in-app confirm; step 2 gen identity + Edit brush S–XL zoom-adaptive with pan blocked during edit drag and in-flight stamp queue guard for larger brush tiers; step 3 geology contrast+legend) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`wizard-merge-size-grid`, `brush-size--zoom-adaptive`, `geology-readable--preview-contrast`, D-43/D-70/D-65/D-66/D-68/D-69/D-71/D-72, `world-pipeline--tectonics-v1`)
 - Brush size S–XL screen tiers → effective hex radius from zoom (editor + wizard Edit; cap 24) -> `crates/web/src/lib.rs` (`brush-size--zoom-adaptive`, D-70)
 - Wizard confirm overlay (`#wiz-confirm-overlay`) for Back / bounds reset — avoids silent `window.confirm` in Tauri -> `crates/web/index.html`, `crates/web/src/lib.rs` (D-69)
 - World scaffold source -> `toolchain/template/world/`
-- CI/build behavior -> `.github/workflows/` (`ci.yml`, `release-alpha-0-2.yml`)
+- CI/build behavior -> `.github/workflows/` (`ci.yml`; NSIS alpha release workflow removed under D-80)
 
 ## Key files
 
 - Workspace members: `Cargo.toml`
 - Developer setup/runbook: `docs/DEV.md`
+- Cursor alpha guide (D-80): `docs/CURSOR-ALPHA.md`
 - Full symbol codemap (generated): `docs/CODEMAP.md`
 - Codemap generator script: `scripts/gen_codemap.py`
+- Alpha Windows helpers: `scripts/doctor-windows.ps1`, `scripts/bootstrap-windows.ps1`, `scripts/run-desktop.ps1`, `scripts/update-windows.ps1`
 - Core boundary entry: `crates/core/src/lib.rs`
 - Server boundary entry: `crates/server/src/lib.rs`
 - Web boundary entry: `crates/web/src/lib.rs`
 - Home screen layout entry: `crates/web/index.html`
-- Alpha tester notes / release body source: `docs/TESTER-NOTES-0.2.1.md`
+- Alpha tester notes (stub → CURSOR-ALPHA): `docs/TESTER-NOTES-0.2.1.md`
 - World Build Wizard overlay (D-57 shell + D-59 draft): `crates/web/index.html` (`#build-wizard`), `crates/web/src/lib.rs` (`open_build_wizard`, `persist_build_draft`, `wizard_return_home`)
 - Editor tool dock (rail + collapsible drawers: Inspect/profile, Terrain brushes Land/Water/Raise/Lower + step/falloff, View color mode + elevation overlays, World): `crates/web/index.html`, `crates/web/src/lib.rs`, `crates/web/src/elevation_view.rs` — **overlays** the map (D-39); canvas stable on drawer toggle
 - Project list actions (`open` / `remove` / `delete`, with secondary manage flow): `crates/web/src/lib.rs`, `crates/server/src/lib.rs`

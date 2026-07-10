@@ -14,21 +14,22 @@ Your lore lives in your world folder, not in this product repository.
 
 ### For whom
 
-- **Primary:** writer / GM who wants to install the app and start building worlds quickly.
-- **Not primary:** source-reading setup flows or manual `.cursor/` bootstrapping.
+- **Primary:** writer / GM who uses **Cursor** with agents to prepare, run, and update mapkeeper, then builds worlds in the visual editor.
+- **Not primary:** standalone consumer-installer onboarding for alpha.
 
-## Install (Windows alpha 0.2)
+## Alpha (Windows) — Cursor agent-managed
 
-1. Download **current alpha**: [mapkeeper_0.2.1_x64-setup.exe](https://github.com/plutork/MAPKEEPER/releases/download/v0.2.1/mapkeeper_0.2.1_x64-setup.exe).
-2. Or browse all releases: [GitHub Releases](https://github.com/plutork/MAPKEEPER/releases).
-3. Install and launch from Start menu / desktop shortcut.
+Primary path (no installer download):
 
-Unsigned alpha builds may show SmartScreen:
+1. Clone this repository.
+2. Open the folder in **Cursor**.
+3. Run **`/mk-doctor`**, then **`/mk-install`** if needed, then **`/mk-run`**.
+4. On empty Home, click **Create your first world**.
+5. Later, run **`/mk-update`**.
 
-- click **More info**
-- click **Run anyway**
+Details: [docs/CURSOR-ALPHA.md](docs/CURSOR-ALPHA.md).
 
-Tester checklist: [docs/TESTER-NOTES-0.2.1.md](docs/TESTER-NOTES-0.2.1.md).
+`/mk-install` prepares **this workspace** for source-run — it does not install mapkeeper system-wide.
 
 ## Create your first world
 
@@ -37,7 +38,7 @@ Tester checklist: [docs/TESTER-NOTES-0.2.1.md](docs/TESTER-NOTES-0.2.1.md).
 - Flow opens **Build World wizard** directly.
 - Blank **Create** remains available under advanced options.
 
-Git-native interim path stays available via [mapkeeper-world-template](https://github.com/plutork/mapkeeper-world-template/generate).
+Git-native interim world scaffold: [mapkeeper-world-template](https://github.com/plutork/mapkeeper-world-template/generate).
 
 ## Invariants
 
@@ -52,6 +53,7 @@ Git-native interim path stays available via [mapkeeper-world-template](https://g
 
 ## Docs & deeper
 
+- **Cursor alpha guide:** [docs/CURSOR-ALPHA.md](docs/CURSOR-ALPHA.md)
 - **Developer setup:** [docs/DEV.md](docs/DEV.md)
 - **Code routing map:** [docs/CODEMAP-LITE.md](docs/CODEMAP-LITE.md)
 - **World template details:** [toolchain/template/README.md](toolchain/template/README.md)

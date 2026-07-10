@@ -1,7 +1,9 @@
-# Cursor at repo root — ignore except tracked agent skills (D-18)
+# Cursor at repo root — ignore except tracked skills + alpha commands (D-18, D-80)
 /.cursor/*
 !/.cursor/skills/
 !/.cursor/skills/**
+!/.cursor/commands/
+!/.cursor/commands/**
 
 # Rust (D-20)
 /target/
