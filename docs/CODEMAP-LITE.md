@@ -107,7 +107,9 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
   `fixtures/layers-dense/`.
 - Renderer is a projection of the layer model, not the source of truth.
 - Renderer layout (4.2): fit-to-window canvas + camera viewport — base
-  `hex_layout`/`map_half_extent` plus `zoom` (0.6x–2.5x), `pan` (LMB drag),
+  `hex_layout`/`map_half_extent` plus `zoom` (min 0.6; max from target
+  on-screen hex ≈40px — `zoom-cap--target-hex-px` D-85, amends D-41 flat 2.5x),
+  `pan` (LMB drag),
   and visible draw culling (`visible_scan_bounds`) in `crates/web/src/lib.rs`.
 - Future generators/validators are local tools over these layers (not built,
   not AI runtime).

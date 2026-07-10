@@ -36,7 +36,9 @@ use web_sys::{
 };
 
 const MIN_ZOOM: f64 = 0.6;
-const MAX_ZOOM: f64 = 2.5;
+// zoom-cap--target-hex-px (D-85): max zoom so on-screen hex ≈ this many px (amends D-41 flat 2.5x).
+const ZOOM_CLOSEUP_HEX_PX: f64 = 40.0;
+const ZOOM_MAX_HARD: f64 = 32.0;
 const PAN_DRAG_THRESHOLD: f64 = 3.0;
 // save-batch--http-endpoint-v1: tuneable write buffering.
 const PAINT_SAVE_COOLDOWN_MS: u32 = 300;
@@ -2500,8 +2502,14 @@ fn map_layout(state: &AppState, width: f64, height: f64) -> (f64, f64, f64) {
     (size, ox, oy)
 }
 
-fn clamp_zoom(value: f64) -> f64 {
-    value.clamp(MIN_ZOOM, MAX_ZOOM)
+fn max_zoom_for_base_hex(base_size_px: f64) -> f64 {
+    // Fit (1.0) always allowed; zoom-in only until hex reaches ZOOM_CLOSEUP_HEX_PX.
+    let from_target = ZOOM_CLOSEUP_HEX_PX / base_size_px.max(1.0);
+    from_target.clamp(1.0, ZOOM_MAX_HARD)
+}
+
+fn clamp_zoom(base_size_px: f64, value: f64) -> f64 {
+    value.clamp(MIN_ZOOM, max_zoom_for_base_hex(base_size_px))
 }
 
 /// brush-size--zoom-adaptive (D-70): tier → screen diameter → hex radius from layout size.
@@ -3742,7 +3750,7 @@ fn pointer_over_wizard_chrome(event: &web_sys::MouseEvent) -> bool {
         .is_some()
 }
 
-/// Wheel zoom with cursor anchor, clamped to the chosen 0.6x–2.5x range.
+/// Wheel zoom with cursor anchor; max from target on-screen hex px (D-85).
 fn attach_wheel_zoom(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
         event.prevent_default();
@@ -3771,7 +3779,7 @@ fn attach_wheel_zoom(state: Rc<RefCell<AppState>>) {
         let world_x = (mx - old_ox) / old_size;
         let world_y = (my - old_oy) / old_size;
         let factor = if delta_y < 0.0 { 1.1 } else { 0.9 };
-        let new_zoom = clamp_zoom(s.zoom * factor);
+        let new_zoom = clamp_zoom(base_size, s.zoom * factor);
         s.zoom = new_zoom;
         let new_size = base_size * s.zoom;
         let new_ox = mx - world_x * new_size;
@@ -4091,9 +4099,16 @@ fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
 }
 
 /// Redraw on window resize so the map keeps filling the viewport (4.2
-/// fit-to-window). Cheap — one redraw per resize event.
+/// fit-to-window). Reclamp zoom when base hex size changes (D-85).
 fn attach_window_resize(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+        {
+            let canvas = canvas();
+            let rect = canvas.get_bounding_client_rect();
+            let mut s = state.borrow_mut();
+            let (base_size, _, _) = hex_layout(rect.width(), rect.height(), s.map_bounds);
+            s.zoom = clamp_zoom(base_size, s.zoom);
+        }
         schedule_redraw(state.clone());
     });
     let _ = window().add_event_listener_with_callback("resize", closure.as_ref().unchecked_ref());
@@ -4834,5 +4849,14 @@ mod wizard_stamp_pending_tests {
         let l = effective_brush_radius_from_hex_size(2, hex_px);
         let xl = effective_brush_radius_from_hex_size(3, hex_px);
         assert_eq!((s, m, l, xl), (0, 1, 2, 3));
+    }
+
+    #[test]
+    fn zoom_max_grows_when_base_hex_is_small() {
+        use super::max_zoom_for_base_hex;
+        // World-like tiny base → high max; Small-like large base → max ≈ 1.
+        assert!(max_zoom_for_base_hex(5.0) > 5.0);
+        assert_eq!(max_zoom_for_base_hex(40.0), 1.0);
+        assert_eq!(max_zoom_for_base_hex(80.0), 1.0);
     }
 }
