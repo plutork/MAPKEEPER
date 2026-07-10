@@ -9,7 +9,7 @@ paths: schemas/**, **/profiles/**
 
 # Cell profile schema (mapkeeper V0)
 
-**Product invariants:** `STARTER_PACK.md` · **Decided scope:** D-12 in MAPKEEPER-OS `decisions.md`.
+**Product invariants:** `README.md#invariants` · **Decided scope:** D-12 in MAPKEEPER-OS `decisions.md`.
 
 ## cell_id (canonical)
 

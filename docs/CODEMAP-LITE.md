@@ -4,6 +4,8 @@ Short routing index for agents and maintainers.
 
 Use this first, then open only the needed files.
 
+Product pitch / invariants (authors): `README.md#product` · `README.md#invariants` (`STARTER_PACK.md` is a redirect stub, D-74).
+
 ## Task -> first path
 
 - Core rules, ids, geometry, profile model -> `crates/core/src/`

@@ -4,19 +4,54 @@ Generic **local** world editor built for the age of AI agents.
 
 The map is not only a picture — it is the interface to a machine-readable world.
 
+<a id="product"></a>
+
+## Product
+
+**mapkeeper** helps a **writer / game master** build a portable world folder: hex map, machine-readable layers, and cell profiles that the same tools (and Cursor agents) can query — without an AI runtime inside the app.
+
+Your **lore lives in a world folder**, not in this product repository. Clone or install mapkeeper to *run the editor*; create worlds under Documents (or any folder you choose).
+
+### For whom
+
+- **Primary:** writer / GM — open the app, build or resume a world, agents already understand the layout.
+- **Not primary:** reading mapkeeper source, hand-copying `.cursor/` files, or treating GitHub as the only onboarding path.
+
+### Invariants
+
+<a id="invariants"></a>
+
+- **Map → machine-readable state**, not only a decorative image.
+- **Same data** for the author (visual editor) and for agents (profiles + layer contracts).
+- **No AI runtime in the product** — agents run outside; mapkeeper ships data contracts and world scaffolds.
+- **Core stays world-agnostic** — private lore stays in the world folder.
+- **Layer-first map state** (`map/manifest.json` + `map/layers/…`) is separate from human **profiles** (both keyed by cell id).
+- **Local-only** — no remote telemetry in core.
+- **Onboarding preference:** desktop / in-app Build World → GitHub world template (interim) → CLI `init` (power users).
+
+### Where we are
+
+| Horizon | Intent |
+|---------|--------|
+| **Now** | V0 editor path shipped: Home launcher, desktop shell (Windows), Build World wizard (size → silhouette → tectonics → elevation), hex map + profiles + CLI query, layer-first terrain/geology/elevation |
+| **Next** | Climate / rivers and further Geo pipeline steps; polish from dogfood |
+| **Later** | Canon UI, time slices, more layers/generators/validators, signed installers / other OS |
+
+---
+
 ## Create your world
 
-**Now (early access):** [GitHub template](https://github.com/plutork/mapkeeper-world-template/generate) — for authors comfortable with git.
+**Now (Windows desktop):** run the `mapkeeper` app — Home screen to pick or create a world (no browser/`localhost` step). Unsigned builds may show SmartScreen — "More info" → "Run anyway". Build with `cargo tauri build` in `crates/desktop` until packaged releases are published.
 
-**Now (Windows installer, roadmap 5.9):** run the `mapkeeper` desktop app — a native window opens directly on the same Home screen (pick or create a world), no `cargo run`/browser/localhost step. Unsigned for now (Windows SmartScreen will warn — "More info" → "Run anyway"); build it yourself with `cargo tauri build` in `crates/desktop` until packaged releases are published.
+**Now (git-native):** [GitHub world template](https://github.com/plutork/mapkeeper-world-template/generate).
 
-**Target UX (long-term):** open mapkeeper → **New world** — pre-configured agents and folders, no git required. The desktop app above is this UX for V0; the editor wizard is the same idea, longer-term.
+**Target UX (long-term):** open mapkeeper → **New world** with agents and folders ready, no git required. Desktop + Build World are that path for V0; polish continues.
 
 Details: [toolchain/template/README.md](toolchain/template/README.md).
 
 ## Docs
 
-- **[STARTER_PACK.md](STARTER_PACK.md)** — product pitch, invariants, milestones.
+- **This README** — product pitch, invariants, and how to run (canonical; formerly `STARTER_PACK.md`).
 - **[docs/CODEMAP-LITE.md](docs/CODEMAP-LITE.md)** — quick task-to-path routing for contributors and agents.
 
 ## This repo (product)
@@ -92,19 +127,3 @@ subcommand. Windows only for V0 — code signing and auto-update are Later
 ## License
 
 [Apache License 2.0](LICENSE).
-
-## Status
-
-**V0 done**, plus the **Hex Map Model Foundation**. Full flow works end to
-end: open the launcher Home screen (web or desktop app), create or pick a
-world, click a hex to name it (profile — `cell_id`/`display_name`/`slug`/
-`notes`) or paint terrain, and query either back over the CLI — CI-tested
-(schema fixtures + CLI round trip) and dogfooded on a real local world.
-
-The map is a **layer-first world-state model**: machine-readable state lives
-under `map/manifest.json` + `map/layers/<id>.json` (sparse per layer — a cell
-is `unknown` / `none` / a concrete `value`), kept separate from author
-profiles. `terrain` is the first layer; the renderer projects it. Windows
-desktop installer (`crates/desktop`, Tauri) wraps the same web UI natively.
-Renderer polish, more layers, generators and validators are Later. World
-projects also work via the GitHub template above (interim, git-native authors).

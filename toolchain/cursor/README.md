@@ -20,6 +20,6 @@ The `/user` command makes the agent behave as an **author** using mapkeeper: que
 
 ## Optional context in world repo
 
-Add `AGENTS.md` in your world root, or link to [STARTER_PACK.md](https://github.com/plutork/MAPKEEPER/blob/main/STARTER_PACK.md) (product pitch).
+Add `AGENTS.md` in your world root, or link to the [mapkeeper README](https://github.com/plutork/MAPKEEPER/blob/main/README.md#product) (product pitch).
 
 Parent index: [../README.md](../README.md).

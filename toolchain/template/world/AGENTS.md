@@ -15,4 +15,4 @@ Two anchored-by-`cell_id` stores, kept separate on purpose:
 
 The running editor validates on save; no separate schema file lives in this folder.
 
-Product pitch: [STARTER_PACK.md](https://github.com/plutork/MAPKEEPER/blob/main/STARTER_PACK.md)
+Product pitch: [mapkeeper README](https://github.com/plutork/MAPKEEPER/blob/main/README.md#product)

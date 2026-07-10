@@ -16,7 +16,7 @@ A **world project** for [mapkeeper](https://github.com/plutork/MAPKEEPER) — lo
 
 ## Product docs
 
-- [mapkeeper STARTER_PACK](https://github.com/plutork/MAPKEEPER/blob/main/STARTER_PACK.md) — pitch and invariants
+- [mapkeeper README](https://github.com/plutork/MAPKEEPER/blob/main/README.md#product) — pitch and invariants
 - Local **[AGENTS.md](AGENTS.md)** — hints for Cursor in this world
 
 ## Report product gaps
