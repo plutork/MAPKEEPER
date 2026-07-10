@@ -14,22 +14,21 @@ Your lore lives in your world folder, not in this product repository.
 
 ### For whom
 
-- **Primary:** writer / GM who uses **Cursor** with agents to prepare, run, and update mapkeeper, then builds worlds in the visual editor.
+- **Primary:** writer / GM who opens this repo in **Cursor**, runs the editor from source, and builds worlds in the visual UI (agents help when stuck).
 - **Not primary:** standalone consumer-installer onboarding for alpha.
 
-## Alpha (Windows) — Cursor agent-managed
+## Alpha (Windows) — workspace-first
 
 Primary path (no installer download):
 
 1. Clone this repository.
 2. Open the folder in **Cursor**.
-3. Run **`/mk-doctor`**, then **`/mk-install`** if needed, then **`/mk-run`**.
+3. In a terminal, run **`.\run.ps1`**.
 4. On empty Home, click **Create your first world**.
-5. Later, run **`/mk-update`**.
+5. Later, run **`.\update.ps1`**.
+6. If launch fails, run **`/doctor`** in Cursor.
 
 Details: [docs/CURSOR-ALPHA.md](docs/CURSOR-ALPHA.md).
-
-`/mk-install` prepares **this workspace** for source-run — it does not install mapkeeper system-wide.
 
 ## Create your first world
 

@@ -1,34 +1,34 @@
 # Cursor alpha (Windows)
 
-Agent-managed alpha for mapkeeper (D-80).
+Workspace-first alpha for mapkeeper (D-80 direction, **D-81** surface).
 
 ## Path
 
 1. Clone this repository.
 2. Open the folder in **Cursor**.
-3. Run **`/mk-doctor`**.
-4. Run **`/mk-install`** if needed (prepares this workspace — not a system-wide install).
-5. Run **`/mk-run`** (update check → build web → Tauri desktop).
-6. On empty Home, use **Create your first world**.
-7. Later: **`/mk-update`**.
+3. Run **`.\run.ps1`** in a terminal (builds web + launches the desktop app).
+4. On empty Home, use **Create your first world**.
+5. Later: **`.\update.ps1`**.
+6. If something fails: run **`/doctor`** in Cursor (agent diagnoses and repairs with your consent).
+
+No installer download. No agent required for normal run/update.
 
 ## What this validates
 
-Cursor opens the MAPKEEPER workspace → agent prepares/runs the visual editor → author creates/resumes a world → agents can use the same world data.
+Open the MAPKEEPER workspace → run the visual editor from source → author creates/resumes a world → agents can use the same world data.
 
 ## Safety
 
-- No silent heavy installs; MSVC Build Tools need a manual step + confirmation.
-- Alpha agent does not patch product source by default.
-- No commits/branches by the alpha agent.
-- Update stops on a dirty git tree (`git pull --ff-only` only when clean).
-- World folders are never deleted by these commands.
+- `run.ps1` does not update git or install toolchains silently.
+- `update.ps1` stops on a dirty tree; uses `git pull --ff-only` only.
+- `/doctor` asks before heavy installs; never deletes world folders.
 
 ## Not this alpha
 
 - NSIS / SmartScreen installer-first distribution
 - Portable runtime zip
 - In-app Check for updates
-- macOS / Linux scripts
+- `/mk-*` commands or `doctor.ps1`
+- macOS / Linux root scripts
 
 Contributor details: [`DEV.md`](DEV.md).
