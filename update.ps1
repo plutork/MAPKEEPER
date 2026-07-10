@@ -1,4 +1,5 @@
-# alpha-root-scripts-simplify (D-81): dirty stop → pull --ff-only → rebuild web
+# alpha-root-scripts-simplify (D-81): explicit update — dirty stop, pull, rebuild (no launch)
+# Daily path: .\run.ps1 (D-86 — pull when clean + launch)
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
 Set-Location $Root
@@ -42,5 +43,5 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "Update OK: $before -> $after"
-Write-Host "Next: .\run.ps1"
+Write-Host "Next: .\run.ps1 (pull+launch) or launch only if already built."
 exit 0

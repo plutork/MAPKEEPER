@@ -42,7 +42,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - World Build Wizard shell (D-57 + D-59 draft resume + D-71 size+grid one screen): Home **Build World**, fullscreen overlay, Save Draft / wizard resume + Home footer version label -> `crates/web/index.html`, `crates/web/src/lib.rs`
 - Home version label only (D-80 supersedes D-76 Check-for-updates CTA for alpha; updates via `/mk-update`) -> `crates/web/index.html`, `crates/web/src/lib.rs`
 - Tester first-run flow (D-77): empty Home primary CTA `Create your first world` -> Build wizard defaults; blank Create demoted to advanced; post-Finish next-step note -> `crates/web/index.html`, `crates/web/src/lib.rs`
-- Agent-managed alpha (D-80…D-83): root `setup.ps1` / `run.ps1` / `update.ps1` + Cursor `/doctor`; no `/mk-*` kit
+- Agent-managed alpha (D-80…D-86): root `setup.ps1` / daily `run.ps1` (pull when clean) / optional `update.ps1` + Cursor `/doctor`
 - World Build Wizard steps 1–4 (size+blank grid → silhouette → tectonics → elevation → Finish; Back on steps 2–4 via in-app confirm; step 2 gen identity + Edit brush S–XL zoom-adaptive with pan blocked during edit drag and in-flight stamp queue guard for larger brush tiers; step 3 geology contrast+legend) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`wizard-merge-size-grid`, `brush-size--zoom-adaptive`, `geology-readable--preview-contrast`, D-43/D-70/D-65/D-66/D-68/D-69/D-71/D-72, `world-pipeline--tectonics-v1`)
 - Brush size S–XL screen tiers → effective hex radius from zoom (editor + wizard Edit; cap 24) -> `crates/web/src/lib.rs` (`brush-size--zoom-adaptive`, D-70)
 - Wizard confirm overlay (`#wiz-confirm-overlay`) for Back / bounds reset — avoids silent `window.confirm` in Tauri -> `crates/web/index.html`, `crates/web/src/lib.rs` (D-69)
@@ -56,7 +56,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Cursor alpha guide (D-80/D-81): `docs/CURSOR-ALPHA.md`
 - Full symbol codemap (generated): `docs/CODEMAP.md`
 - Codemap generator script: `scripts/gen_codemap.py`
-- Alpha Windows bootstrap/launch/update: `setup.ps1`, `run.ps1`, `update.ps1`; troubleshooting role: `.cursor/commands/doctor.md` (D-82/D-83)
+- Alpha Windows bootstrap/launch/update: `setup.ps1`, `run.ps1` (D-86 pull-in-run), `update.ps1`; troubleshooting: `.cursor/commands/doctor.md`
 - Core boundary entry: `crates/core/src/lib.rs`
 - Server boundary entry: `crates/server/src/lib.rs`
 - Web boundary entry: `crates/web/src/lib.rs`

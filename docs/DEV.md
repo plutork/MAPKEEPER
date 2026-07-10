@@ -2,7 +2,7 @@
 
 Developer-oriented setup for working on mapkeeper itself.
 
-**Alpha testers:** prefer [CURSOR-ALPHA.md](CURSOR-ALPHA.md) — `.\setup.ps1` then `.\run.ps1` / `.\update.ps1`; `/doctor` only if stuck.
+**Alpha testers:** prefer [CURSOR-ALPHA.md](CURSOR-ALPHA.md) — `.\setup.ps1` then daily `.\run.ps1`; optional `.\update.ps1`; `/doctor` only if stuck.
 
 ## Repo layout
 
@@ -19,7 +19,7 @@ Cargo workspace, Rust everywhere (core, CLI, local server, WASM UI):
 | `fixtures/` | shared test fixtures |
 | `toolchain/` | world scaffold source |
 | `tests/` | e2e/dev tooling (Playwright) |
-| `setup.ps1` / `run.ps1` / `update.ps1` | Windows alpha bootstrap / launch / update (D-83) |
+| `setup.ps1` / `run.ps1` / `update.ps1` | Windows alpha bootstrap / daily launch (D-86 pull-in-run) / explicit update |
 
 ## Local server + web UI
 
@@ -48,7 +48,7 @@ First time:
 .\run.ps1
 ```
 
-Daily launch:
+Daily launch (pull when clean, rebuild, launch):
 
 ```powershell
 .\run.ps1
@@ -61,7 +61,7 @@ powershell -File crates/web/build.ps1
 cargo run -p mapkeeper-desktop
 ```
 
-Update a clean checkout:
+Explicit update on a **clean** tree (rebuild only, no launch):
 
 ```powershell
 .\update.ps1

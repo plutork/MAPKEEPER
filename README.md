@@ -24,9 +24,9 @@ Primary path (no installer download):
 1. Clone this repository.
 2. Open the folder in **Cursor**.
 3. First time: run **`.\setup.ps1`**.
-4. Run **`.\run.ps1`**.
+4. Run **`.\run.ps1`** (daily — pull when clean, then build + launch).
 5. On empty Home, click **Create your first world**.
-6. Later, run **`.\update.ps1`**.
+6. Optional: **`.\update.ps1`** — update-only without launch.
 7. If something fails, run **`/doctor`** in Cursor.
 
 Details: [docs/CURSOR-ALPHA.md](docs/CURSOR-ALPHA.md).
