@@ -99,7 +99,8 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
   dense elevation layer and flushes paints via the generic batch. Wizard land
   Edit (D-70): optimistic local stamps on every new center cell during drag;
   HTTP flush on mouseup only; brush-size click must not redraw huge hex
-  previews (circle preview when radius > 2; clear hover over wiz-right).
+  previews (circle preview when radius > 2; clear hover over wiz-right);
+  effective radius = max(zoom-derived, tier) so S/M/L/XL stay distinct up close.
   Server cell PUT patches touched cells. CLI keeps
   `terrain`/`elevation` plus generic `layer get/set/list/clear <id>`. Dense
   schema: `schemas/map-layer-dense.schema.json` (v2); fixtures

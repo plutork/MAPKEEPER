@@ -2511,10 +2511,12 @@ fn brush_tier_screen_diameter(tier: i32) -> f64 {
 }
 
 fn effective_brush_radius_from_hex_size(tier: i32, hex_size_px: f64) -> i32 {
+    let tier = tier.clamp(MIN_BRUSH_TIER, MAX_BRUSH_TIER);
     let diameter = brush_tier_screen_diameter(tier);
     let hex_w = (3f64.sqrt() * hex_size_px).max(1.0);
-    let radius = ((diameter / hex_w) * 0.5).floor() as i32;
-    radius.clamp(0, MAX_EFFECTIVE_BRUSH_RADIUS)
+    let from_zoom = ((diameter / hex_w) * 0.5).floor() as i32;
+    // D-70: tiers must stay distinct at close zoom (floor alone collapsed S=M=L=0).
+    from_zoom.max(tier).clamp(0, MAX_EFFECTIVE_BRUSH_RADIUS)
 }
 
 fn current_hex_size_px(state: &AppState) -> f64 {
@@ -4820,5 +4822,17 @@ mod wizard_stamp_pending_tests {
         assert!(!brush_preview_uses_circle(2));
         assert!(brush_preview_uses_circle(3));
         assert!(brush_preview_uses_circle(24));
+    }
+
+    #[test]
+    fn brush_tiers_stay_distinct_when_zoomed_in() {
+        use super::effective_brush_radius_from_hex_size;
+        // Large hex px → zoom-derived radius floors to 0; tier floor keeps S<M<L<XL.
+        let hex_px = 80.0;
+        let s = effective_brush_radius_from_hex_size(0, hex_px);
+        let m = effective_brush_radius_from_hex_size(1, hex_px);
+        let l = effective_brush_radius_from_hex_size(2, hex_px);
+        let xl = effective_brush_radius_from_hex_size(3, hex_px);
+        assert_eq!((s, m, l, xl), (0, 1, 2, 3));
     }
 }
