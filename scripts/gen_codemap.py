@@ -66,7 +66,14 @@ def discover_top_level_files() -> list[Path]:
 
 def task_routes() -> list[tuple[str, str]]:
     return [
-        ("Core rules / geometry / layer model", "`crates/core/src/`"),
+        (
+            "Core worldgen pipeline (land → hydrology, D-92)",
+            "`crates/core/src/worldgen/`",
+        ),
+        (
+            "Core rules / geometry / layer model",
+            "`crates/core/src/` (facade `lib.rs`; legacy re-exports)",
+        ),
         ("HTTP API / world file I/O", "`crates/server/src/`"),
         ("CLI author flows and helpers", "`crates/cli/src/`"),
         ("Web UI / WASM editor", "`crates/web/src/`"),

@@ -60,6 +60,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Cursor alpha guide (D-80/D-81): `docs/CURSOR-ALPHA.md`
 - Full symbol codemap (generated): `docs/CODEMAP.md`
 - Codemap generator script: `scripts/gen_codemap.py`
+- Codemap drift CI guard: `scripts/check_codemap_drift.py` (regen `CODEMAP.md` + validate `CODEMAP-LITE.md` paths)
 - Alpha Windows bootstrap/launch/update: `setup.ps1`, `run.ps1` (D-86 pull-in-run), `update.ps1`; troubleshooting: `.cursor/commands/doctor.md`
 - Core boundary entry: `crates/core/src/lib.rs` (facade; worldgen under `worldgen/`, legacy top-level re-exports for adapters)
 - Server boundary entry: `crates/server/src/lib.rs`

@@ -30,6 +30,21 @@ jobs:
       # excluded here, covered instead by the windows-desktop-build job.
       - run: cargo test --workspace --exclude mapkeeper-desktop
 
+  codemap-drift:
+    name: Codemap drift (CODEMAP.md + CODEMAP-LITE)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Regenerate CODEMAP.md and verify committed copy
+        run: python scripts/gen_codemap.py
+      - name: Fail if CODEMAP.md changed (commit regen output)
+        run: git diff --exit-code docs/CODEMAP.md
+      - name: Check CODEMAP-LITE stale paths
+        run: python scripts/check_codemap_drift.py
+
   windows-desktop-build:
     name: cargo build mapkeeper-desktop (Windows only, roadmap 5.9, D-29)
     runs-on: windows-latest
