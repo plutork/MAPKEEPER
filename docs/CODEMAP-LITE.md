@@ -51,6 +51,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 ## Key files
 
 - Workspace members: `Cargo.toml`
+- Developer setup/runbook: `docs/DEV.md`
 - Full symbol codemap (generated): `docs/CODEMAP.md`
 - Codemap generator script: `scripts/gen_codemap.py`
 - Core boundary entry: `crates/core/src/lib.rs`

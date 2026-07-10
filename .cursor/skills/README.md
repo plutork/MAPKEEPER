@@ -1,6 +1,6 @@
 # Product skills (MAPKEEPER)
 
-Build-time depth for V0 — **commands live in MAPKEEPER-OS**; these skills auto-load by file path.
+Build-time depth for V0 — these skills auto-load by file path.
 
 | Skill | When | Complements |
 |-------|------|-------------|
@@ -9,6 +9,6 @@ Build-time depth for V0 — **commands live in MAPKEEPER-OS**; these skills auto
 | [mapkeeper-web-tests](mapkeeper-web-tests/SKILL.md) | `tests/**`, `e2e/**` | V0 dogfood; adapted from anthropics webapp-testing |
 | [mapkeeper-world-template](mapkeeper-world-template/SKILL.md) | `toolchain/template/world/**` | D-08/D-10 template sync |
 
-**Gate:** product skills do **not** bypass MAPKEEPER-OS `/real` — maintainer must have D-* backing.
+**Gate:** product skills do not bypass approved decision/todo build flow.
 
 **Upstream:** UI/test patterns adapted from [anthropics/skills](https://github.com/anthropics/skills) (see repo LICENSE).

@@ -11,7 +11,7 @@ paths: crates/web/**
 
 **Adapted from:** [anthropics/skills frontend-design](https://github.com/anthropics/skills/tree/main/skills/frontend-design) — trimmed for mapkeeper.
 
-**Companion:** MAPKEEPER-OS `mapkeeper-product.mdc` · D-12 web-first V0.
+**Companion:** product-first lens + D-12 web-first V0.
 
 ## Audience
 
@@ -51,4 +51,4 @@ filesystem. No direct FS access from this crate.
 
 ## Gate
 
-Implementation only via MAPKEEPER-OS **`/real`** after layout + renderer Shape (`/idea`).
+Implementation only via approved `/real` scope after layout + renderer Shape (`/idea`).

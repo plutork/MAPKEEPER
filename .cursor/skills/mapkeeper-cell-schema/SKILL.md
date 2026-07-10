@@ -9,7 +9,7 @@ paths: schemas/**, **/profiles/**
 
 # Cell profile schema (mapkeeper V0)
 
-**Product invariants:** `README.md#invariants` · **Decided scope:** D-12 in MAPKEEPER-OS `decisions.md`.
+**Product invariants:** `README.md#invariants` · decided scope: D-12 (maintainer decisions log).
 
 ## cell_id (canonical)
 
@@ -49,4 +49,4 @@ decision.
 
 ## Gate
 
-Maintainer edits here only under MAPKEEPER-OS **`/real`** with D-* or active `/done` plan.
+Maintainer edits here only under approved build scope (`/real` with backing D-* / todo).

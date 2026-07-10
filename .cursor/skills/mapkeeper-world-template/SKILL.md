@@ -29,9 +29,9 @@ Edit **`toolchain/template/world/`** only — not manual copy from legacy `toolc
 
 ## Public MAPKEEPER rules
 
-- No MAPKEEPER-OS maintainer text in public kit.
+- No private maintainer text in the public kit.
 - Template is **interim** onboarding until editor wizard (D-09).
 
 ## Gate
 
-Template changes are product work — MAPKEEPER-OS **`/real`** with D-* backing.
+Template changes are product work — only through approved `/real` scope with D-* backing.
