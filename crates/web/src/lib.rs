@@ -560,6 +560,7 @@ struct AppState {
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
+    set_text("app-version", &format!("mapkeeper {APP_VERSION}"));
 
     let initial_bounds = MapPreset::Small.bounds();
     let state = Rc::new(RefCell::new(AppState {
