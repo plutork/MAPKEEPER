@@ -9,7 +9,7 @@ Write-Host ""
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host "git not found."
-    Write-Host "If this fails, run /doctor in Cursor."
+    Write-Host "If this fails, run .\setup.ps1 or /doctor in Cursor."
     exit 1
 }
 
@@ -36,7 +36,7 @@ Write-Host "Rebuilding web UI…"
 powershell -File (Join-Path $Root "crates\web\build.ps1")
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Web build failed."
-    Write-Host "If this fails, run /doctor in Cursor."
+    Write-Host "If this fails, run .\setup.ps1 or /doctor in Cursor."
     exit $LASTEXITCODE
 }
 

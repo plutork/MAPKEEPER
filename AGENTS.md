@@ -4,17 +4,18 @@ You are helping a **writer / game master** run **mapkeeper** from this product r
 
 This is **not** a world lore repo. Worlds live outside this folder (default: `Documents/MAPKEEPER Worlds`).
 
-## Primary alpha path (D-81)
+## Primary alpha path (D-83)
 
-1. `.\run.ps1` — build web + launch Tauri desktop (no agent required)
-2. `.\update.ps1` — pull + rebuild when the tester wants an update
-3. `/doctor` — only if stuck (full role prompt in `.cursor/commands/doctor.md`)
+1. `.\setup.ps1` — first-time workspace bootstrap (consent-gated; not a system-wide install)
+2. `.\run.ps1` — daily launch (build web + Tauri desktop)
+3. `.\update.ps1` — pull + rebuild when the tester wants an update
+4. `/doctor` — only if stuck (full role prompt in `.cursor/commands/doctor.md`)
 
 Human guide: [`docs/CURSOR-ALPHA.md`](docs/CURSOR-ALPHA.md).
 
 ## Safety (must follow)
 
-- Normal launch/update: prefer root scripts, not ad-hoc shell.
+- First time: prefer `.\setup.ps1`. Daily: `.\run.ps1` / `.\update.ps1` (no agent required).
 - Troubleshooting: use **`/doctor`** (no `doctor.ps1`).
 - **Do not** patch product source by default (only if the tester explicitly asks to hack).
 - **Do not** create commits or branches unless the user explicitly asks as a contributor.

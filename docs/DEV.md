@@ -2,7 +2,7 @@
 
 Developer-oriented setup for working on mapkeeper itself.
 
-**Alpha testers:** prefer [CURSOR-ALPHA.md](CURSOR-ALPHA.md) — `.\run.ps1` / `.\update.ps1`, and `/doctor` only if stuck.
+**Alpha testers:** prefer [CURSOR-ALPHA.md](CURSOR-ALPHA.md) — `.\setup.ps1` then `.\run.ps1` / `.\update.ps1`; `/doctor` only if stuck.
 
 ## Repo layout
 
@@ -19,7 +19,7 @@ Cargo workspace, Rust everywhere (core, CLI, local server, WASM UI):
 | `fixtures/` | shared test fixtures |
 | `toolchain/` | world scaffold source |
 | `tests/` | e2e/dev tooling (Playwright) |
-| `run.ps1` / `update.ps1` | Windows alpha launch / update (D-81) |
+| `setup.ps1` / `run.ps1` / `update.ps1` | Windows alpha bootstrap / launch / update (D-83) |
 
 ## Local server + web UI
 
@@ -41,6 +41,15 @@ cargo run -p mapkeeper-cli -- terrain get demo.hex.q0.r0 --world .tmp-world
 
 ## Desktop shell (Windows) — source-run
 
+First time:
+
+```powershell
+.\setup.ps1
+.\run.ps1
+```
+
+Daily launch:
+
 ```powershell
 .\run.ps1
 ```
@@ -58,7 +67,7 @@ Update a clean checkout:
 .\update.ps1
 ```
 
-Requires: Rust (MSVC), `wasm32-unknown-unknown`, WebView2, and Visual Studio Build Tools (C++ workload). If setup fails, use Cursor **`/doctor`** (interactive; no silent MSVC install).
+Requires: Rust (MSVC), `wasm32-unknown-unknown`, WebView2, and Visual Studio Build Tools (C++ workload). Prefer `.\setup.ps1` for first-time checks. If setup fails, use Cursor **`/doctor`** (interactive; no silent MSVC install).
 
 ## NSIS installer (Later — not alpha path)
 
