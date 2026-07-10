@@ -301,24 +301,6 @@ fn half_extent(bounds: &MapBounds) -> (f64, f64) {
     (max_x.max(1.0), max_y.max(1.0))
 }
 
-fn count_land_cells(land_mask: &DenseLayer) -> usize {
-    (0..land_mask.len())
-        .filter(|&i| is_land_cell(land_mask, i))
-        .count()
-}
-
-fn valid_geology_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        GEOLOGY_NONE
-            | GEOLOGY_STABLE
-            | GEOLOGY_BASIN
-            | GEOLOGY_RIDGE
-            | GEOLOGY_RIFT
-            | GEOLOGY_VOLCANIC_ARC
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +309,24 @@ mod tests {
         LAND_MASK_OCEAN,
     };
     use crate::plates::build_hidden_plates;
+
+    fn count_land_cells(land_mask: &DenseLayer) -> usize {
+        (0..land_mask.len())
+            .filter(|&i| is_land_cell(land_mask, i))
+            .count()
+    }
+
+    fn valid_geology_kind(kind: &str) -> bool {
+        matches!(
+            kind,
+            GEOLOGY_NONE
+                | GEOLOGY_STABLE
+                | GEOLOGY_BASIN
+                | GEOLOGY_RIDGE
+                | GEOLOGY_RIFT
+                | GEOLOGY_VOLCANIC_ARC
+        )
+    }
 
     fn count_kind(layer: &DenseLayer, kind: &str) -> usize {
         (0..layer.len())
