@@ -3387,6 +3387,10 @@ fn attach_pan_drag(state: Rc<RefCell<AppState>>) {
             if event.button() != 0 {
                 return;
             }
+            // Wizard silhouette Edit owns LMB drag; do not start viewport pan.
+            if wizard_is_active() && down_state.borrow().wizard_edit_mode {
+                return;
+            }
             // Keep painting clicks reliable: pan starts only in Inspect mode.
             if !matches!(down_state.borrow().brush, Brush::Inspect) {
                 return;
