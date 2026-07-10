@@ -19,7 +19,7 @@ Your lore lives in your world folder, not in this product repository.
 
 ## Install (Windows alpha 0.2)
 
-1. Download **current alpha**: [mapkeeper_0.2.0_x64-setup.exe](https://github.com/plutork/MAPKEEPER/releases/download/v0.2.0/mapkeeper_0.2.0_x64-setup.exe).
+1. Download **current alpha**: [mapkeeper_0.2.1_x64-setup.exe](https://github.com/plutork/MAPKEEPER/releases/download/v0.2.1/mapkeeper_0.2.1_x64-setup.exe).
 2. Or browse all releases: [GitHub Releases](https://github.com/plutork/MAPKEEPER/releases).
 3. Install and launch from Start menu / desktop shortcut.
 
@@ -28,7 +28,7 @@ Unsigned alpha builds may show SmartScreen:
 - click **More info**
 - click **Run anyway**
 
-Tester checklist: [docs/TESTER-NOTES-0.2.0.md](docs/TESTER-NOTES-0.2.0.md).
+Tester checklist: [docs/TESTER-NOTES-0.2.1.md](docs/TESTER-NOTES-0.2.1.md).
 
 ## Create your first world
 

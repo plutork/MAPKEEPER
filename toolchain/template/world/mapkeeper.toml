@@ -3,7 +3,7 @@
 [world]
 id = "my-world"
 name = "my-world"
-version = "0.2.0"
+version = "0.2.1"
 
 # [mapkeeper]
-# min_editor_version = "0.2.0"
+# min_editor_version = "0.2.1"

@@ -58,7 +58,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Server boundary entry: `crates/server/src/lib.rs`
 - Web boundary entry: `crates/web/src/lib.rs`
 - Home screen layout entry: `crates/web/index.html`
-- Alpha tester notes / release body source: `docs/TESTER-NOTES-0.2.0.md`
+- Alpha tester notes / release body source: `docs/TESTER-NOTES-0.2.1.md`
 - World Build Wizard overlay (D-57 shell + D-59 draft): `crates/web/index.html` (`#build-wizard`), `crates/web/src/lib.rs` (`open_build_wizard`, `persist_build_draft`, `wizard_return_home`)
 - Editor tool dock (rail + collapsible drawers: Inspect/profile, Terrain brushes Land/Water/Raise/Lower + step/falloff, View color mode + elevation overlays, World): `crates/web/index.html`, `crates/web/src/lib.rs`, `crates/web/src/elevation_view.rs` — **overlays** the map (D-39); canvas stable on drawer toggle
 - Project list actions (`open` / `remove` / `delete`, with secondary manage flow): `crates/web/src/lib.rs`, `crates/server/src/lib.rs`

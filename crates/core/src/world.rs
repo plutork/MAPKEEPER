@@ -82,7 +82,7 @@ pub const SCAFFOLD_FILES: &[ScaffoldFile] = &[
 /// the static template's `mapkeeper.toml`, with the author's id substituted.
 pub fn manifest_toml(world_id: &str) -> String {
     format!(
-        "# mapkeeper world project\n\n[world]\nid = \"{world_id}\"\nname = \"{world_id}\"\nversion = \"0.2.0\"\n"
+        "# mapkeeper world project\n\n[world]\nid = \"{world_id}\"\nname = \"{world_id}\"\nversion = \"0.2.1\"\n"
     )
 }
 

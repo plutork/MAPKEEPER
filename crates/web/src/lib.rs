@@ -66,7 +66,7 @@ const CANVAS_PAD: f64 = 20.0;
 /// Default land elevation when a cell is unknown/none (hydro projection).
 const DEFAULT_LAND_ELEVATION: i32 = 1;
 // check-updates-button (D-76): compare bundled app version with GitHub releases.
-const APP_VERSION: &str = "0.2.0";
+const APP_VERSION: &str = "0.2.1";
 const RELEASES_API_URL: &str = "https://api.github.com/repos/plutork/MAPKEEPER/releases";
 
 // perf-100k--web-dense-client: index-addressed elevation buffer (no sparse mirror).
