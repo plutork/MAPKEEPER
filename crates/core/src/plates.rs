@@ -190,6 +190,53 @@ pub fn classify_plate_boundary_at(
     (best_kind, influence)
 }
 
+/// Hex steps from nearest cross-plate edge (`0` = on edge, `255` = far interior).
+pub fn build_boundary_distances(bounds: &MapBounds, plates: &HiddenPlates) -> Vec<u8> {
+    let len = bounds.len();
+    let mut dist = vec![u8::MAX; len];
+    let mut queue = std::collections::VecDeque::new();
+
+    for index in 0..len {
+        if is_cross_plate_cell(bounds, plates, index) {
+            dist[index] = 0;
+            queue.push_back(index);
+        }
+    }
+
+    while let Some(index) = queue.pop_front() {
+        let d = dist[index];
+        if d >= 4 {
+            continue;
+        }
+        let Some(cell) = bounds.from_index(index) else {
+            continue;
+        };
+        for nb in cell.neighbors() {
+            let Some(ni) = bounds.index_of(nb) else {
+                continue;
+            };
+            let nd = d.saturating_add(1);
+            if dist[ni] > nd {
+                dist[ni] = nd;
+                queue.push_back(ni);
+            }
+        }
+    }
+    dist
+}
+
+fn is_cross_plate_cell(bounds: &MapBounds, plates: &HiddenPlates, index: usize) -> bool {
+    let my_plate = plates.plate_ids[index];
+    let Some(cell) = bounds.from_index(index) else {
+        return false;
+    };
+    cell.neighbors().into_iter().any(|nb| {
+        bounds
+            .index_of(nb)
+            .is_some_and(|ni| plates.plate_ids[ni] != my_plate)
+    })
+}
+
 fn neighbor_direction(from: Axial, to: Axial) -> (f64, f64) {
     let (x0, y0) = from.to_pixel(1.0);
     let (x1, y1) = to.to_pixel(1.0);

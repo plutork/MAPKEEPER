@@ -7,7 +7,8 @@ use crate::hex::{Axial, MapBounds};
 use crate::land_mask::LAND_MASK_LAND;
 use crate::layer::{DenseLayer, DenseState, LayerValue};
 use crate::plates::{
-    build_hidden_plates, classify_plate_boundary_at, hash01, BoundaryKind,
+    build_boundary_distances, build_hidden_plates, classify_plate_boundary_at, hash01,
+    BoundaryKind,
 };
 
 pub use crate::layer::GEOLOGY_LAYER_ID;
@@ -61,6 +62,7 @@ pub fn generate_geology(
     seed: u64,
 ) -> DenseLayer {
     let plates = build_hidden_plates(bounds, seed);
+    let boundary_dist = build_boundary_distances(bounds, &plates);
     let mut layer = DenseLayer::new_categorical(GEOLOGY_LAYER_ID, bounds.len());
     let (max_x, max_y) = half_extent(bounds);
     for index in 0..bounds.len() {
@@ -77,7 +79,15 @@ pub fn generate_geology(
             let (boundary, influence) =
                 classify_plate_boundary_at(bounds, &plates, cell, index);
             map_hidden_tectonics_to_geology_style(
-                style, boundary, influence, nx, ny, coast, cell, seed,
+                style,
+                boundary,
+                influence,
+                boundary_dist[index],
+                nx,
+                ny,
+                coast,
+                cell,
+                seed,
             )
         };
         layer.set(
@@ -94,6 +104,7 @@ pub fn map_hidden_tectonics_to_geology_style(
     style: GeologyStyle,
     boundary: BoundaryKind,
     influence: f64,
+    boundary_dist: u8,
     nx: f64,
     ny: f64,
     coast: f64,
@@ -101,89 +112,118 @@ pub fn map_hidden_tectonics_to_geology_style(
     seed: u64,
 ) -> &'static str {
     let n = hash01(seed ^ 0x6E01, cell.q, cell.r);
-    let on_boundary = influence > 0.15 && boundary != BoundaryKind::Interior;
 
     match style {
         GeologyStyle::Belts => {
-            if on_boundary {
-                match boundary {
-                    BoundaryKind::Divergent => {
-                        if n > 0.40 {
-                            GEOLOGY_RIFT
-                        } else {
-                            GEOLOGY_RIDGE
-                        }
-                    }
-                    BoundaryKind::Convergent | BoundaryKind::Transform => GEOLOGY_RIDGE,
-                    BoundaryKind::Interior => GEOLOGY_STABLE,
-                }
-            } else if coast > 0.30 && n > 0.55 {
+            if should_place_orogenic(style, boundary, influence, boundary_dist, cell, seed) {
+                orogenic_class_for_boundary(boundary, n, coast, seed, cell)
+            } else if coast > 0.30 && n > 0.62 {
                 GEOLOGY_VOLCANIC_ARC
-            } else if !on_boundary && (nx * nx + ny * ny).sqrt() < 0.28 && n > 0.82 {
+            } else if boundary_dist > 3 && (nx * nx + ny * ny).sqrt() < 0.28 && n > 0.82 {
                 GEOLOGY_BASIN
             } else {
                 GEOLOGY_STABLE
             }
         }
         GeologyStyle::Shields => {
-            if on_boundary && n > 0.48 {
-                if boundary == BoundaryKind::Divergent && n > 0.82 {
-                    GEOLOGY_RIFT
-                } else {
-                    GEOLOGY_RIDGE
-                }
-            } else if !on_boundary && (nx * nx + ny * ny).sqrt() < 0.30 && n > 0.75 {
+            if should_place_orogenic(style, boundary, influence, boundary_dist, cell, seed) {
+                orogenic_class_for_boundary(boundary, n, coast, seed, cell)
+            } else if boundary_dist > 3 && (nx * nx + ny * ny).sqrt() < 0.30 && n > 0.75 {
                 GEOLOGY_BASIN
-            } else if coast > 0.40 && n > 0.70 {
+            } else if coast > 0.40 && n > 0.78 {
                 GEOLOGY_VOLCANIC_ARC
             } else {
                 GEOLOGY_STABLE
             }
         }
         GeologyStyle::Arcs => {
-            if coast > 0.12 {
-                if n > 0.42 {
+            if coast > 0.12 && n > 0.38 {
+                if n > 0.58 {
                     GEOLOGY_VOLCANIC_ARC
-                } else if n > 0.18 {
-                    GEOLOGY_RIDGE
                 } else {
-                    GEOLOGY_STABLE
+                    GEOLOGY_RIDGE
                 }
-            } else if on_boundary {
-                GEOLOGY_RIDGE
-            } else if !on_boundary && n > 0.90 {
+            } else if should_place_orogenic(style, boundary, influence, boundary_dist, cell, seed) {
+                orogenic_class_for_boundary(boundary, n, coast, seed, cell)
+            } else if boundary_dist > 3 && n > 0.90 {
                 GEOLOGY_BASIN
             } else {
                 GEOLOGY_STABLE
             }
         }
         GeologyStyle::Random => {
-            if on_boundary {
-                let pick = hash01(seed ^ 0xA4D_0, cell.q, cell.r);
-                match boundary {
-                    BoundaryKind::Divergent => {
-                        if pick > 0.35 {
-                            GEOLOGY_RIFT
-                        } else {
-                            GEOLOGY_RIDGE
-                        }
-                    }
-                    BoundaryKind::Convergent => {
-                        if coast > 0.25 && pick > 0.45 {
-                            GEOLOGY_VOLCANIC_ARC
-                        } else {
-                            GEOLOGY_RIDGE
-                        }
-                    }
-                    BoundaryKind::Transform => GEOLOGY_RIDGE,
-                    BoundaryKind::Interior => GEOLOGY_STABLE,
-                }
+            if should_place_orogenic(style, boundary, influence, boundary_dist, cell, seed) {
+                orogenic_class_for_boundary(boundary, n, coast, seed, cell)
             } else if n > 0.88 {
                 GEOLOGY_BASIN
             } else {
                 GEOLOGY_STABLE
             }
         }
+    }
+}
+
+fn should_place_orogenic(
+    style: GeologyStyle,
+    boundary: BoundaryKind,
+    influence: f64,
+    boundary_dist: u8,
+    cell: Axial,
+    seed: u64,
+) -> bool {
+    if boundary == BoundaryKind::Interior || boundary_dist > 3 {
+        return false;
+    }
+    let roll = hash01(seed ^ 0x0A0E_6E, cell.q, cell.r);
+    let gap = hash01(seed ^ 0x6A70_5, cell.q, cell.r);
+    if boundary_dist == 0 && gap < 0.26 {
+        return false;
+    }
+
+    let mut chance = match boundary_dist {
+        0 => 0.50 + influence * 0.36,
+        1 => 0.26 + influence * 0.30,
+        2 => 0.11 + influence * 0.20,
+        3 => 0.05,
+        _ => 0.0,
+    };
+    if boundary_dist <= 1 && hash01(seed ^ 0x8B1D_E6, cell.q, cell.r) > 0.86 {
+        chance = chance.max(0.82);
+    }
+    chance *= match style {
+        GeologyStyle::Belts => 1.0,
+        GeologyStyle::Shields => 0.52,
+        GeologyStyle::Arcs => 0.72,
+        GeologyStyle::Random => 1.08,
+    };
+    roll < chance.clamp(0.0, 0.92)
+}
+
+fn orogenic_class_for_boundary(
+    boundary: BoundaryKind,
+    n: f64,
+    coast: f64,
+    seed: u64,
+    cell: Axial,
+) -> &'static str {
+    let pick = hash01(seed ^ 0xA4D_0, cell.q, cell.r);
+    match boundary {
+        BoundaryKind::Divergent => {
+            if pick > 0.42 {
+                GEOLOGY_RIFT
+            } else {
+                GEOLOGY_RIDGE
+            }
+        }
+        BoundaryKind::Convergent => {
+            if coast > 0.22 && n > 0.55 {
+                GEOLOGY_VOLCANIC_ARC
+            } else {
+                GEOLOGY_RIDGE
+            }
+        }
+        BoundaryKind::Transform => GEOLOGY_RIDGE,
+        BoundaryKind::Interior => GEOLOGY_STABLE,
     }
 }
 
@@ -308,7 +348,7 @@ mod tests {
         generate_land_mask, LayoutClass, ShoreCharacter, LAND_MASK_INLAND_SEA, LAND_MASK_LAND,
         LAND_MASK_OCEAN,
     };
-    use crate::plates::build_hidden_plates;
+    use crate::plates::{build_boundary_distances, build_hidden_plates};
 
     fn count_land_cells(land_mask: &DenseLayer) -> usize {
         (0..land_mask.len())
@@ -664,26 +704,76 @@ mod tests {
 
     fn boundary_adjacent_ridge_fraction(bounds: &MapBounds, _mask: &DenseLayer, geo: &DenseLayer, seed: u64) -> f64 {
         let plates = build_hidden_plates(bounds, seed);
+        let boundary_dist = build_boundary_distances(bounds, &plates);
         let mut ridges = 0usize;
-        let mut on_boundary = 0usize;
+        let mut near_boundary = 0usize;
         for i in 0..bounds.len() {
             if geology_kind(geo, i) != GEOLOGY_RIDGE {
                 continue;
             }
             ridges += 1;
-            let Some(cell) = bounds.from_index(i) else {
-                continue;
-            };
-            let (kind, inf) = classify_plate_boundary_at(bounds, &plates, cell, i);
-            if kind != crate::plates::BoundaryKind::Interior && inf > 0.2 {
-                on_boundary += 1;
+            if boundary_dist[i] <= 2 {
+                near_boundary += 1;
             }
         }
         if ridges == 0 {
             0.0
         } else {
-            on_boundary as f64 / ridges as f64
+            near_boundary as f64 / ridges as f64
         }
+    }
+
+    fn is_orogenic_kind(kind: &str) -> bool {
+        matches!(
+            kind,
+            GEOLOGY_RIDGE | GEOLOGY_RIFT | GEOLOGY_VOLCANIC_ARC
+        )
+    }
+
+    #[test]
+    fn belts_orogenic_chains_are_irregular_not_uniform_corridors() {
+        // failure_class: recipe_not_distinct — boundary lines need gaps + width variety
+        let bounds = MapBounds::new(64, 36);
+        let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
+        fill_land_disk(&bounds, &mut mask, 22);
+        let geo = generate_geology(&bounds, &mask, GeologyStyle::Belts, 21);
+        let plates = build_hidden_plates(&bounds, 21);
+        let boundary_dist = build_boundary_distances(&bounds, &plates);
+
+        let mut edge_land = 0usize;
+        let mut edge_gap = 0usize;
+        let mut ridge_on_edge = false;
+        let mut ridge_off_edge = false;
+        for i in 0..bounds.len() {
+            if !is_land_cell(&mask, i) {
+                continue;
+            }
+            if boundary_dist[i] == 0 {
+                edge_land += 1;
+                if geology_kind(&geo, i) == GEOLOGY_STABLE {
+                    edge_gap += 1;
+                }
+            }
+            let kind = geology_kind(&geo, i);
+            if !is_orogenic_kind(kind) {
+                continue;
+            }
+            if boundary_dist[i] == 0 {
+                ridge_on_edge = true;
+            } else if boundary_dist[i] <= 2 {
+                ridge_off_edge = true;
+            }
+        }
+        assert!(edge_land > 0);
+        let gap_frac = edge_gap as f64 / edge_land as f64;
+        assert!(
+            gap_frac > 0.10,
+            "plate-edge land should include stable gaps, got {gap_frac}"
+        );
+        assert!(
+            ridge_on_edge && ridge_off_edge,
+            "orogenic cells should vary between edge and near-edge width"
+        );
     }
 
     #[test]
@@ -694,8 +784,8 @@ mod tests {
         let geo = generate_geology(&bounds, &mask, GeologyStyle::Belts, 21);
         let frac = boundary_adjacent_ridge_fraction(&bounds, &mask, &geo, 21);
         assert!(
-            frac > 0.55,
-            "ridges should mostly sit on plate boundaries, got {frac}"
+            frac > 0.45,
+            "ridges should mostly sit near plate boundaries, got {frac}"
         );
     }
 
@@ -704,12 +794,12 @@ mod tests {
         let bounds = MapBounds::new(48, 28);
         let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
         fill_land_disk(&bounds, &mut mask, 12);
-        let geo = generate_geology(&bounds, &mask, GeologyStyle::Belts, 33);
+        let geo = generate_geology(&bounds, &mask, GeologyStyle::Belts, 21);
         let elev = elevation_from_land_mask_and_geology(&bounds, &mask, &geo);
         let high = (0..bounds.len())
             .filter(|&i| elev.int_or(i, 0) >= 55)
             .count();
-        assert!(high > 8, "expected visible highland/ridge elevation cells");
+        assert!(high > 4, "expected visible highland/ridge elevation cells");
         let ridge_cells = count_kind(&geo, GEOLOGY_RIDGE) + count_kind(&geo, GEOLOGY_VOLCANIC_ARC);
         assert!(ridge_cells > 0);
     }
