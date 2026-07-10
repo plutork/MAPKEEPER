@@ -30,7 +30,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - New-world ocean fill (dense elevation all `0` after bounds) -> `crates/server/src/lib.rs` (`write_map_manifest`), `crates/cli/src/main.rs` (`write_initial_ocean_elevation`)
 - CLI commands and query flow (`profile`, `terrain`, `elevation`, generic `layer <id>`) -> `crates/cli/src/`
 - Dense-on-disk layer I/O (`read_or_empty` + `write_dense_layer`) -> `crates/core/src/layer.rs`, `crates/server/src/lib.rs`, `crates/cli/src/main.rs`
-- Web UI (WASM canvas, Home/Editor flow, tool dock + terrain brushes; elevation view palette/labels/peaks in `elevation_view.rs`) -> `crates/web/src/`
+- Web UI (WASM canvas, Home/Editor flow, tool dock + terrain brushes; elevation view palette/labels/peaks in `elevation_view.rs`) -> `crates/web/src/` (**D-94** incremental split: `state.rs`, `dom.rs`, `api.rs`; canvas/wizard/editor still in `lib.rs` until B2–B4)
 - Rivers tool dock (chain-click brush, stroke overlay, erase whole river, Generate rivers + confirm) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`river-overlay-layer-v1`, `rivers-auto-from-elevation-v1`)
 - Perf Step 0 measurement hooks (`open_ms`, layer fetch/parse/mirror, `redraw_ms`, `batch_flush_ms`; `#view-perf` + console) -> `crates/web/src/lib.rs` (`perf-100k--measurement-hooks`)
 - Web dense elevation client (index-addressed `DenseLayer` render cache, no HashMap mirror) -> `crates/web/src/lib.rs` (`perf-100k--web-dense-client`)
@@ -64,7 +64,11 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Alpha Windows bootstrap/launch/update: `setup.ps1`, `run.ps1` (D-86 pull-in-run), `update.ps1`; troubleshooting: `.cursor/commands/doctor.md`
 - Core boundary entry: `crates/core/src/lib.rs` (facade; worldgen under `worldgen/`, legacy top-level re-exports for adapters)
 - Server boundary entry: `crates/server/src/lib.rs`
-- Web boundary entry: `crates/web/src/lib.rs`
+- Web boundary entry: `crates/web/src/lib.rs` (`start()` + wiring; legacy blocks until D-94 B2–B4)
+- Web state/types/DTOs: `crates/web/src/state.rs` (D-94 B1)
+- Web DOM helpers: `crates/web/src/dom.rs` (D-94 B1)
+- Web HTTP fetch/load/post: `crates/web/src/api.rs` (D-94 B1)
+- Web elevation view overlays: `crates/web/src/elevation_view.rs`
 - Home screen layout entry: `crates/web/index.html`
 - Alpha tester notes (stub → CURSOR-ALPHA): `docs/TESTER-NOTES-0.2.1.md`
 - World Build Wizard overlay (D-57 shell + D-59 draft): `crates/web/index.html` (`#build-wizard`), `crates/web/src/lib.rs` (`open_build_wizard`, `persist_build_draft`, `wizard_return_home`)

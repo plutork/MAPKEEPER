@@ -8,7 +8,34 @@
 //! placeholder profile (title + notes) -> save -> cell is "painted". No
 //! real cell schema (roadmap 3.2) yet — that is the point of this pass.
 
+mod api;
+mod dom;
 mod elevation_view;
+mod state;
+
+use api::{
+    delete_river_at_cell, flush_pending_paints, load_elevation, load_geology, load_map,
+    load_profile_into_panel, load_rivers, persist_build_draft, post_river_append,
+    post_river_generate, post_river_pop, refresh_projects, schedule_paint_flush,
+};
+use dom::{
+    canvas, click_target_element, context, document, drawer_is_open, hide_post_finish_note,
+    hide_wiz_confirm, input, perf_now, select_value, set_dock_tab, set_drawer_open,
+    set_select_value, set_text, set_world_label, show_view, show_wiz_confirm, textarea, window,
+};
+use state::{
+    bump_content_rev, count_visible_in_bounds, draw_snapshot, elevation_at, fresh_elevation_layer,
+    geology_tint, grid_lines_stats_label, grid_lines_toggle_label,
+    set_elevation_cell, show_profile_markers, stroke_grid_enabled, AppState, Brush,
+    BuildBoundsInput, BuildBoundsResponse, BuildStateInput, CreateProjectInput, DeleteProjectInput, ForgetProjectInput, OpenProjectInput, PerfMetrics,
+    PerfTimers, ProfileInput, ProjectStatus, WizConfirmKind,
+    WizardClimateGenerateInput, WizardElevationGenerateInput, WizardGeologyGenerateInput,
+    WizardLandMaskCellInput, WizardLandMaskGenerateInput, WizardLandMaskGenerateResponse,
+    APP_VERSION, BRUSH_PREVIEW_GAP, BRUSH_PREVIEW_HEX_DETAIL_MAX, BRUSH_SCREEN_DIAMETERS_PX,
+    CANVAS_PAD, FILL_SCALE_GRID_OFF, FILL_SCALE_GRID_ON, GRID_LINE_WIDTH, MAX_BRUSH_RADIUS, MAX_BRUSH_TIER, MAX_EFFECTIVE_BRUSH_RADIUS,
+    MIN_BRUSH_RADIUS, MIN_BRUSH_TIER, MIN_ZOOM, PAINT_BATCH_MAX_CELLS, PAINT_SAVE_COOLDOWN_MS,
+    PAN_DRAG_THRESHOLD, ZOOM_CLOSEUP_HEX_PX, ZOOM_MAX_HARD,
+};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -23,200 +50,13 @@ use gloo_timers::future::TimeoutFuture;
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::{hydro_from_elevation, stamp_delta, HydroKind};
 use mapkeeper_core::land_mask::{find_recipe, next_recipe, pick_recipe, LayoutClass};
-use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
 use mapkeeper_core::map_preset::MapPreset;
-use mapkeeper_core::profile::CellProfile;
-use mapkeeper_core::rivers::{river_at_cell, RiverCatalog};
-use serde::{Deserialize, Serialize};
+use mapkeeper_core::rivers::RiverCatalog;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
-    CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlElement, HtmlInputElement,
-    HtmlSelectElement, HtmlTextAreaElement,
+    CanvasRenderingContext2d, Element, HtmlElement,
 };
-
-const MIN_ZOOM: f64 = 0.6;
-// zoom-cap--target-hex-px (D-85): max zoom so on-screen hex ≈ this many px (amends D-41 flat 2.5x).
-const ZOOM_CLOSEUP_HEX_PX: f64 = 40.0;
-const ZOOM_MAX_HARD: f64 = 32.0;
-const PAN_DRAG_THRESHOLD: f64 = 3.0;
-// save-batch--http-endpoint-v1: tuneable write buffering.
-const PAINT_SAVE_COOLDOWN_MS: u32 = 300;
-const PAINT_BATCH_MAX_CELLS: usize = 512;
-// brush-size--zoom-adaptive (D-70): screen-space tier → cell radius from zoom.
-const MIN_BRUSH_TIER: i32 = 0;
-const MAX_BRUSH_TIER: i32 = 3;
-/// Soft ceiling on effective hex radius (World overview perf guard; tunable).
-const MAX_EFFECTIVE_BRUSH_RADIUS: i32 = 24;
-/// Screen-space brush diameters (px) for tiers S/M/L/XL.
-const BRUSH_SCREEN_DIAMETERS_PX: [f64; 4] = [28.0, 56.0, 96.0, 144.0];
-/// Hex-boundary preview above this radius freezes the UI — use a circle instead.
-const BRUSH_PREVIEW_HEX_DETAIL_MAX: i32 = 2;
-// Legacy aliases — tier index still stored as brush_radius field.
-const MIN_BRUSH_RADIUS: i32 = MIN_BRUSH_TIER;
-const MAX_BRUSH_RADIUS: i32 = MAX_BRUSH_TIER;
-// perf-100k--canvas-lod-grid-markers: skip per-hex stroke when many cells visible.
-const GRID_STROKE_CELL_THRESHOLD: usize = 10_000;
-// perf-100k--canvas-lod-grid-markers: hide profile dots when zoomed out.
-const PROFILE_MARKER_MIN_ZOOM: f64 = 1.0;
-// view-cells-seamless-v1: fill scales — On = edge-to-edge; Off = overlap seamless map.
-const FILL_SCALE_GRID_ON: f64 = 1.0;
-const FILL_SCALE_GRID_OFF: f64 = 1.04;
-const GRID_LINE_WIDTH: f64 = 1.0;
-/// Brush hover preview inset (unchanged from legacy HEX_GAP).
-const BRUSH_PREVIEW_GAP: f64 = 0.92;
-/// Breathing room (px) between the map and the canvas edge.
-const CANVAS_PAD: f64 = 20.0;
-/// Default land elevation when a cell is unknown/none (hydro projection).
-const DEFAULT_LAND_ELEVATION: i32 = 1;
-// Home version label (D-80: in-app Check-for-updates CTA removed; /mk-update owns alpha updates).
-const APP_VERSION: &str = "0.2.1";
-
-// perf-100k--web-dense-client: index-addressed elevation buffer (no sparse mirror).
-fn fresh_elevation_layer(bounds: MapBounds) -> DenseLayer {
-    DenseLayer::new_integer("elevation", bounds.len())
-}
-
-// geology-readable--preview-contrast (D-72): opaque class fills for wizard Tectonics
-fn geology_tint(geo: &DenseLayer, bounds: MapBounds, q: i32, r: i32) -> Option<&'static str> {
-    let index = bounds.index_of(Axial::new(q, r))?;
-    match geo.state(index) {
-        DenseState::Value(LayerValue::Text(ref t)) => match t.as_str() {
-            "ridge" => Some("rgba(196, 92, 42, 0.78)"),
-            "rift" => Some("rgba(140, 70, 180, 0.72)"),
-            "basin" => Some("rgba(45, 110, 190, 0.72)"),
-            "volcanic_arc" => Some("rgba(210, 55, 45, 0.82)"),
-            "stable" => Some("rgba(70, 150, 85, 0.62)"),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn elevation_at(layer: &DenseLayer, bounds: MapBounds, q: i32, r: i32) -> i32 {
-    let index = bounds.index_of(Axial::new(q, r)).unwrap_or(0);
-    layer.int_or(index, DEFAULT_LAND_ELEVATION)
-}
-
-fn set_elevation_cell(layer: &mut DenseLayer, bounds: MapBounds, q: i32, r: i32, value: i32) {
-    if let Some(index) = bounds.index_of(Axial::new(q, r)) {
-        layer.set(index, DenseState::Value(LayerValue::Int(value)));
-    }
-}
-
-fn count_visible_in_bounds(
-    q_min: i32,
-    q_max: i32,
-    r_min: i32,
-    r_max: i32,
-    bounds: MapBounds,
-) -> usize {
-    let mut n = 0usize;
-    for q in q_min..=q_max {
-        for r in r_min..=r_max {
-            if bounds.contains(Axial::new(q, r)) {
-                n += 1;
-            }
-        }
-    }
-    n
-}
-
-fn stroke_grid_enabled(show_grid: bool, visible_cells: usize) -> bool {
-    show_grid && visible_cells <= GRID_STROKE_CELL_THRESHOLD
-}
-
-fn show_profile_markers(zoom: f64) -> bool {
-    zoom >= PROFILE_MARKER_MIN_ZOOM
-}
-
-fn grid_lines_stats_label(show_grid: bool, visible_cells: usize) -> &'static str {
-    if !show_grid {
-        "lines Off"
-    } else if visible_cells > GRID_STROKE_CELL_THRESHOLD {
-        "lines Auto-off"
-    } else {
-        "lines On"
-    }
-}
-
-fn grid_lines_toggle_label(show_grid: bool) -> &'static str {
-    if show_grid {
-        "Grid lines: On"
-    } else {
-        "Grid lines: Off"
-    }
-}
-
-// perf-100k--measurement-hooks: lightweight Step 0 timing (console + view pane).
-#[derive(Default)]
-struct PerfMetrics {
-    open_ms: Option<f64>,
-    layer_fetch_ms: Option<f64>,
-    layer_parse_or_decode_ms: Option<f64>,
-    client_mirror_ms: Option<f64>,
-    first_redraw_ms: Option<f64>,
-    redraw_ms: Option<f64>,
-    drawn_cells: Option<usize>,
-    batch_flush_ms: Option<f64>,
-}
-
-#[derive(Default)]
-struct PerfTimers {
-    open_start: Option<f64>,
-}
-
-fn perf_now() -> f64 {
-    web_sys::window()
-        .and_then(|w| w.performance())
-        .map(|p| p.now())
-        .unwrap_or_else(js_sys::Date::now)
-}
-
-fn perf_ms_label(v: Option<f64>) -> String {
-    match v {
-        Some(ms) => format!("{ms:.0}ms"),
-        None => "—".to_string(),
-    }
-}
-
-impl PerfMetrics {
-    fn console_line(&self) -> String {
-        format!(
-            "open={} fetch={} parse={} mirror={} 1st_redraw={} redraw={} drawn={} batch={}",
-            perf_ms_label(self.open_ms),
-            perf_ms_label(self.layer_fetch_ms),
-            perf_ms_label(self.layer_parse_or_decode_ms),
-            perf_ms_label(self.client_mirror_ms),
-            perf_ms_label(self.first_redraw_ms),
-            perf_ms_label(self.redraw_ms),
-            self.drawn_cells
-                .map(|n| n.to_string())
-                .unwrap_or_else(|| "—".to_string()),
-            perf_ms_label(self.batch_flush_ms),
-        )
-    }
-
-    fn view_line(&self) -> String {
-        format!(
-            "Perf: open {} · fetch {} · parse {} · mirror {} · redraw {} · batch {} · drawn {}",
-            perf_ms_label(self.open_ms),
-            perf_ms_label(self.layer_fetch_ms),
-            perf_ms_label(self.layer_parse_or_decode_ms),
-            perf_ms_label(self.client_mirror_ms),
-            perf_ms_label(self.redraw_ms),
-            perf_ms_label(self.batch_flush_ms),
-            self.drawn_cells
-                .map(|n| n.to_string())
-                .unwrap_or_else(|| "—".to_string()),
-        )
-    }
-}
-
-fn perf_emit(metrics: &PerfMetrics) {
-    set_text("view-perf", &metrics.view_line());
-    web_sys::console::log_1(&format!("[perf] {}", metrics.console_line()).into());
-}
 
 fn redraw_and_sample(state: &Rc<RefCell<AppState>>) {
     let t0 = perf_now();
@@ -229,38 +69,9 @@ fn redraw_and_sample(state: &Rc<RefCell<AppState>>) {
     set_text("view-perf", &s.perf.view_line());
 }
 
-// perf-100k--raf-redraw-coalesce: at most one full redraw per animation frame.
-#[derive(Clone, Copy, PartialEq)]
-struct DrawSnapshot {
-    zoom: f64,
-    pan_x: f64,
-    pan_y: f64,
-    selected: Option<(i32, i32)>,
-    show_grid: bool,
-    hover_cell: Option<(i32, i32)>,
-    color_mode: ColorMode,
-    show_elevation_labels: bool,
-    show_peaks: bool,
-    content_rev: u64,
-}
-
-fn draw_snapshot(s: &AppState) -> DrawSnapshot {
-    DrawSnapshot {
-        zoom: s.zoom,
-        pan_x: s.pan_x,
-        pan_y: s.pan_y,
-        selected: s.selected,
-        show_grid: s.show_grid,
-        hover_cell: s.hover_cell,
-        color_mode: s.color_mode,
-        show_elevation_labels: s.show_elevation_labels,
-        show_peaks: s.show_peaks,
-        content_rev: s.content_rev,
-    }
-}
-
-fn bump_content_rev(s: &mut AppState) {
-    s.content_rev = s.content_rev.wrapping_add(1);
+pub(crate) fn perf_emit(metrics: &PerfMetrics) {
+    set_text("view-perf", &metrics.view_line());
+    web_sys::console::log_1(&format!("[perf] {}", metrics.console_line()).into());
 }
 
 fn schedule_redraw(state: Rc<RefCell<AppState>>) {
@@ -306,265 +117,6 @@ fn flush_scheduled_redraw(state: Rc<RefCell<AppState>>) {
     if state.borrow().redraw_dirty {
         schedule_redraw(state);
     }
-}
-
-#[derive(Deserialize)]
-struct MapBoundsResponse {
-    width: i32,
-    height: i32,
-    cell_count: u32,
-}
-
-#[derive(Deserialize)]
-struct MapResponse {
-    #[allow(dead_code)]
-    world_id: String,
-    bounds: MapBoundsResponse,
-    legacy_map: bool,
-    cells: Vec<CellSummary>,
-}
-
-#[derive(Deserialize)]
-struct CellSummary {
-    q: i32,
-    r: i32,
-    display_name: String,
-}
-
-#[derive(Serialize)]
-struct ProfileInput {
-    display_name: String,
-    notes: String,
-}
-
-#[derive(Deserialize)]
-struct ProjectEntry {
-    #[allow(dead_code)]
-    id: String,
-    #[allow(dead_code)]
-    path: String,
-}
-
-#[derive(Deserialize)]
-struct ProjectStatus {
-    #[allow(dead_code)]
-    id: String,
-    #[allow(dead_code)]
-    path: String,
-    valid: bool,
-    legacy_map: bool,
-    build_draft: bool,
-    build_step: Option<u32>,
-}
-
-#[derive(Deserialize)]
-struct ProjectsResponse {
-    active: Option<ProjectEntry>,
-    projects: Vec<ProjectStatus>,
-    default_worlds_root: String,
-}
-
-#[derive(Serialize)]
-struct BuildStateInput {
-    status: &'static str,
-    step: u32,
-}
-
-#[derive(Serialize)]
-struct BuildBoundsInput<'a> {
-    map_preset: &'a str,
-}
-
-#[derive(Deserialize)]
-struct BuildBoundsResponse {
-    #[allow(dead_code)]
-    bounds: MapBoundsResponse,
-    #[allow(dead_code)]
-    reset: bool,
-}
-
-#[derive(Serialize)]
-struct WizardLandMaskGenerateInput<'a> {
-    recipe_id: &'a str,
-    character: &'a str,
-    variant: &'a str,
-    regenerate_nonce: u32,
-}
-
-/// D-68: identity echoed from land-mask generate.
-#[derive(Deserialize)]
-struct WizardLandMaskGenerateResponse {
-    seed: u64,
-    recipe_id: String,
-    layout_class: String,
-    character: String,
-    regenerate_nonce: u64,
-}
-
-#[derive(Serialize)]
-struct WizardGeologyGenerateInput<'a> {
-    style: &'a str,
-    regenerate_nonce: u32,
-}
-
-#[derive(Serialize)]
-struct WizardElevationGenerateInput<'a> {
-    style: &'a str,
-    regenerate_nonce: u32,
-}
-
-#[derive(Serialize)]
-struct WizardClimateGenerateInput<'a> {
-    style: &'a str,
-    regenerate_nonce: u32,
-}
-
-#[derive(Serialize)]
-struct WizardLandMaskCellInput<'a> {
-    q: i32,
-    r: i32,
-    kind: &'a str,
-}
-
-#[derive(Serialize)]
-struct CreateProjectInput<'a> {
-    id: &'a str,
-    path: &'a str,
-    map_preset: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    build_wizard: Option<bool>,
-}
-
-#[derive(Serialize)]
-struct OpenProjectInput<'a> {
-    path: &'a str,
-}
-
-#[derive(Serialize)]
-struct ForgetProjectInput<'a> {
-    path: &'a str,
-}
-
-#[derive(Serialize)]
-struct DeleteProjectInput<'a> {
-    path: &'a str,
-}
-
-/// One cell in a generic layer batch (`PUT /api/layers/:id/batch`), matching
-/// `core::layer::LayerCellWrite` + `WireCellState::Value`. Elevation paints are
-/// always concrete integer values (scale-layers, D-46).
-#[derive(Serialize)]
-struct LayerCellWrite {
-    q: i32,
-    r: i32,
-    state: &'static str,
-    value: i32,
-}
-
-/// Active editing tool. `Inspect` keeps the old click→profile behavior; the
-/// hydro brushes paint elevation-driven hydro (`land`/`water`) instead.
-#[derive(Clone)]
-enum Brush {
-    Inspect,
-    SetLand,
-    SetWater,
-    Raise,
-    Lower,
-    /// river-overlay-layer-v1: chain-click polyline brush.
-    River,
-    RiverErase,
-}
-
-struct AppState {
-    /// Cells that have an author profile (used for the profile-presence marker).
-    cells: HashMap<(i32, i32), String>,
-    /// Index-addressed elevation layer — primary render cache (perf-100k--web-dense-client).
-    elevation: DenseLayer,
-    brush: Brush,
-    /// Last terrain brush — restored when reopening Terrain tab.
-    last_paint_brush: Brush,
-    /// Last river brush — restored when reopening Rivers tab.
-    last_river_brush: Brush,
-    /// Active river chain id (`None` = next click starts a new river).
-    active_river_id: Option<u32>,
-    /// River catalog mirror (river-overlay-layer-v1).
-    rivers: RiverCatalog,
-    selected: Option<(i32, i32)>,
-    /// Hex bounds from `map/manifest.json` (via `/api/map`).
-    map_bounds: MapBounds,
-    /// Camera zoom multiplier over fit-to-window base size.
-    zoom: f64,
-    /// Camera pan offset in screen pixels.
-    pan_x: f64,
-    pan_y: f64,
-    /// Drag-pan interaction state.
-    drag_active: bool,
-    drag_moved: bool,
-    drag_last_x: f64,
-    drag_last_y: f64,
-    /// Drag-paint interaction state (Land/Water brush).
-    paint_active: bool,
-    paint_moved: bool,
-    paint_last_cell: Option<(i32, i32)>,
-    /// Brush size tier 0..=3 (S/M/L/XL). Effective hex radius from zoom (D-70).
-    brush_radius: i32,
-    /// Raise/Lower step magnitude (1, 5, or 10).
-    brush_step: i32,
-    /// Even falloff vs hill gradient for Raise/Lower.
-    falloff_even: bool,
-    color_mode: ColorMode,
-    show_elevation_labels: bool,
-    show_peaks: bool,
-    /// Local paint writes not yet persisted to server.
-    pending_paints: HashMap<(i32, i32), i32>,
-    paint_flush_scheduled: bool,
-    paint_flush_in_flight: bool,
-    hover_cell: Option<(i32, i32)>,
-    /// Draw hex-cell borders over fills.
-    show_grid: bool,
-    suppress_next_click: bool,
-    legacy_map: bool,
-    default_worlds_root: Option<String>,
-    path_touched: bool,
-    build_path_touched: bool,
-    /// Step 0 perf samples (perf-100k--measurement-hooks).
-    perf: PerfMetrics,
-    perf_timers: PerfTimers,
-    /// Visual revision — bumps when elevation/cells change (perf-100k--raf-redraw-coalesce).
-    content_rev: u64,
-    last_draw_snapshot: Option<DrawSnapshot>,
-    redraw_dirty: bool,
-    redraw_raf_pending: bool,
-    wizard_character: String,
-    /// Selected layout class id (D-65: six cards always visible).
-    wizard_layout_class: String,
-    wizard_regenerate_nonce: u32,
-    /// Active recipe within the selected class.
-    wizard_recipe_id: String,
-    /// Effective silhouette seed from last generate (D-68).
-    wizard_gen_seed: Option<u64>,
-    wizard_accepted: bool,
-    wizard_edit_mode: bool,
-    wizard_edit_brush: String,
-    /// D-70: screen tier 0..=3 (S–XL); effective radius from zoom.
-    wizard_brush_radius: i32,
-    /// Wizard land-edit: optimistic local stamps not yet flushed (true=land).
-    pending_wizard_stamps: HashMap<(i32, i32), bool>,
-    wizard_stamp_flush_scheduled: bool,
-    wizard_stamp_flush_in_flight: bool,
-    /// Hex distance throttle between drag stamp centers.
-    wizard_stamp_last_center: Option<(i32, i32)>,
-    /// Build wizard step: 1 size · 2 land · 3 tectonics · 4 elevation · 5 climate · 6 water (D-71/D-90/D-91).
-    wizard_step: u32,
-    wizard_geo_style: String,
-    wizard_geo_nonce: u32,
-    wizard_elev_style: String,
-    wizard_elev_nonce: u32,
-    wizard_climate_style: String,
-    wizard_climate_nonce: u32,
-    wizard_geo_accepted: bool,
-    /// Dense geology cache for tint overlay (index → palette string).
-    geology: Option<DenseLayer>,
 }
 
 #[wasm_bindgen(start)]
@@ -666,114 +218,6 @@ pub fn start() {
     attach_post_finish_note_dismiss();
 
     wasm_bindgen_futures::spawn_local(refresh_projects(state));
-}
-
-fn window() -> web_sys::Window {
-    web_sys::window().expect("no window")
-}
-
-fn document() -> web_sys::Document {
-    window().document().expect("no document")
-}
-
-/// Click target may be a text node inside a button — walk up to the element.
-fn click_target_element(event: &web_sys::MouseEvent) -> Option<web_sys::Element> {
-    let target = event.target()?;
-    if let Ok(el) = target.clone().dyn_into::<web_sys::Element>() {
-        return Some(el);
-    }
-    target.dyn_into::<web_sys::Node>().ok()?.parent_element()
-}
-
-fn canvas() -> HtmlCanvasElement {
-    document()
-        .get_element_by_id("map")
-        .expect("#map canvas missing")
-        .dyn_into::<HtmlCanvasElement>()
-        .expect("#map is not a canvas")
-}
-
-fn context() -> CanvasRenderingContext2d {
-    canvas()
-        .get_context("2d")
-        .ok()
-        .flatten()
-        .expect("no 2d context")
-        .dyn_into::<CanvasRenderingContext2d>()
-        .expect("context is not 2d")
-}
-
-fn input(id: &str) -> HtmlInputElement {
-    document()
-        .get_element_by_id(id)
-        .expect("missing input")
-        .dyn_into()
-        .expect("not an input")
-}
-
-fn textarea(id: &str) -> HtmlTextAreaElement {
-    document()
-        .get_element_by_id(id)
-        .expect("missing textarea")
-        .dyn_into()
-        .expect("not a textarea")
-}
-
-fn set_text(id: &str, text: &str) {
-    if let Some(el) = document().get_element_by_id(id) {
-        el.set_text_content(Some(text));
-    }
-}
-
-fn set_drawer_open(open: bool) {
-    if let Some(drawer) = document().get_element_by_id("dock-drawer") {
-        if open {
-            let _ = drawer.class_list().remove_1("collapsed");
-        } else {
-            let _ = drawer.class_list().add_1("collapsed");
-        }
-    }
-}
-
-fn drawer_is_open() -> bool {
-    document()
-        .get_element_by_id("dock-drawer")
-        .is_some_and(|drawer| !drawer.class_list().contains("collapsed"))
-}
-
-fn set_dock_tab(tab: &str) {
-    if let Some(drawer) = document().get_element_by_id("dock-drawer") {
-        if let Ok(panes) = drawer.query_selector_all("[data-drawer]") {
-            for i in 0..panes.length() {
-                if let Some(node) = panes.item(i) {
-                    if let Ok(el) = node.dyn_into::<Element>() {
-                        let active = el.get_attribute("data-drawer").as_deref() == Some(tab);
-                        if active {
-                            let _ = el.class_list().add_1("active");
-                        } else {
-                            let _ = el.class_list().remove_1("active");
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if let Some(rail) = document().get_element_by_id("dock-rail") {
-        if let Ok(items) = rail.query_selector_all("[data-dock]") {
-            for i in 0..items.length() {
-                if let Some(node) = items.item(i) {
-                    if let Ok(el) = node.dyn_into::<Element>() {
-                        let active = el.get_attribute("data-dock").as_deref() == Some(tab);
-                        if active {
-                            let _ = el.class_list().add_1("active");
-                        } else {
-                            let _ = el.class_list().remove_1("active");
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 fn clear_pointer_interaction(s: &mut AppState) {
@@ -1060,26 +504,6 @@ fn clear_inspect_selection() {
     set_text("status", "");
 }
 
-fn set_world_label(world_id: &str) {
-    set_text("world-name", world_id);
-}
-
-/// Toggle between the Home (project picker) and Editor (hex map) screens.
-fn show_view(name: &str) {
-    for id in ["home", "editor"] {
-        if let Some(el) = document().get_element_by_id(id) {
-            if id == name {
-                let _ = el.class_list().add_1("active");
-            } else {
-                let _ = el.class_list().remove_1("active");
-            }
-        }
-    }
-    if name != "editor" {
-        hide_post_finish_note();
-    }
-}
-
 fn build_step_label(step: u32) -> &'static str {
     match step {
         1 => "Step 1 · Size & grid",
@@ -1092,34 +516,6 @@ fn build_step_label(step: u32) -> &'static str {
 }
 
 // home-build-draft-v1: persist wizard draft on active world.
-async fn persist_build_draft(step: u32) -> bool {
-    let body = BuildStateInput {
-        status: "draft",
-        step,
-    };
-    let Ok(resp) = gloo_net::http::Request::put("/api/build")
-        .json(&body)
-        .expect("serializing build state")
-        .send()
-        .await
-    else {
-        return false;
-    };
-    resp.ok()
-}
-
-fn hide_wiz_confirm() {
-    if let Some(el) = document().get_element_by_id("wiz-confirm-overlay") {
-        let _ = el.class_list().remove_1("open");
-    }
-}
-
-fn show_wiz_confirm(msg: &str) {
-    set_text("wiz-confirm-msg", msg);
-    if let Some(el) = document().get_element_by_id("wiz-confirm-overlay") {
-        let _ = el.class_list().add_1("open");
-    }
-}
 
 fn wizard_back_message(from_step: u32) -> &'static str {
     match from_step {
@@ -1130,13 +526,6 @@ fn wizard_back_message(from_step: u32) -> &'static str {
         2 => "Go back to map size? Changing the preset will reset Geo if land already exists.",
         _ => "Go back to the previous wizard step?",
     }
-}
-
-/// D-69: in-app confirm — window.confirm is often silent/blocked in Tauri WebView2.
-#[derive(Clone)]
-enum WizConfirmKind {
-    Back,
-    BoundsPreset(String),
 }
 
 /// Apply wizard preset via PUT /api/build/bounds when different from current bounds (D-69).
@@ -1420,9 +809,13 @@ fn show_wizard_step(state: &AppState) {
         1 => set_wizard_status("Confirm map size on the blank grid, then continue."),
         3 => set_wizard_status("Step 3: generate geology, accept, continue."),
         4 => set_wizard_status("Step 4: pick relief style, generate elevation, then continue."),
-        5 => set_wizard_status("Step 5: pick precipitation style, generate climate, then continue."),
+        5 => {
+            set_wizard_status("Step 5: pick precipitation style, generate climate, then continue.")
+        }
         6 => set_wizard_status("Step 6: generate rivers from climate rainfall, then Finish."),
-        _ => set_wizard_status("Step 2 flow: 1) parameters, 2) generate, 3) accept/edit, 4) continue."),
+        _ => set_wizard_status(
+            "Step 2 flow: 1) parameters, 2) generate, 3) accept/edit, 4) continue.",
+        ),
     }
 }
 
@@ -1441,14 +834,6 @@ fn preset_id_for_bounds(bounds: &MapBounds) -> Option<&'static str> {
         }
     }
     None
-}
-
-fn set_select_value(id: &str, value: &str) {
-    if let Some(el) = document().get_element_by_id(id) {
-        if let Ok(select) = el.dyn_into::<web_sys::HtmlSelectElement>() {
-            select.set_value(value);
-        }
-    }
 }
 
 fn wizard_has_downstream(state: &AppState) -> bool {
@@ -1552,7 +937,11 @@ fn sync_wizard_gen_identity(state: &AppState) {
         "wiz-gen-identity",
         &format!(
             "class: {} · recipe: {} · shore: {} · nonce: {} · seed: {}",
-            state.wizard_layout_class, recipe, state.wizard_character, state.wizard_regenerate_nonce, seed
+            state.wizard_layout_class,
+            recipe,
+            state.wizard_character,
+            state.wizard_regenerate_nonce,
+            seed
         ),
     );
 }
@@ -1747,22 +1136,6 @@ async fn generate_wizard_geology(state: Rc<RefCell<AppState>>) {
     }
     schedule_redraw(state.clone());
     set_wizard_status("Geology generated — classes shown on the map (see legend).");
-}
-
-async fn load_geology(state: &Rc<RefCell<AppState>>) {
-    let Ok(resp) = gloo_net::http::Request::get("/api/layers/geology").send().await else {
-        return;
-    };
-    if !resp.ok() {
-        return;
-    }
-    let Ok(layer) = resp.json::<DenseLayer>().await else {
-        return;
-    };
-    // world-pipeline--tectonics-v1: tint overlay depends on content_rev in DrawSnapshot
-    let mut s = state.borrow_mut();
-    s.geology = Some(layer);
-    bump_content_rev(&mut s);
 }
 
 async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
@@ -2166,8 +1539,8 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-chars") {
-            let _ = root
-                .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+            let _ =
+                root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
         closure.forget();
     }
@@ -2394,8 +1767,8 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-geo-styles") {
-            let _ = root
-                .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+            let _ =
+                root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
         closure.forget();
     }
@@ -2476,8 +1849,8 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-elev-styles") {
-            let _ = root
-                .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+            let _ =
+                root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
         closure.forget();
     }
@@ -2535,8 +1908,8 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-climate-styles") {
-            let _ = root
-                .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+            let _ =
+                root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
         closure.forget();
     }
@@ -2731,14 +2104,6 @@ fn hex_corners(cx: f64, cy: f64, size: f64) -> [(f64, f64); 6] {
 /// Half-extent (in unit-size pixels) of the whole hex map, including the
 /// outer cells' corner reach. Pointy-top corners stick out `√3/2` sideways
 /// and `1.0` vertically. Used to fit the map into the current canvas.
-fn select_value(id: &str) -> String {
-    document()
-        .get_element_by_id(id)
-        .expect("missing select")
-        .dyn_into::<HtmlSelectElement>()
-        .expect("not a select")
-        .value()
-}
 
 fn map_half_extent(bounds: MapBounds) -> (f64, f64) {
     let mut mx = 0.0_f64;
@@ -3026,33 +2391,6 @@ fn hydro_fill(elevation: i32) -> &'static str {
     }
 }
 
-/// Fetch `/api/projects`; show the Home list or jump straight into the
-/// editor if a world is already active (e.g. server started with `--world`).
-async fn refresh_projects(state: Rc<RefCell<AppState>>) {
-    let Ok(resp) = gloo_net::http::Request::get("/api/projects").send().await else {
-        set_text("home-status", "Could not reach mapkeeper-server.");
-        return;
-    };
-    let Ok(data) = resp.json::<ProjectsResponse>().await else {
-        return;
-    };
-
-    {
-        let mut state_mut = state.borrow_mut();
-        state_mut.default_worlds_root = Some(data.default_worlds_root.clone());
-    }
-    refresh_suggested_path(&state);
-    render_project_list(&data.projects, &state);
-
-    if let Some(active) = data.active {
-        let _ = active;
-        show_view("editor");
-        wasm_bindgen_futures::spawn_local(load_map(state));
-    } else {
-        show_view("home");
-    }
-}
-
 fn render_project_list(projects: &[ProjectStatus], state: &Rc<RefCell<AppState>>) {
     let document = document();
     let Some(list) = document.get_element_by_id("project-list") else {
@@ -3212,8 +2550,10 @@ fn pick_unique_first_world_id_and_path(
 ) -> (String, String) {
     let base = slugify_world_id("My First World");
     let used_ids: HashSet<String> = projects.iter().map(|p| p.id.to_ascii_lowercase()).collect();
-    let used_paths: HashSet<String> =
-        projects.iter().map(|p| p.path.to_ascii_lowercase()).collect();
+    let used_paths: HashSet<String> = projects
+        .iter()
+        .map(|p| p.path.to_ascii_lowercase())
+        .collect();
     for n in 1..1000 {
         let candidate = if n == 1 {
             base.clone()
@@ -3249,286 +2589,6 @@ fn sync_first_world_defaults(state: &Rc<RefCell<AppState>>, projects: &[ProjectS
         "first-world-hint",
         &format!("Start Build World with defaults ({id} in Documents, Small map) — then adjust if needed."),
     );
-}
-
-async fn load_map(state: Rc<RefCell<AppState>>) {
-    {
-        let mut s = state.borrow_mut();
-        s.perf = PerfMetrics::default();
-        s.perf_timers.open_start = Some(perf_now());
-    }
-    if let Ok(resp) = gloo_net::http::Request::get("/api/map").send().await {
-        if let Ok(map) = resp.json::<MapResponse>().await {
-            let mut state_mut = state.borrow_mut();
-            state_mut.cells = map
-                .cells
-                .into_iter()
-                .map(|c| ((c.q, c.r), c.display_name))
-                .collect();
-            bump_content_rev(&mut state_mut);
-            state_mut.map_bounds =
-                MapBounds::new(map.bounds.width.max(1), map.bounds.height.max(1));
-            state_mut.zoom = 1.0;
-            state_mut.pan_x = 0.0;
-            state_mut.pan_y = 0.0;
-            state_mut.pending_paints.clear();
-            state_mut.paint_flush_scheduled = false;
-            state_mut.paint_flush_in_flight = false;
-            state_mut.legacy_map = map.legacy_map;
-            reset_view_on_world_open(&mut state_mut);
-            sync_wizard_actions(&state_mut);
-            set_world_label(&format!(
-                "{} · {} cells",
-                map.world_id, map.bounds.cell_count
-            ));
-            if map.legacy_map {
-                set_text(
-                    "legacy-map-note",
-                    "Legacy folder — using default Small bounds until map/manifest.json exists.",
-                );
-            } else {
-                set_text("legacy-map-note", "");
-            }
-        }
-    }
-    load_elevation(&state).await;
-    load_rivers(&state).await;
-    let redraw_start = perf_now();
-    let drawn = redraw(&state.borrow());
-    let first_redraw_ms = perf_now() - redraw_start;
-    {
-        let mut s = state.borrow_mut();
-        s.perf.first_redraw_ms = Some(first_redraw_ms);
-        s.perf.redraw_ms = Some(first_redraw_ms);
-        s.perf.drawn_cells = Some(drawn);
-        if let Some(t0) = s.perf_timers.open_start.take() {
-            s.perf.open_ms = Some(perf_now() - t0);
-        }
-        s.last_draw_snapshot = Some(draw_snapshot(&s));
-    }
-    perf_emit(&state.borrow().perf);
-}
-
-/// Fetch the dense elevation layer (scale-layers, D-46) into index buffers.
-async fn load_elevation(state: &Rc<RefCell<AppState>>) {
-    let fetch_start = perf_now();
-    let Ok(resp) = gloo_net::http::Request::get("/api/layers/elevation")
-        .send()
-        .await
-    else {
-        return;
-    };
-    let fetch_ms = perf_now() - fetch_start;
-    let parse_start = perf_now();
-    let Ok(layer) = resp.json::<DenseLayer>().await else {
-        return;
-    };
-    let parse_ms = perf_now() - parse_start;
-    let mirror_start = perf_now();
-    let bounds = state.borrow().map_bounds;
-    // perf-100k--web-dense-client: adopt layer wholesale — no scan-to-HashMap.
-    let adopted = if layer.cell_count == bounds.len() {
-        layer
-    } else {
-        fresh_elevation_layer(bounds)
-    };
-    let mirror_ms = perf_now() - mirror_start;
-    let mut state_mut = state.borrow_mut();
-    state_mut.elevation = adopted;
-    bump_content_rev(&mut state_mut);
-    state_mut.perf.layer_fetch_ms = Some(fetch_ms);
-    state_mut.perf.layer_parse_or_decode_ms = Some(parse_ms);
-    state_mut.perf.client_mirror_ms = Some(mirror_ms);
-}
-
-/// Fetch river catalog (river-overlay-layer-v1).
-async fn load_rivers(state: &Rc<RefCell<AppState>>) {
-    let Ok(resp) = gloo_net::http::Request::get("/api/rivers").send().await else {
-        return;
-    };
-    let Ok(catalog) = resp.json::<RiverCatalog>().await else {
-        return;
-    };
-    let mut s = state.borrow_mut();
-    s.rivers = catalog;
-    s.active_river_id = None;
-    sync_river_status(&s);
-}
-
-#[derive(Deserialize)]
-struct RiversGenerateResponse {
-    #[serde(flatten)]
-    catalog: RiverCatalog,
-    precip_source: String,
-}
-
-#[derive(Serialize)]
-struct RiverAppendBody {
-    river_id: Option<u32>,
-    q: i32,
-    r: i32,
-}
-
-async fn post_river_append(state: Rc<RefCell<AppState>>, q: i32, r: i32) {
-    let river_id = state.borrow().active_river_id;
-    let body = RiverAppendBody { river_id, q, r };
-    let Ok(resp) = gloo_net::http::Request::post("/api/rivers/append")
-        .json(&body)
-        .expect("serialize river append")
-        .send()
-        .await
-    else {
-        set_text("river-status", "River save failed (network)");
-        return;
-    };
-    if !resp.ok() {
-        let msg = resp
-            .text()
-            .await
-            .unwrap_or_else(|_| "River append rejected".into());
-        set_text("river-status", &msg);
-        return;
-    }
-    let Ok(catalog) = resp.json::<RiverCatalog>().await else {
-        set_text("river-status", "River save failed (parse)");
-        return;
-    };
-    let new_active = if river_id.is_some() {
-        river_id
-    } else {
-        catalog.rivers.last().map(|r| r.id)
-    };
-    {
-        let mut s = state.borrow_mut();
-        s.rivers = catalog;
-        s.active_river_id = new_active;
-        bump_content_rev(&mut s);
-        sync_river_status(&s);
-    }
-    schedule_redraw(state);
-}
-
-async fn delete_river_at_cell(state: Rc<RefCell<AppState>>, q: i32, r: i32) {
-    let river_id = {
-        let s = state.borrow();
-        let index = match s.map_bounds.index_of(Axial::new(q, r)) {
-            Some(i) => i,
-            None => return,
-        };
-        match river_at_cell(&s.rivers, index) {
-            Some(id) => id,
-            None => {
-                set_text("river-status", "No river on this cell");
-                return;
-            }
-        }
-    };
-    let url = format!("/api/rivers/{river_id}");
-    let Ok(resp) = gloo_net::http::Request::delete(&url).send().await else {
-        set_text("river-status", "River delete failed (network)");
-        return;
-    };
-    if !resp.ok() {
-        let msg = resp
-            .text()
-            .await
-            .unwrap_or_else(|_| "River delete rejected".into());
-        set_text("river-status", &msg);
-        return;
-    }
-    let Ok(catalog) = resp.json::<RiverCatalog>().await else {
-        set_text("river-status", "River delete failed (parse)");
-        return;
-    };
-    {
-        let mut s = state.borrow_mut();
-        s.rivers = catalog;
-        if s.active_river_id == Some(river_id) {
-            s.active_river_id = None;
-        }
-        bump_content_rev(&mut s);
-        sync_river_status(&s);
-    }
-    schedule_redraw(state);
-}
-
-async fn post_river_pop(state: Rc<RefCell<AppState>>) {
-    let river_id = match state.borrow().active_river_id {
-        Some(id) => id,
-        None => {
-            set_text("river-status", "No active river to undo");
-            return;
-        }
-    };
-    let url = format!("/api/rivers/{river_id}/pop");
-    let Ok(resp) = gloo_net::http::Request::post(&url).send().await else {
-        set_text("river-status", "Undo failed (network)");
-        return;
-    };
-    if !resp.ok() {
-        let msg = resp.text().await.unwrap_or_else(|_| "Undo rejected".into());
-        set_text("river-status", &msg);
-        return;
-    }
-    let Ok(catalog) = resp.json::<RiverCatalog>().await else {
-        set_text("river-status", "Undo failed (parse)");
-        return;
-    };
-    let still_active = catalog.rivers.iter().any(|r| r.id == river_id);
-    {
-        let mut s = state.borrow_mut();
-        s.rivers = catalog;
-        if !still_active {
-            s.active_river_id = None;
-        }
-        bump_content_rev(&mut s);
-        sync_river_status(&s);
-    }
-    schedule_redraw(state);
-}
-
-async fn post_river_generate(state: Rc<RefCell<AppState>>, status_id: &str) {
-    set_text(status_id, "Generating rivers…");
-    let Ok(resp) = gloo_net::http::Request::post("/api/rivers/generate")
-        .send()
-        .await
-    else {
-        set_text(status_id, "Generate failed (network)");
-        return;
-    };
-    if !resp.ok() {
-        let msg = resp
-            .text()
-            .await
-            .unwrap_or_else(|_| "Generate rejected".into());
-        set_text(status_id, &msg);
-        return;
-    }
-    let Ok(body) = resp.json::<RiversGenerateResponse>().await else {
-        set_text(status_id, "Generate failed (parse)");
-        return;
-    };
-    {
-        let mut s = state.borrow_mut();
-        s.rivers = body.catalog;
-        s.active_river_id = None;
-        bump_content_rev(&mut s);
-        sync_river_status(&s);
-    }
-    let source_note = if body.precip_source == "climate" {
-        "from climate precipitation"
-    } else {
-        "uniform fallback (no precipitation layer)"
-    };
-    set_text(
-        status_id,
-        &format!(
-            "Generated {} river(s) — {}",
-            state.borrow().rivers.rivers.len(),
-            source_note
-        ),
-    );
-    schedule_redraw(state);
 }
 
 fn cell_from_mouse_event(
@@ -3616,83 +2676,6 @@ fn queue_paint_delta_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), ste
     if painted_cells > 0 {
         set_text("status", "Autosave pending…");
         schedule_paint_flush(state);
-    }
-}
-
-fn schedule_paint_flush(state: Rc<RefCell<AppState>>) {
-    let should_schedule = {
-        let mut s = state.borrow_mut();
-        if s.paint_flush_scheduled || s.pending_paints.is_empty() {
-            false
-        } else {
-            s.paint_flush_scheduled = true;
-            true
-        }
-    };
-    if !should_schedule {
-        return;
-    }
-    wasm_bindgen_futures::spawn_local(async move {
-        TimeoutFuture::new(PAINT_SAVE_COOLDOWN_MS).await;
-        flush_pending_paints(state).await;
-    });
-}
-
-async fn flush_pending_paints(state: Rc<RefCell<AppState>>) {
-    let batch = {
-        let mut s = state.borrow_mut();
-        s.paint_flush_scheduled = false;
-        if s.paint_flush_in_flight || s.pending_paints.is_empty() {
-            return;
-        }
-        s.paint_flush_in_flight = true;
-        s.pending_paints.drain().collect::<Vec<_>>()
-    };
-
-    let mut failed_cells: Vec<((i32, i32), i32)> = Vec::new();
-    let mut measured_batch = false;
-    // save-batch--http-endpoint-v1: send chunked batch writes.
-    for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
-        let payload = chunk
-            .iter()
-            .map(|((q, r), elevation)| LayerCellWrite {
-                q: *q,
-                r: *r,
-                state: "value",
-                value: *elevation,
-            })
-            .collect::<Vec<_>>();
-        let batch_start = perf_now();
-        let sent = gloo_net::http::Request::put("/api/layers/elevation/batch")
-            .json(&payload)
-            .expect("serializing elevation batch body")
-            .send()
-            .await;
-        if matches!(sent, Ok(resp) if resp.ok()) {
-            state.borrow_mut().perf.batch_flush_ms = Some(perf_now() - batch_start);
-            measured_batch = true;
-        } else {
-            failed_cells.extend(chunk.iter().copied());
-        }
-    }
-
-    {
-        let mut s = state.borrow_mut();
-        for ((q, r), value) in failed_cells {
-            s.pending_paints.insert((q, r), value);
-        }
-        s.paint_flush_in_flight = false;
-    }
-
-    if measured_batch {
-        perf_emit(&state.borrow().perf);
-    }
-
-    if !state.borrow().pending_paints.is_empty() {
-        set_text("status", "Autosave retry…");
-        schedule_paint_flush(state);
-    } else {
-        set_text("status", "");
     }
 }
 
@@ -3974,8 +2957,7 @@ fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
         Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
             let next_hover = {
                 let s = move_state.borrow();
-                let show = brush_paints(&s.brush)
-                    || (wizard_is_active() && s.wizard_edit_mode);
+                let show = brush_paints(&s.brush) || (wizard_is_active() && s.wizard_edit_mode);
                 if !show {
                     None
                 } else if pointer_over_wizard_chrome(&event) {
@@ -4076,35 +3058,6 @@ fn attach_wheel_zoom(state: Rc<RefCell<AppState>>) {
     });
     let _ = canvas().add_event_listener_with_callback("wheel", closure.as_ref().unchecked_ref());
     closure.forget();
-}
-
-async fn load_profile_into_panel(state: Rc<RefCell<AppState>>, q: i32, r: i32) {
-    let url = format!("/api/cells/{q}/{r}/profile");
-    let profile = gloo_net::http::Request::get(&url)
-        .send()
-        .await
-        .ok()
-        .and_then(|resp| resp.ok().then_some(resp));
-    // The author may have clicked a different cell while this was in
-    // flight — don't clobber whatever panel is showing now.
-    if state.borrow().selected != Some((q, r)) {
-        return;
-    }
-    let Some(resp) = profile else {
-        set_text("status", "Could not load profile");
-        input("title").set_disabled(false);
-        textarea("notes").set_disabled(false);
-        return;
-    };
-    if let Ok(profile) = resp.json::<CellProfile>().await {
-        if state.borrow().selected == Some((q, r)) {
-            input("title").set_value(&profile.display_name);
-            textarea("notes").set_value(&profile.notes);
-        }
-    }
-    input("title").set_disabled(false);
-    textarea("notes").set_disabled(false);
-    set_text("status", "");
 }
 
 fn attach_save_click(state: Rc<RefCell<AppState>>) {
@@ -4854,7 +3807,10 @@ fn attach_first_world_handlers(state: Rc<RefCell<AppState>>) {
             };
             if wrap.class_list().contains("demoted") {
                 let _ = wrap.class_list().remove_1("demoted");
-                set_text("first-world-hint", "Defaults ready above. Advanced create options are now visible below.");
+                set_text(
+                    "first-world-hint",
+                    "Defaults ready above. Advanced create options are now visible below.",
+                );
                 if let Some(btn) = document().get_element_by_id("first-world-advanced") {
                     btn.set_text_content(Some("Hide advanced options"));
                 }
@@ -4881,13 +3837,6 @@ fn show_post_finish_note() {
     let _ = note.class_list().add_1("visible");
 }
 
-fn hide_post_finish_note() {
-    let Some(note) = document().get_element_by_id("post-finish-note") else {
-        return;
-    };
-    let _ = note.class_list().remove_1("visible");
-}
-
 fn attach_post_finish_note_dismiss() {
     let Some(btn) = document().get_element_by_id("post-finish-dismiss") else {
         return;
@@ -4899,8 +3848,8 @@ fn attach_post_finish_note_dismiss() {
 
 /// Delegated click on the project list: any `.open-btn` opens that world.
 fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
-    let closure =
-        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+    let closure = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(
+        move |event: web_sys::MouseEvent| {
             let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else {
                 return;
             };
@@ -5047,14 +3996,18 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                     schedule_redraw(state.clone());
                                 }
                                 3 => {
-                                    set_wizard_status("Resumed at tectonics — generate or accept geology.");
+                                    set_wizard_status(
+                                        "Resumed at tectonics — generate or accept geology.",
+                                    );
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
                                         schedule_redraw(state.clone());
                                     });
                                 }
                                 4 => {
-                                    set_wizard_status("Resumed at elevation — generate or continue to climate.");
+                                    set_wizard_status(
+                                        "Resumed at elevation — generate or continue to climate.",
+                                    );
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
                                         load_elevation(&state).await;
@@ -5062,7 +4015,9 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                     });
                                 }
                                 5 => {
-                                    set_wizard_status("Resumed at climate — generate or continue to water.");
+                                    set_wizard_status(
+                                        "Resumed at climate — generate or continue to water.",
+                                    );
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
                                         load_elevation(&state).await;
@@ -5070,7 +4025,9 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                     });
                                 }
                                 6 => {
-                                    set_wizard_status("Resumed at water — generate rivers or Finish.");
+                                    set_wizard_status(
+                                        "Resumed at water — generate rivers or Finish.",
+                                    );
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
                                         load_elevation(&state).await;
@@ -5097,7 +4054,8 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                     Err(err) => set_text("home-status", &format!("Error: {err}")),
                 }
             });
-        });
+        },
+    );
     document()
         .get_element_by_id("project-list")
         .expect("missing #project-list")
