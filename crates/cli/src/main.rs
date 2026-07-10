@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use mapkeeper_core::cell_id::CellId;
+use mapkeeper_core::climate::PRECIPITATION_LAYER_ID;
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::{
     filled_elevation_layer, hydro_from_elevation, DEFAULT_LAND_ELEVATION, ELEVATION_LAYER_ID,
@@ -857,8 +858,23 @@ fn cmd_rivers_delete(world: &Path, river_id: u32) -> Result<()> {
 fn cmd_rivers_generate(world: &Path) -> Result<()> {
     let bounds = read_bounds(world);
     let elevation = read_elevation_dense(world, &bounds);
-    let (catalog, owners) = generate_with_owners(&elevation, &bounds);
+    let precipitation = read_optional_precip_layer(world, &bounds);
+    let (catalog, owners, used_climate) =
+        generate_with_owners(&elevation, &bounds, precipitation.as_ref());
     persist_generated_rivers(world, &catalog, &owners, &bounds)?;
+    if used_climate {
+        eprintln!("river flux: using climate precipitation layer");
+    } else {
+        eprintln!("river flux: uniform precipitation fallback (no precipitation layer)");
+    }
     println!("{}", catalog.to_json_pretty()?);
     Ok(())
+}
+
+fn read_optional_precip_layer(world: &Path, bounds: &MapBounds) -> Option<DenseLayer> {
+    let path = layer_file_path(world, PRECIPITATION_LAYER_ID);
+    if !path.exists() {
+        return None;
+    }
+    Some(read_dense_layer(world, PRECIPITATION_LAYER_ID, bounds))
 }

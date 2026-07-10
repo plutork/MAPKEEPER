@@ -1,10 +1,9 @@
-//! Elevation-driven river generation (rivers-auto-from-elevation-v1, D-55).
-//!
-//! Azgaar-inspired flux routing: depression fill → precip → downhill flow →
-//! confluence by dominant flux → `RiverCatalog` with `parent`/`basin`.
+//! Elevation-driven river generation (rivers-auto-from-elevation-v1, D-55;
+//! amended D-91 — climate precipitation flux when layer present).
 
 use std::collections::HashMap;
 
+use crate::climate::PRECIPITATION_LAYER_ID;
 use crate::hex::MapBounds;
 use crate::hydro::{DEFAULT_LAND_ELEVATION, SEA_LEVEL};
 use crate::layer::DenseLayer;
@@ -12,23 +11,34 @@ use crate::rivers::{River, RiverCatalog, RIVER_CATALOG_SCHEMA_VERSION};
 
 /// Azgaar `MIN_FLUX_TO_FORM_RIVER`, scaled for map size.
 const BASE_MIN_FLUX: u32 = 30;
-const UNIFORM_PRECIP: u32 = 1;
+pub const UNIFORM_PRECIP: u32 = 1;
+/// Fallback mean when precip layer has no land samples (Balanced ≈ legacy uniform).
+const FALLBACK_LAND_PRECIP_MEAN: f64 = 90.0;
 const MIN_RIVER_CELLS: usize = 2;
 
-/// Generate a full river catalog from the elevation layer (replace-all).
+/// Generate a full river catalog from elevation (uniform precip fallback).
 pub fn generate_rivers_from_elevation(elevation: &DenseLayer, bounds: &MapBounds) -> RiverCatalog {
-    generate_with_owners(elevation, bounds).0
+    generate_with_owners(elevation, bounds, None).0
 }
 
-/// Run generation and return catalog + per-cell owners for layer sync.
+/// Run generation and return catalog + per-cell owners + whether climate precip was used.
 pub fn generate_with_owners(
     elevation: &DenseLayer,
     bounds: &MapBounds,
-) -> (RiverCatalog, Vec<u32>) {
+    precipitation: Option<&DenseLayer>,
+) -> (RiverCatalog, Vec<u32>, bool) {
     let n = bounds.len();
     if n == 0 {
-        return (RiverCatalog::default(), Vec::new());
+        return (RiverCatalog::default(), Vec::new(), false);
     }
+
+    let use_climate = precipitation
+        .map(|p| p.layer_id == PRECIPITATION_LAYER_ID && land_precip_sample_count(p, elevation, n) > 0)
+        .unwrap_or(false);
+    let precip_mean = precipitation
+        .filter(|_| use_climate)
+        .map(|p| land_precip_mean(p, elevation, n))
+        .unwrap_or(FALLBACK_LAND_PRECIP_MEAN);
 
     let mut heights = read_heights(elevation, n);
     resolve_depressions(&mut heights, bounds);
@@ -46,7 +56,13 @@ pub fn generate_with_owners(
     let mut next_id = 1u32;
 
     for &i in &land_high_to_low {
-        flux[i] = flux[i].saturating_add(UNIFORM_PRECIP);
+        let precip_add = if use_climate {
+            let raw = precipitation.unwrap().int_or(i, 0);
+            precip_flux_units(raw, precip_mean)
+        } else {
+            UNIFORM_PRECIP
+        };
+        flux[i] = flux[i].saturating_add(precip_add);
         if flux[i] < min_flux {
             if let Some(min) = lowest_neighbor(i, &heights, bounds) {
                 if heights[min] < heights[i] {
@@ -83,7 +99,44 @@ pub fn generate_with_owners(
     }
 
     let catalog = build_catalog(paths, parents, next_id);
-    (catalog, owner)
+    (catalog, owner, use_climate)
+}
+
+fn land_precip_sample_count(precip: &DenseLayer, elevation: &DenseLayer, n: usize) -> u32 {
+    (0..n)
+        .filter(|&i| elevation.int_or(i, DEFAULT_LAND_ELEVATION) > SEA_LEVEL)
+        .filter(|&i| precip.int_or(i, 0) > 0)
+        .count() as u32
+}
+
+fn land_precip_mean(precip: &DenseLayer, elevation: &DenseLayer, n: usize) -> f64 {
+    let mut sum = 0.0;
+    let mut count = 0u32;
+    for i in 0..n {
+        if elevation.int_or(i, DEFAULT_LAND_ELEVATION) <= SEA_LEVEL {
+            continue;
+        }
+        let v = precip.int_or(i, 0);
+        if v <= 0 {
+            continue;
+        }
+        sum += v as f64;
+        count += 1;
+    }
+    if count == 0 {
+        FALLBACK_LAND_PRECIP_MEAN
+    } else {
+        sum / f64::from(count)
+    }
+}
+
+/// Scale layer precip so Balanced mean ≈ legacy uniform=1 flux unit.
+fn precip_flux_units(raw: i32, mean: f64) -> u32 {
+    if raw <= 0 {
+        return UNIFORM_PRECIP;
+    }
+    let mean = mean.max(1.0);
+    ((f64::from(raw) / mean).round() as u32).max(UNIFORM_PRECIP)
 }
 
 fn read_heights(elevation: &DenseLayer, n: usize) -> Vec<i32> {
@@ -266,20 +319,29 @@ mod tests {
         layer.set(i, DenseState::Value(LayerValue::Int(v)));
     }
 
+    fn set_precip(layer: &mut DenseLayer, bounds: &MapBounds, q: i32, r: i32, v: i32) {
+        let i = bounds.index_of(Axial::new(q, r)).unwrap();
+        layer.set(i, DenseState::Value(LayerValue::Int(v)));
+    }
+
+    fn slope_fixture(bounds: &MapBounds, elev: &mut DenseLayer) {
+        for i in 0..bounds.len() {
+            elev.set(i, DenseState::Value(LayerValue::Int(0)));
+        }
+        for q in 2..bounds.width - 2 {
+            for r in -2..=2 {
+                if bounds.contains(Axial::new(q, r)) {
+                    set_elev(elev, bounds, q, r, 10 + q * 5);
+                }
+            }
+        }
+    }
+
     #[test]
     fn generates_rivers_on_slope() {
         let bounds = MapBounds::new(14, 8);
         let mut elev = DenseLayer::new_integer("elevation", bounds.len());
-        for i in 0..bounds.len() {
-            elev.set(i, DenseState::Value(LayerValue::Int(0)));
-        }
-        for q in 2..8 {
-            for r in -2..=2 {
-                if bounds.contains(Axial::new(q, r)) {
-                    set_elev(&mut elev, &bounds, q, r, 10 + q * 5);
-                }
-            }
-        }
+        slope_fixture(&bounds, &mut elev);
         let catalog = generate_rivers_from_elevation(&elev, &bounds);
         assert!(!catalog.rivers.is_empty());
         for river in &catalog.rivers {
@@ -354,5 +416,105 @@ mod tests {
 
         assert_eq!(parents.get(&2), Some(&1));
         assert_eq!(owner[3], 1);
+    }
+
+    #[test]
+    fn climate_flux_is_deterministic() {
+        let bounds = MapBounds::new(14, 8);
+        let mut elev = DenseLayer::new_integer("elevation", bounds.len());
+        slope_fixture(&bounds, &mut elev);
+        let mut precip = DenseLayer::new_integer(PRECIPITATION_LAYER_ID, bounds.len());
+        for q in 2..bounds.width - 2 {
+            for r in -2..=2 {
+                if bounds.contains(Axial::new(q, r)) {
+                    let v = if q < 7 { 140 } else { 40 };
+                    set_precip(&mut precip, &bounds, q, r, v);
+                }
+            }
+        }
+        let a = generate_with_owners(&elev, &bounds, Some(&precip));
+        let b = generate_with_owners(&elev, &bounds, Some(&precip));
+        assert!(a.2);
+        assert_eq!(a.0, b.0);
+        assert_eq!(a.1, b.1);
+    }
+
+    #[test]
+    fn fallback_without_precip_layer_matches_uniform() {
+        let bounds = MapBounds::new(14, 8);
+        let mut elev = DenseLayer::new_integer("elevation", bounds.len());
+        slope_fixture(&bounds, &mut elev);
+        let legacy = generate_with_owners(&elev, &bounds, None);
+        let empty = DenseLayer::new_integer(PRECIPITATION_LAYER_ID, bounds.len());
+        let fallback = generate_with_owners(&elev, &bounds, Some(&empty));
+        assert!(!legacy.2);
+        assert!(!fallback.2);
+        assert_eq!(legacy.0, fallback.0);
+    }
+
+    fn sources_in_west_half(catalog: &RiverCatalog, bounds: &MapBounds, mid_q: i32) -> usize {
+        catalog
+            .rivers
+            .iter()
+            .filter(|r| {
+                bounds
+                    .from_index(r.source)
+                    .map(|c| c.q < mid_q)
+                    .unwrap_or(false)
+            })
+            .count()
+    }
+
+    #[test]
+    fn wetter_regions_produce_more_river_mass() {
+        let bounds = MapBounds::new(18, 10);
+        let mut elev = DenseLayer::new_integer("elevation", bounds.len());
+        slope_fixture(&bounds, &mut elev);
+
+        let mut asymmetric = DenseLayer::new_integer(PRECIPITATION_LAYER_ID, bounds.len());
+        let mid_q = bounds.width / 2;
+        for q in 2..bounds.width - 2 {
+            for r in -3..=3 {
+                if !bounds.contains(Axial::new(q, r)) {
+                    continue;
+                }
+                let v = if q < mid_q { 160 } else { 25 };
+                set_precip(&mut asymmetric, &bounds, q, r, v);
+            }
+        }
+
+        let climate = generate_with_owners(&elev, &bounds, Some(&asymmetric));
+        assert!(climate.2);
+
+        let wet_sources = sources_in_west_half(&climate.0, &bounds, mid_q);
+        let dry_sources = climate.0.rivers.len().saturating_sub(wet_sources);
+        assert!(
+            wet_sources > dry_sources,
+            "expected more river sources on wet west half, west={wet_sources} east={dry_sources}"
+        );
+    }
+
+    #[test]
+    fn balanced_mean_precip_near_uniform_river_count() {
+        let bounds = MapBounds::new(14, 8);
+        let mut elev = DenseLayer::new_integer("elevation", bounds.len());
+        slope_fixture(&bounds, &mut elev);
+        let uniform = generate_with_owners(&elev, &bounds, None);
+
+        let mut balanced = DenseLayer::new_integer(PRECIPITATION_LAYER_ID, bounds.len());
+        for q in 2..bounds.width - 2 {
+            for r in -2..=2 {
+                if bounds.contains(Axial::new(q, r)) {
+                    set_precip(&mut balanced, &bounds, q, r, 90);
+                }
+            }
+        }
+        let scaled = generate_with_owners(&elev, &bounds, Some(&balanced));
+        assert!(scaled.2);
+        let delta = (scaled.0.rivers.len() as i32 - uniform.0.rivers.len() as i32).abs();
+        assert!(
+            delta <= 3,
+            "balanced mean precip should track uniform river count, delta={delta}"
+        );
     }
 }

@@ -866,7 +866,12 @@
             <li class="wiz-step locked">1 &middot; Climate</li>
           </ul>
         </div>
-        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Water</button></div>
+        <div class="wiz-group locked" id="wiz-group-water">
+          <button type="button" class="wiz-group-head" data-wiz-group="water" disabled>&#9654; Water</button>
+          <ul class="wiz-steps">
+            <li class="wiz-step locked">1 &middot; Rivers</li>
+          </ul>
+        </div>
         <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Soils</button></div>
         <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Life</button></div>
         <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Extras</button></div>
@@ -1057,6 +1062,26 @@
             <button id="wiz-climate-generate" class="wiz-action-btn" type="button">Generate climate</button>
           </div>
           <p class="wiz-hint">Regenerate to try another layout with the same style.</p>
+        </section>
+        <section class="wiz-section">
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-climate-continue" class="wiz-action-btn primary" type="button">Continue</button>
+          </div>
+        </section>
+        </div>
+
+        <div id="wiz-panel-step6" class="hidden">
+        <div class="wiz-btn-row wiz-back-top">
+          <button id="wiz-water-back" class="wiz-action-btn warn" type="button">Back</button>
+        </div>
+        <h2>Water</h2>
+        <p class="wiz-hint">Generate rivers from elevation and climate rainfall. Wet regions get more flow.</p>
+        <section class="wiz-section">
+          <p class="wiz-label">1. Generate</p>
+          <div class="wiz-btn-row">
+            <button id="wiz-water-generate" class="wiz-action-btn" type="button">Generate rivers</button>
+          </div>
+          <p class="wiz-hint">Regenerate to replace all auto rivers. Manual river edits stay available in the editor.</p>
         </section>
         <section class="wiz-section">
           <div class="wiz-btn-row wiz-bottom-actions">

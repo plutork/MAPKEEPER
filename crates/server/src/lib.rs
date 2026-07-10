@@ -1314,6 +1314,14 @@ fn default_value_type(layer_id: &str) -> ValueType {
     }
 }
 
+fn read_optional_precip_layer(world_path: &Path, bounds: &MapBounds) -> Option<DenseLayer> {
+    let path = layer_file_path(world_path, PRECIPITATION_LAYER_ID);
+    if !path.exists() {
+        return None;
+    }
+    Some(read_dense_layer(world_path, PRECIPITATION_LAYER_ID, bounds))
+}
+
 fn read_dense_layer(world_path: &Path, layer_id: &str, bounds: &MapBounds) -> DenseLayer {
     let raw = std::fs::read_to_string(layer_file_path(world_path, layer_id)).ok();
     DenseLayer::read_or_empty(
@@ -1696,7 +1704,14 @@ async fn delete_river_handler(
     Json(catalog).into_response()
 }
 
-/// rivers-auto-from-elevation-v1 (D-55): replace-all catalog from elevation flux.
+/// rivers-auto-from-elevation-v1 (D-55); D-91 climate precipitation when layer exists.
+#[derive(serde::Serialize)]
+struct RiversGenerateResponse {
+    #[serde(flatten)]
+    catalog: RiverCatalog,
+    precip_source: &'static str,
+}
+
 async fn generate_rivers_handler(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
@@ -1708,9 +1723,20 @@ async fn generate_rivers_handler(State(state): State<Arc<Mutex<AppState>>>) -> i
     };
     let bounds = map_bounds(&active.path);
     let elevation = read_dense_layer(&active.path, ELEVATION_LAYER_ID, &bounds);
-    let (catalog, owners) = generate_with_owners(&elevation, &bounds);
+    let precipitation = read_optional_precip_layer(&active.path, &bounds);
+    let (catalog, owners, used_climate) =
+        generate_with_owners(&elevation, &bounds, precipitation.as_ref());
     if let Err(err) = persist_generated_rivers(&active.path, &catalog, &owners, &bounds) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
-    Json(catalog).into_response()
+    let precip_source = if used_climate {
+        "climate"
+    } else {
+        "uniform_fallback"
+    };
+    Json(RiversGenerateResponse {
+        catalog,
+        precip_source,
+    })
+    .into_response()
 }

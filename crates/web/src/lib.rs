@@ -554,7 +554,7 @@ struct AppState {
     wizard_stamp_flush_in_flight: bool,
     /// Hex distance throttle between drag stamp centers.
     wizard_stamp_last_center: Option<(i32, i32)>,
-    /// Build wizard step: 1 size · 2 land · 3 tectonics · 4 elevation · 5 climate (D-71/D-90).
+    /// Build wizard step: 1 size · 2 land · 3 tectonics · 4 elevation · 5 climate · 6 water (D-71/D-90/D-91).
     wizard_step: u32,
     wizard_geo_style: String,
     wizard_geo_nonce: u32,
@@ -1086,6 +1086,7 @@ fn build_step_label(step: u32) -> &'static str {
         3 => "Step 3 · Tectonics",
         4 => "Step 4 · Elevation",
         5 => "Step 5 · Climate",
+        6 => "Step 6 · Rivers",
         _ => "Step 2 · Land silhouette",
     }
 }
@@ -1122,6 +1123,7 @@ fn show_wiz_confirm(msg: &str) {
 
 fn wizard_back_message(from_step: u32) -> &'static str {
     match from_step {
+        6 => "Go back to climate? You can regenerate rivers later.",
         5 => "Go back to elevation? You can regenerate climate later.",
         4 => "Go back to tectonics? You can regenerate elevation later.",
         3 => "Go back to land silhouette? Geology accept state stays until you regenerate.",
@@ -1209,6 +1211,8 @@ async fn apply_wizard_preset_now(state: Rc<RefCell<AppState>>, preset: &str) -> 
 async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
     let from = state.borrow().wizard_step;
     let to = match from {
+        6 => 5,
+        5 => 4,
         4 => 3,
         3 => 2,
         2 => 1,
@@ -1238,6 +1242,8 @@ async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
         ),
         2 => set_wizard_status("Land silhouette — Back to size if the map is too large/small."),
         3 => set_wizard_status("Tectonics — Back returns to silhouette."),
+        4 => set_wizard_status("Elevation — Back returns to tectonics."),
+        5 => set_wizard_status("Climate — Back returns to elevation."),
         _ => {}
     }
 }
@@ -1292,6 +1298,7 @@ fn sync_wizard_nav(step: u32) {
             3 => "Geo › Tectonics",
             4 => "Geo › Elevation",
             5 => "Climate › Precipitation",
+            6 => "Water › Rivers",
             _ => "Geo › Land silhouette",
         };
         crumb.set_text_content(Some(text));
@@ -1358,6 +1365,43 @@ fn sync_wizard_nav(step: u32) {
             }
         }
     }
+    if let Some(water_group) = document().get_element_by_id("wiz-group-water") {
+        if step >= 6 {
+            let _ = water_group.class_list().remove_1("locked");
+            let _ = water_group.class_list().add_1("expanded");
+            if let Ok(Some(head)) = water_group.query_selector(".wiz-group-head") {
+                let _ = head.remove_attribute("disabled");
+                head.set_text_content(Some("▼ Water"));
+            }
+            if let Ok(Some(list)) = water_group.query_selector(".wiz-steps") {
+                if let Ok(items) = list.query_selector_all(".wiz-step") {
+                    for i in 0..items.length() {
+                        let Some(node) = items.item(i) else {
+                            continue;
+                        };
+                        let Ok(el) = node.dyn_into::<web_sys::Element>() else {
+                            continue;
+                        };
+                        let _ = el.class_list().remove_1("active");
+                        let _ = el.class_list().remove_1("done");
+                        let _ = el.class_list().remove_1("locked");
+                        if step == 6 {
+                            let _ = el.class_list().add_1("active");
+                        } else {
+                            let _ = el.class_list().add_1("done");
+                        }
+                    }
+                }
+            }
+        } else {
+            let _ = water_group.class_list().add_1("locked");
+            let _ = water_group.class_list().remove_1("expanded");
+            if let Ok(Some(head)) = water_group.query_selector(".wiz-group-head") {
+                let _ = head.set_attribute("disabled", "");
+                head.set_text_content(Some("▶ Water"));
+            }
+        }
+    }
 }
 
 fn show_wizard_step(state: &AppState) {
@@ -1367,6 +1411,7 @@ fn show_wizard_step(state: &AppState) {
     set_panel_hidden("wiz-panel-step3", step != 3);
     set_panel_hidden("wiz-panel-step4", step != 4);
     set_panel_hidden("wiz-panel-step5", step != 5);
+    set_panel_hidden("wiz-panel-step6", step != 6);
     sync_wizard_nav(step);
     if step <= 1 {
         sync_wizard_size_meta(state);
@@ -1375,7 +1420,8 @@ fn show_wizard_step(state: &AppState) {
         1 => set_wizard_status("Confirm map size on the blank grid, then continue."),
         3 => set_wizard_status("Step 3: generate geology, accept, continue."),
         4 => set_wizard_status("Step 4: pick relief style, generate elevation, then continue."),
-        5 => set_wizard_status("Step 5: pick precipitation style, generate climate, then Finish."),
+        5 => set_wizard_status("Step 5: pick precipitation style, generate climate, then continue."),
+        6 => set_wizard_status("Step 6: generate rivers from climate rainfall, then Finish."),
         _ => set_wizard_status("Step 2 flow: 1) parameters, 2) generate, 3) accept/edit, 4) continue."),
     }
 }
@@ -2077,7 +2123,13 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         }
         closure.forget();
     }
-    for back_id in ["wiz-sil-back", "wiz-geo-back", "wiz-elev-back", "wiz-climate-back"] {
+    for back_id in [
+        "wiz-sil-back",
+        "wiz-geo-back",
+        "wiz-elev-back",
+        "wiz-climate-back",
+        "wiz-water-back",
+    ] {
         let state = state.clone();
         let pending = pending_confirm.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
@@ -2508,9 +2560,42 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         let closure = Closure::<dyn FnMut()>::new(move || {
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
+                if !persist_build_draft(6).await {
+                    set_wizard_status("Could not advance to water.");
+                    return;
+                }
+                {
+                    let mut s = state.borrow_mut();
+                    s.wizard_step = 6;
+                    sync_wizard_actions(&s);
+                }
+                set_wizard_status("Step 6: generate rivers from climate rainfall.");
+            });
+        });
+        if let Some(btn) = document().get_element_by_id("wiz-climate-continue") {
+            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            set_wizard_status("Generating rivers…");
+            wasm_bindgen_futures::spawn_local(post_river_generate(state.clone(), "wizard-status"));
+        });
+        if let Some(btn) = document().get_element_by_id("wiz-water-generate") {
+            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let state = state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
                 let body = BuildStateInput {
                     status: "complete",
-                    step: 5,
+                    step: 6,
                 };
                 let Ok(resp) = gloo_net::http::Request::put("/api/build")
                     .json(&body)
@@ -3270,6 +3355,13 @@ async fn load_rivers(state: &Rc<RefCell<AppState>>) {
     sync_river_status(&s);
 }
 
+#[derive(Deserialize)]
+struct RiversGenerateResponse {
+    #[serde(flatten)]
+    catalog: RiverCatalog,
+    precip_source: String,
+}
+
 #[derive(Serialize)]
 struct RiverAppendBody {
     river_id: Option<u32>,
@@ -3395,13 +3487,13 @@ async fn post_river_pop(state: Rc<RefCell<AppState>>) {
     schedule_redraw(state);
 }
 
-async fn post_river_generate(state: Rc<RefCell<AppState>>) {
-    set_text("river-status", "Generating rivers…");
+async fn post_river_generate(state: Rc<RefCell<AppState>>, status_id: &str) {
+    set_text(status_id, "Generating rivers…");
     let Ok(resp) = gloo_net::http::Request::post("/api/rivers/generate")
         .send()
         .await
     else {
-        set_text("river-status", "Generate failed (network)");
+        set_text(status_id, "Generate failed (network)");
         return;
     };
     if !resp.ok() {
@@ -3409,23 +3501,32 @@ async fn post_river_generate(state: Rc<RefCell<AppState>>) {
             .text()
             .await
             .unwrap_or_else(|_| "Generate rejected".into());
-        set_text("river-status", &msg);
+        set_text(status_id, &msg);
         return;
     }
-    let Ok(catalog) = resp.json::<RiverCatalog>().await else {
-        set_text("river-status", "Generate failed (parse)");
+    let Ok(body) = resp.json::<RiversGenerateResponse>().await else {
+        set_text(status_id, "Generate failed (parse)");
         return;
     };
     {
         let mut s = state.borrow_mut();
-        s.rivers = catalog;
+        s.rivers = body.catalog;
         s.active_river_id = None;
         bump_content_rev(&mut s);
         sync_river_status(&s);
     }
+    let source_note = if body.precip_source == "climate" {
+        "from climate precipitation"
+    } else {
+        "uniform fallback (no precipitation layer)"
+    };
     set_text(
-        "river-status",
-        &format!("Generated {} river(s)", state.borrow().rivers.rivers.len()),
+        status_id,
+        &format!(
+            "Generated {} river(s) — {}",
+            state.borrow().rivers.rivers.len(),
+            source_note
+        ),
     );
     schedule_redraw(state);
 }
@@ -4191,7 +4292,7 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
 fn attach_generate_rivers_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
         set_text("river-status", "Generating rivers…");
-        wasm_bindgen_futures::spawn_local(post_river_generate(state.clone()));
+        wasm_bindgen_futures::spawn_local(post_river_generate(state.clone(), "river-status"));
     });
     document()
         .get_element_by_id("generate-rivers")
@@ -4961,10 +5062,19 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                     });
                                 }
                                 5 => {
-                                    set_wizard_status("Resumed at climate — generate or Finish.");
+                                    set_wizard_status("Resumed at climate — generate or continue to water.");
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
                                         load_elevation(&state).await;
+                                        schedule_redraw(state.clone());
+                                    });
+                                }
+                                6 => {
+                                    set_wizard_status("Resumed at water — generate rivers or Finish.");
+                                    wasm_bindgen_futures::spawn_local(async move {
+                                        load_geology(&state).await;
+                                        load_elevation(&state).await;
+                                        load_rivers(&state).await;
                                         schedule_redraw(state.clone());
                                     });
                                 }
