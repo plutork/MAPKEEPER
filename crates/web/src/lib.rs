@@ -1052,8 +1052,43 @@ async fn persist_build_draft(step: u32) -> bool {
     resp.ok()
 }
 
+fn hide_wiz_confirm() {
+    if let Some(el) = document().get_element_by_id("wiz-confirm-overlay") {
+        let _ = el.class_list().remove_1("open");
+    }
+}
+
+fn show_wiz_confirm(msg: &str) {
+    set_text("wiz-confirm-msg", msg);
+    if let Some(el) = document().get_element_by_id("wiz-confirm-overlay") {
+        let _ = el.class_list().add_1("open");
+    }
+}
+
+fn wizard_back_message(from_step: u32) -> &'static str {
+    match from_step {
+        5 => "Go back to tectonics? You can regenerate elevation later.",
+        4 => "Go back to land silhouette? Geology accept state stays until you regenerate.",
+        3 => "Go back to grid/size? Changing map size will reset land and later Geo layers.",
+        2 => "Go back to map size? Changing the preset will reset Geo if land already exists.",
+        _ => "Go back to the previous wizard step?",
+    }
+}
+
+/// D-69: in-app confirm — window.confirm is often silent/blocked in Tauri WebView2.
+#[derive(Clone)]
+enum WizConfirmKind {
+    Back,
+    BoundsPreset(String),
+}
+
 /// Apply wizard preset via PUT /api/build/bounds when different from current bounds (D-69).
-async fn apply_wizard_preset_if_needed(state: Rc<RefCell<AppState>>, preset: &str) -> bool {
+/// If reset confirm needed, queues in-app dialog and returns false (caller waits for OK).
+async fn apply_wizard_preset_if_needed(
+    state: Rc<RefCell<AppState>>,
+    preset: &str,
+    pending_confirm: &Rc<RefCell<Option<WizConfirmKind>>>,
+) -> bool {
     let (same, has_down) = {
         let s = state.borrow();
         let same = preset_id_for_bounds(&s.map_bounds) == Some(preset);
@@ -1063,17 +1098,16 @@ async fn apply_wizard_preset_if_needed(state: Rc<RefCell<AppState>>, preset: &st
         return true;
     }
     if has_down {
-        let win = web_sys::window().expect("window");
-        let ok = win
-            .confirm_with_message(
-                "Changing map size will reset land silhouette, geology, and elevation. Continue?",
-            )
-            .unwrap_or(false);
-        if !ok {
-            set_wizard_status("Size change cancelled.");
-            return false;
-        }
+        *pending_confirm.borrow_mut() = Some(WizConfirmKind::BoundsPreset(preset.to_string()));
+        show_wiz_confirm(
+            "Changing map size will reset land silhouette, geology, and elevation. Continue?",
+        );
+        return false;
     }
+    apply_wizard_preset_now(state, preset).await
+}
+
+async fn apply_wizard_preset_now(state: Rc<RefCell<AppState>>, preset: &str) -> bool {
     let body = BuildBoundsInput { map_preset: preset };
     let Ok(resp) = gloo_net::http::Request::put("/api/build/bounds")
         .json(&body)
@@ -1115,21 +1149,7 @@ async fn apply_wizard_preset_if_needed(state: Rc<RefCell<AppState>>, preset: &st
     true
 }
 
-fn confirm_wizard_back(from_step: u32) -> bool {
-    let msg = match from_step {
-        5 => "Go back to tectonics? You can regenerate elevation later.",
-        4 => "Go back to land silhouette? Geology accept state stays until you regenerate.",
-        3 => "Go back to grid/size? Changing map size will reset land and later Geo layers.",
-        2 => "Go back to map size? Changing the preset will reset Geo if land already exists.",
-        _ => "Go back to the previous wizard step?",
-    };
-    web_sys::window()
-        .expect("window")
-        .confirm_with_message(msg)
-        .unwrap_or(false)
-}
-
-/// D-69: navigate back one Geo step (3→2→1, 4→3, 5→4). Caller must confirm first (sync click).
+/// D-69: navigate back one Geo step (3→2→1, 4→3, 5→4).
 async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
     let from = state.borrow().wizard_step;
     let to = match from {
@@ -1702,6 +1722,47 @@ fn wiz_toggle_style_group(container_id: &str, attr: &str, active: &web_sys::Elem
 }
 
 fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
+    // Shared pending confirm for Back / bounds reset (in-app dialog, not window.confirm).
+    let pending_confirm: Rc<RefCell<Option<WizConfirmKind>>> = Rc::new(RefCell::new(None));
+
+    {
+        let state = state.clone();
+        let pending = pending_confirm.clone();
+        let on_ok = Closure::<dyn FnMut()>::new(move || {
+            let kind = pending.borrow_mut().take();
+            hide_wiz_confirm();
+            let Some(kind) = kind else {
+                return;
+            };
+            let state = state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                match kind {
+                    WizConfirmKind::Back => wizard_go_back_one_step(state).await,
+                    WizConfirmKind::BoundsPreset(preset) => {
+                        let _ = apply_wizard_preset_now(state, &preset).await;
+                    }
+                }
+            });
+        });
+        if let Some(btn) = document().get_element_by_id("wiz-confirm-ok") {
+            let _ = btn.add_event_listener_with_callback("click", on_ok.as_ref().unchecked_ref());
+        }
+        on_ok.forget();
+    }
+    {
+        let pending = pending_confirm.clone();
+        let on_cancel = Closure::<dyn FnMut()>::new(move || {
+            *pending.borrow_mut() = None;
+            hide_wiz_confirm();
+            set_wizard_status("Cancelled.");
+        });
+        if let Some(btn) = document().get_element_by_id("wiz-confirm-cancel") {
+            let _ =
+                btn.add_event_listener_with_callback("click", on_cancel.as_ref().unchecked_ref());
+        }
+        on_cancel.forget();
+    }
+
     // Save Draft — flush pending paints; world already on disk from create.
     {
         let state = state.clone();
@@ -1744,17 +1805,18 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
     // wizard-size-grid-step (D-69): size confirm → grid → silhouette.
     {
         let state = state.clone();
+        let pending = pending_confirm.clone();
         let on_change = Closure::<dyn FnMut()>::new(move || {
             sync_preset_size_warning("wiz-preset", "wiz-preset-warn");
             let preset = select_value("wiz-preset");
             let state = state.clone();
+            let pending = pending.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                // Immediate apply on step 1/2 when blank (or confirm if downstream).
                 let step = state.borrow().wizard_step;
                 if step > 2 {
                     return;
                 }
-                let _ = apply_wizard_preset_if_needed(state, &preset).await;
+                let _ = apply_wizard_preset_if_needed(state, &preset, &pending).await;
             });
         });
         if let Ok(Some(select)) = document().query_selector("#wiz-preset") {
@@ -1765,11 +1827,13 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
     }
     {
         let state = state.clone();
+        let pending = pending_confirm.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
             let preset = select_value("wiz-preset");
             let state = state.clone();
+            let pending = pending.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                if !apply_wizard_preset_if_needed(state.clone(), &preset).await {
+                if !apply_wizard_preset_if_needed(state.clone(), &preset, &pending).await {
                     return;
                 }
                 if !persist_build_draft(2).await {
@@ -1790,29 +1854,13 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         }
         closure.forget();
     }
-    {
+    for back_id in ["wiz-grid-back", "wiz-sil-back", "wiz-geo-back", "wiz-elev-back"] {
         let state = state.clone();
-        let closure = Closure::<dyn FnMut()>::new(move || {
-            // confirm must stay sync in the click gesture (async spawn loses it → always cancel).
-            let from = state.borrow().wizard_step;
-            if !confirm_wizard_back(from) {
-                return;
-            }
-            wasm_bindgen_futures::spawn_local(wizard_go_back_one_step(state.clone()));
-        });
-        if let Some(btn) = document().get_element_by_id("wiz-grid-back") {
-            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
-        }
-        closure.forget();
-    }
-    for back_id in ["wiz-sil-back", "wiz-geo-back", "wiz-elev-back"] {
-        let state = state.clone();
+        let pending = pending_confirm.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
             let from = state.borrow().wizard_step;
-            if !confirm_wizard_back(from) {
-                return;
-            }
-            wasm_bindgen_futures::spawn_local(wizard_go_back_one_step(state.clone()));
+            *pending.borrow_mut() = Some(WizConfirmKind::Back);
+            show_wiz_confirm(wizard_back_message(from));
         });
         if let Some(btn) = document().get_element_by_id(back_id) {
             let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
