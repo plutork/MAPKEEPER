@@ -12,8 +12,8 @@ jobs:
     name: Schema fixtures (cell-profile.schema.json)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
       - run: pip install jsonschema
@@ -23,7 +23,7 @@ jobs:
     name: cargo test (workspace, incl. CLI query path)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       # mapkeeper-desktop (Tauri, roadmap 5.9) is Windows-only for V0 (D-29)
       # and needs system GTK/webkit2gtk dev libs this runner doesn't have —
@@ -34,7 +34,7 @@ jobs:
     name: cargo build mapkeeper-desktop (Windows only, roadmap 5.9, D-29)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
