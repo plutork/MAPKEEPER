@@ -73,6 +73,8 @@ pub fn generate_geology(
             DenseState::Value(LayerValue::Text(kind.to_string())),
         );
     }
+    // geology_random_speckle: drop isolated minor-class cells → stable
+    despeckle_isolated_minors(bounds, &mut layer);
     layer
 }
 
@@ -112,52 +114,93 @@ fn classify_land(
     seed: u64,
 ) -> &'static str {
     let n = hash01(seed ^ 0x6E01, cell.q, cell.r);
-    let band = (nx * 1.7 + ny * 0.9 + hash01(seed, cell.q, cell.r) * 0.35).sin();
+    // Low-frequency band so ridge/rift read as belts, not salt.
+    let band = (nx * 1.7 + ny * 0.9).sin();
     match style {
         GeologyStyle::Belts => {
-            if band.abs() < 0.18 {
+            if band.abs() < 0.20 {
                 if n > 0.55 {
                     GEOLOGY_RIFT
                 } else {
                     GEOLOGY_RIDGE
                 }
-            } else if band.abs() < 0.32 && n > 0.7 {
+            } else if band.abs() < 0.30 && n > 0.78 {
                 GEOLOGY_BASIN
-            } else if coast < 0.22 && n > 0.82 {
+            } else if coast > 0.40 && n > 0.72 {
+                // coast_proximity_inverted fix: arcs prefer high coast
                 GEOLOGY_VOLCANIC_ARC
             } else {
                 GEOLOGY_STABLE
             }
         }
         GeologyStyle::Shields => {
-            if band.abs() < 0.10 && n > 0.6 {
+            if band.abs() < 0.10 && n > 0.55 {
                 GEOLOGY_RIDGE
-            } else if (nx * nx + ny * ny).sqrt() < 0.35 && n > 0.75 {
+            } else if (nx * nx + ny * ny).sqrt() < 0.32 && n > 0.70 {
                 GEOLOGY_BASIN
-            } else if coast < 0.18 && n > 0.88 {
+            } else if coast > 0.45 && n > 0.80 {
                 GEOLOGY_VOLCANIC_ARC
             } else {
                 GEOLOGY_STABLE
             }
         }
         GeologyStyle::Arcs => {
-            if coast < 0.28 {
-                if n > 0.45 {
+            if coast > 0.28 {
+                if n > 0.40 {
                     GEOLOGY_VOLCANIC_ARC
-                } else if n > 0.25 {
+                } else if n > 0.22 {
                     GEOLOGY_RIDGE
                 } else {
                     GEOLOGY_STABLE
                 }
-            } else if band.abs() < 0.14 {
+            } else if band.abs() < 0.12 {
                 GEOLOGY_RIDGE
-            } else if n > 0.85 {
+            } else if n > 0.88 {
                 GEOLOGY_BASIN
             } else {
                 GEOLOGY_STABLE
             }
         }
     }
+}
+
+/// Minor classes with zero same-class neighbors become stable (anti-speckle).
+fn despeckle_isolated_minors(bounds: &MapBounds, layer: &mut DenseLayer) {
+    let mut demote = Vec::new();
+    for index in 0..bounds.len() {
+        let kind = geology_kind(layer, index);
+        if !is_minor_geology(kind) {
+            continue;
+        }
+        let Some(cell) = bounds.from_index(index) else {
+            continue;
+        };
+        let mut same = 0usize;
+        for n in cell.neighbors() {
+            let Some(ni) = bounds.index_of(n) else {
+                continue;
+            };
+            if geology_kind(layer, ni) == kind {
+                same += 1;
+            }
+        }
+        if same == 0 {
+            demote.push(index);
+        }
+    }
+    for index in demote {
+        layer.set(
+            index,
+            DenseState::Value(LayerValue::Text(GEOLOGY_STABLE.to_string())),
+        );
+    }
+}
+
+fn is_minor_geology(kind: &str) -> bool {
+    matches!(
+        kind,
+        GEOLOGY_BASIN | GEOLOGY_RIDGE | GEOLOGY_RIFT | GEOLOGY_VOLCANIC_ARC
+    )
 }
 
 /// 0 = deep interior, 1 = on coast (land next to non-land).
@@ -227,7 +270,8 @@ fn hash01(seed: u64, q: i32, r: i32) -> f64 {
 mod tests {
     use super::*;
     use crate::land_mask::{
-        generate_land_mask, LayoutClass, ShoreCharacter, LAND_MASK_INLAND_SEA, LAND_MASK_OCEAN,
+        generate_land_mask, LayoutClass, ShoreCharacter, LAND_MASK_INLAND_SEA, LAND_MASK_LAND,
+        LAND_MASK_OCEAN,
     };
 
     fn count_kind(layer: &DenseLayer, kind: &str) -> usize {
@@ -333,5 +377,116 @@ mod tests {
             geo.state(1),
             DenseState::Value(LayerValue::Text(ref t)) if t == GEOLOGY_NONE
         ));
+    }
+
+    fn fill_land_disk(bounds: &MapBounds, mask: &mut DenseLayer, radius: i32) {
+        let center = bounds
+            .from_index(bounds.len() / 2)
+            .unwrap_or(Axial::new(0, 0));
+        for i in 0..bounds.len() {
+            let Some(c) = bounds.from_index(i) else {
+                continue;
+            };
+            let land = c.distance(center) <= radius;
+            let v = if land {
+                LAND_MASK_LAND
+            } else {
+                LAND_MASK_OCEAN
+            };
+            mask.set(i, DenseState::Value(LayerValue::Text(v.to_string())));
+        }
+    }
+
+    fn mean_coast_of_kind(
+        bounds: &MapBounds,
+        mask: &DenseLayer,
+        geo: &DenseLayer,
+        kind: &str,
+    ) -> f64 {
+        let mut sum = 0.0;
+        let mut n = 0usize;
+        for i in 0..bounds.len() {
+            if geology_kind(geo, i) != kind {
+                continue;
+            }
+            let Some(cell) = bounds.from_index(i) else {
+                continue;
+            };
+            sum += coast_proximity(bounds, mask, cell);
+            n += 1;
+        }
+        if n == 0 {
+            0.0
+        } else {
+            sum / n as f64
+        }
+    }
+
+    fn isolated_minor_count(bounds: &MapBounds, geo: &DenseLayer) -> usize {
+        let mut n = 0usize;
+        for i in 0..bounds.len() {
+            let kind = geology_kind(geo, i);
+            if !is_minor_geology(kind) {
+                continue;
+            }
+            let Some(cell) = bounds.from_index(i) else {
+                continue;
+            };
+            let same = cell
+                .neighbors()
+                .into_iter()
+                .filter(|nb| {
+                    bounds
+                        .index_of(*nb)
+                        .is_some_and(|ni| geology_kind(geo, ni) == kind)
+                })
+                .count();
+            if same == 0 {
+                n += 1;
+            }
+        }
+        n
+    }
+
+    #[test]
+    fn arcs_volcanic_prefer_coast_over_interior() {
+        // failure_class: coast_proximity_inverted
+        let bounds = MapBounds::new(40, 24);
+        let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
+        fill_land_disk(&bounds, &mut mask, 10);
+        let geo = generate_geology(&bounds, &mask, GeologyStyle::Arcs, 42);
+        let arcs = count_kind(&geo, GEOLOGY_VOLCANIC_ARC);
+        assert!(arcs > 0, "Arcs style should place volcanic_arc");
+        let mean_arc = mean_coast_of_kind(&bounds, &mask, &geo, GEOLOGY_VOLCANIC_ARC);
+        let mean_stable = mean_coast_of_kind(&bounds, &mask, &geo, GEOLOGY_STABLE);
+        assert!(
+            mean_arc > mean_stable,
+            "volcanic_arc mean coast {mean_arc} should exceed stable {mean_stable}"
+        );
+        assert!(
+            mean_arc > 0.25,
+            "volcanic_arc should sit near coast, got mean {mean_arc}"
+        );
+    }
+
+    #[test]
+    fn generated_geology_has_few_isolated_minors() {
+        // failure_class: geology_random_speckle
+        let bounds = MapBounds::new(48, 28);
+        let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
+        fill_land_disk(&bounds, &mut mask, 12);
+        for style in [
+            GeologyStyle::Belts,
+            GeologyStyle::Shields,
+            GeologyStyle::Arcs,
+        ] {
+            let geo = generate_geology(&bounds, &mask, style, 7);
+            let isolated = isolated_minor_count(&bounds, &geo);
+            assert_eq!(
+                isolated, 0,
+                "{:?} left {isolated} isolated minor cells",
+                style
+            );
+        }
     }
 }
