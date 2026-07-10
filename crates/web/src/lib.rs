@@ -71,15 +71,16 @@ fn fresh_elevation_layer(bounds: MapBounds) -> DenseLayer {
     DenseLayer::new_integer("elevation", bounds.len())
 }
 
+// geology-readable--preview-contrast (D-72): opaque class fills for wizard Tectonics
 fn geology_tint(geo: &DenseLayer, bounds: MapBounds, q: i32, r: i32) -> Option<&'static str> {
     let index = bounds.index_of(Axial::new(q, r))?;
     match geo.state(index) {
         DenseState::Value(LayerValue::Text(ref t)) => match t.as_str() {
-            "ridge" => Some("rgba(180, 90, 60, 0.35)"),
-            "rift" => Some("rgba(120, 60, 140, 0.30)"),
-            "basin" => Some("rgba(60, 100, 160, 0.30)"),
-            "volcanic_arc" => Some("rgba(200, 70, 50, 0.40)"),
-            "stable" => Some("rgba(90, 140, 80, 0.18)"),
+            "ridge" => Some("rgba(196, 92, 42, 0.78)"),
+            "rift" => Some("rgba(140, 70, 180, 0.72)"),
+            "basin" => Some("rgba(45, 110, 190, 0.72)"),
+            "volcanic_arc" => Some("rgba(210, 55, 45, 0.82)"),
+            "stable" => Some("rgba(70, 150, 85, 0.62)"),
             _ => None,
         },
         _ => None,
@@ -1600,7 +1601,7 @@ async fn generate_wizard_geology(state: Rc<RefCell<AppState>>) {
         sync_wizard_actions(&s);
     }
     schedule_redraw(state.clone());
-    set_wizard_status("Geology generated — tint shows belts on land.");
+    set_wizard_status("Geology generated — classes shown on the map (see legend).");
 }
 
 async fn load_geology(state: &Rc<RefCell<AppState>>) {
@@ -2500,7 +2501,7 @@ fn redraw(state: &AppState) -> usize {
                 }
             }
             ctx.fill();
-            // world-pipeline--tectonics-v1: subtle geology tint on step 3
+            // geology-readable--preview-contrast: class fill on Tectonics step
             if wizard_is_active() && state.wizard_step == 3 {
                 if let Some(geo) = state.geology.as_ref() {
                     if let Some(tint) = geology_tint(geo, bounds, q, r) {

@@ -430,6 +430,28 @@
   }
   .wiz-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .wiz-btn-row.hidden { display: none; }
+  .wiz-geo-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .wiz-geo-legend li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #c4c8ce;
+  }
+  .wiz-geo-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
   #wiz-panel-step1.hidden, #wiz-panel-step2.hidden,
   #wiz-panel-step3.hidden, #wiz-panel-step4.hidden { display: none; }
   .wiz-section {
@@ -848,7 +870,7 @@
           <button id="wiz-geo-back" class="wiz-action-btn warn" type="button">Back</button>
         </div>
         <h2>Tectonics</h2>
-        <p class="wiz-hint">Thin geology pass: generate belts that explain later elevation. No geology brush in v1.</p>
+        <p class="wiz-hint">Generate geology belts that shape later elevation. Classes are color-coded on the map.</p>
         <section class="wiz-section">
           <p class="wiz-label">1. Geology style</p>
           <div class="wiz-btn-row" id="wiz-geo-styles">
@@ -862,7 +884,17 @@
           <div class="wiz-btn-row">
             <button id="wiz-geo-generate" class="wiz-action-btn" type="button">Generate geology</button>
           </div>
-          <p class="wiz-hint">Tint overlay shows ridge / basin / arc classes on land.</p>
+          <p class="wiz-hint">Map colors show structure on land. Regenerate to try another layout.</p>
+        </section>
+        <section class="wiz-section">
+          <p class="wiz-label">Legend</p>
+          <ul class="wiz-geo-legend" aria-label="Geology classes">
+            <li><span class="wiz-geo-swatch" style="background:#469655"></span>Stable land</li>
+            <li><span class="wiz-geo-swatch" style="background:#2d6ebe"></span>Basin (low)</li>
+            <li><span class="wiz-geo-swatch" style="background:#c45c2a"></span>Ridge (high)</li>
+            <li><span class="wiz-geo-swatch" style="background:#8c46b4"></span>Rift</li>
+            <li><span class="wiz-geo-swatch" style="background:#d2372d"></span>Volcanic arc</li>
+          </ul>
         </section>
         <section class="wiz-section">
           <p class="wiz-label">3. Accept</p>
@@ -883,7 +915,7 @@
           <button id="wiz-elev-back" class="wiz-action-btn warn" type="button">Back</button>
         </div>
         <h2>Elevation</h2>
-        <p class="wiz-hint">Elevation is generated from land silhouette + geology. Edit heights in the editor after Finish.</p>
+        <p class="wiz-hint">Heights follow geology: ridges and arcs rise, basins stay low. Edit further in the editor after Finish.</p>
         <section class="wiz-section">
           <div class="wiz-btn-row">
             <button id="wiz-elev-generate" class="wiz-action-btn" type="button">Generate elevation</button>

@@ -77,7 +77,7 @@ pub fn generate_geology(
 }
 
 /// Step 5 bridge: elevation from land_mask + geology (no plate sim).
-/// Water → 0; land heights biased by geology class.
+/// Water → 0; land heights biased by geology class (D-72 readable contrast).
 pub fn elevation_from_land_mask_and_geology(
     bounds: &MapBounds,
     land_mask: &DenseLayer,
@@ -88,12 +88,14 @@ pub fn elevation_from_land_mask_and_geology(
         let z = if !is_land_cell(land_mask, index) {
             0
         } else {
+            // geology-readable--elev-bridge: categorical spread, not continuous uplift
             match geology_kind(geology, index) {
-                GEOLOGY_BASIN => 1,
-                GEOLOGY_STABLE | GEOLOGY_NONE => 2,
-                GEOLOGY_RIFT => 2,
-                GEOLOGY_RIDGE | GEOLOGY_VOLCANIC_ARC => 3,
-                _ => 2,
+                GEOLOGY_BASIN => 10,
+                GEOLOGY_RIFT => 18,
+                GEOLOGY_STABLE | GEOLOGY_NONE => 30,
+                GEOLOGY_RIDGE => 55,
+                GEOLOGY_VOLCANIC_ARC => 72,
+                _ => 30,
             }
         };
         elevation.set(index, DenseState::Value(LayerValue::Int(z)));
@@ -299,6 +301,8 @@ mod tests {
         );
         let elev = elevation_from_land_mask_and_geology(&bounds, &mask, &geo);
         assert!(elev.int_or(0, 0) > elev.int_or(1, 0));
+        assert_eq!(elev.int_or(0, 0), 55);
+        assert_eq!(elev.int_or(1, 0), 10);
     }
 
     #[test]
