@@ -65,6 +65,9 @@ const BRUSH_PREVIEW_GAP: f64 = 0.92;
 const CANVAS_PAD: f64 = 20.0;
 /// Default land elevation when a cell is unknown/none (hydro projection).
 const DEFAULT_LAND_ELEVATION: i32 = 1;
+// check-updates-button (D-76): compare bundled app version with GitHub releases.
+const APP_VERSION: &str = "0.2.0";
+const RELEASES_API_URL: &str = "https://api.github.com/repos/plutork/MAPKEEPER/releases";
 
 // perf-100k--web-dense-client: index-addressed elevation buffer (no sparse mirror).
 fn fresh_elevation_layer(bounds: MapBounds) -> DenseLayer {
@@ -377,6 +380,13 @@ struct BuildBoundsResponse {
     reset: bool,
 }
 
+#[derive(Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    html_url: String,
+    draft: bool,
+}
+
 #[derive(Serialize)]
 struct WizardLandMaskGenerateInput<'a> {
     recipe_id: &'a str,
@@ -630,6 +640,7 @@ pub fn start() {
     attach_new_path_input(state.clone());
     attach_generate_id_input(state.clone());
     attach_generate_path_input(state.clone());
+    attach_check_updates_click();
 
     wasm_bindgen_futures::spawn_local(refresh_projects(state));
 }
@@ -688,6 +699,48 @@ fn textarea(id: &str) -> HtmlTextAreaElement {
 fn set_text(id: &str, text: &str) {
     if let Some(el) = document().get_element_by_id(id) {
         el.set_text_content(Some(text));
+    }
+}
+
+fn parse_semver(tag: &str) -> Option<(u32, u32, u32)> {
+    let clean = tag.trim().trim_start_matches('v').trim_start_matches('V');
+    let core = clean.split('-').next().unwrap_or(clean);
+    let mut it = core.split('.');
+    let major = it.next()?.parse().ok()?;
+    let minor = it.next()?.parse().ok()?;
+    let patch = it.next()?.parse().ok()?;
+    Some((major, minor, patch))
+}
+
+fn format_semver(v: (u32, u32, u32)) -> String {
+    format!("{}.{}.{}", v.0, v.1, v.2)
+}
+
+async fn check_updates() -> Result<Option<(String, String)>, &'static str> {
+    let resp = gloo_net::http::Request::get(RELEASES_API_URL)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await
+        .map_err(|_| "Couldn't check — offline or network failed.")?;
+    if !resp.ok() {
+        return Err("Failed to check updates. Try again later.");
+    }
+    let releases = resp
+        .json::<Vec<GithubRelease>>()
+        .await
+        .map_err(|_| "Failed to check updates. Try again later.")?;
+    let latest = releases
+        .into_iter()
+        .find(|r| !r.draft)
+        .ok_or("No release found.")?;
+    let latest_ver =
+        parse_semver(&latest.tag_name).ok_or("Failed to check updates. Try again later.")?;
+    let current_ver = parse_semver(APP_VERSION).ok_or("Failed to check updates. Try again later.")?;
+    if latest_ver > current_ver {
+        Ok(Some((format_semver(latest_ver), latest.html_url)))
+    } else {
+        Ok(None)
     }
 }
 
@@ -4269,6 +4322,99 @@ async fn pick_folder_via_tauri() -> Option<String> {
     let promise: js_sys::Promise = bridge.call0(&window()).ok()?.dyn_into().ok()?;
     let result = wasm_bindgen_futures::JsFuture::from(promise).await.ok()?;
     result.as_string()
+}
+
+async fn open_url_via_tauri(url: &str) -> bool {
+    let Ok(bridge) = js_sys::Reflect::get(&window(), &JsValue::from_str("mapkeeperOpenUrl")) else {
+        return false;
+    };
+    let Ok(bridge) = bridge.dyn_into::<js_sys::Function>() else {
+        return false;
+    };
+    let Ok(promise) = bridge.call1(&window(), &JsValue::from_str(url)) else {
+        return false;
+    };
+    let Ok(promise) = promise.dyn_into::<js_sys::Promise>() else {
+        return false;
+    };
+    wasm_bindgen_futures::JsFuture::from(promise).await.is_ok()
+}
+
+fn hide_updates_open_button() {
+    let Some(btn) = document().get_element_by_id("check-updates-open") else {
+        return;
+    };
+    let _ = btn.class_list().add_1("hidden");
+    let _ = btn.remove_attribute("data-url");
+}
+
+fn show_updates_open_button(url: &str) {
+    let Some(btn) = document().get_element_by_id("check-updates-open") else {
+        return;
+    };
+    let _ = btn.class_list().remove_1("hidden");
+    let _ = btn.set_attribute("data-url", url);
+}
+
+// check-updates-button (D-76): lightweight Home footer release check.
+fn attach_check_updates_click() {
+    hide_updates_open_button();
+    let check = document()
+        .get_element_by_id("check-updates")
+        .expect("missing #check-updates");
+    {
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            set_text("check-updates-status", "Checking for updates…");
+            hide_updates_open_button();
+            wasm_bindgen_futures::spawn_local(async move {
+                match check_updates().await {
+                    Ok(Some((version, url))) => {
+                        set_text(
+                            "check-updates-status",
+                            &format!("New version available: {version}"),
+                        );
+                        show_updates_open_button(&url);
+                    }
+                    Ok(None) => {
+                        set_text("check-updates-status", "You are up to date.");
+                        hide_updates_open_button();
+                    }
+                    Err(msg) => {
+                        set_text("check-updates-status", msg);
+                        hide_updates_open_button();
+                    }
+                }
+            });
+        });
+        check
+            .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+            .expect("attaching check-updates handler");
+        closure.forget();
+    }
+    let open = document()
+        .get_element_by_id("check-updates-open")
+        .expect("missing #check-updates-open");
+    {
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let Some(btn) = document().get_element_by_id("check-updates-open") else {
+                return;
+            };
+            let Some(url) = btn.get_attribute("data-url") else {
+                return;
+            };
+            wasm_bindgen_futures::spawn_local(async move {
+                if open_url_via_tauri(&url).await {
+                    return;
+                }
+                if window().open_with_url_and_target(&url, "_blank").is_err() {
+                    set_text("check-updates-status", "Failed to check updates. Try again later.");
+                }
+            });
+        });
+        open.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+            .expect("attaching check-updates-open handler");
+        closure.forget();
+    }
 }
 
 /// Delegated click on the project list: any `.open-btn` opens that world.

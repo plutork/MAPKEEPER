@@ -44,6 +44,7 @@ async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![pick_folder])
         .setup(|app| {
             let handle = app.handle().clone();

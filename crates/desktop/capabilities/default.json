@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions needed by the mapkeeper launcher (folder picker)",
+  "description": "enables default launcher permissions (folder picker + open release URL)",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": ["core:default", "dialog:default", "opener:allow-default-urls"]
 }

@@ -155,7 +155,33 @@
   .brand { text-align: center; margin-bottom: 24px; }
   .brand h1 { font-size: 24px; margin: 0; letter-spacing: 0.02em; }
   .brand .sub { color: #8a8f98; font-size: 12px; margin: 6px 0 0; }
-  .brand .version { color: #66707c; font-size: 11px; margin: 6px 0 0; letter-spacing: 0.04em; text-transform: uppercase; }
+  .brand .version-row {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .brand .version { color: #66707c; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .brand .version-btn {
+    background: transparent;
+    border: 1px solid #3a4451;
+    color: #a8b3c0;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .brand .version-btn:hover { border-color: #4c5a6b; color: #d2d9e2; }
+  .brand .version-btn.hidden { display: none; }
+  .brand .version-status {
+    min-height: 16px;
+    margin: 6px 0 0;
+    color: #9aa5b1;
+    font-size: 12px;
+  }
   .cards-grid {
     display: grid;
     grid-template-columns: minmax(280px, 1.2fr) minmax(280px, 1.2fr) minmax(160px, 0.65fr);
@@ -577,7 +603,12 @@
     <header class="brand">
       <h1>mapkeeper</h1>
       <p class="sub">Local worlds for author + agents</p>
-      <p class="version">mapkeeper 0.2.0</p>
+      <div class="version-row">
+        <span class="version">mapkeeper 0.2.0</span>
+        <button id="check-updates" class="version-btn" type="button">Check for updates</button>
+        <button id="check-updates-open" class="version-btn hidden" type="button">Open download page</button>
+      </div>
+      <p id="check-updates-status" class="version-status"></p>
     </header>
 
     <div class="cards-grid">
@@ -951,6 +982,7 @@
     if (window.__TAURI__) {
       document.querySelectorAll(".native-only").forEach((el) => { el.style.display = ""; });
       window.mapkeeperPickFolder = () => window.__TAURI__.core.invoke("pick_folder");
+      window.mapkeeperOpenUrl = (url) => window.__TAURI__.opener.openUrl(url);
     }
   </script>
   <script type="module">

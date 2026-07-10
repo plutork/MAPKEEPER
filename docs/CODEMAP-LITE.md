@@ -32,14 +32,15 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Web dense elevation client (index-addressed `DenseLayer` render cache, no HashMap mirror) -> `crates/web/src/lib.rs` (`perf-100k--web-dense-client`)
 - rAF redraw coalescing (`schedule_redraw`, one draw per animation frame) -> `crates/web/src/lib.rs` (`perf-100k--raf-redraw-coalesce`)
 - Canvas LOD: adaptive grid stroke + profile marker zoom cutoff -> `crates/web/src/lib.rs` (`perf-100k--canvas-lod-grid-markers`, **D-51** grid lines seamless: `FILL_SCALE_GRID_ON/OFF`, rename toggle)
-- Desktop shell (Tauri wrapper, native dialog bridge) -> `crates/desktop/src/`
+- Desktop shell (Tauri wrapper, native dialog + opener bridges) -> `crates/desktop/src/`, `crates/desktop/capabilities/default.json`
 - Desktop launch defaults (maximized on startup) -> `crates/desktop/src/lib.rs` (`desktop-maximized-default-launch`)
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
 - River dogfood fixture worlds (fixed 14×8 elevation presets; not author Small) -> `fixtures/worlds/` (`river-dogfood-fixture-worlds`; maintainer/CI — no Home UI per D-59)
 - Build wizard draft state (`[build]` in `mapkeeper.toml`, steps 1–4 + `scheme`, read/write/clear/normalize) -> `crates/core/src/build_state.rs` (`home-build-draft-v1`, D-59, D-69, D-71)
 - Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, `PUT /api/build/bounds`, list `build_draft`/`build_step`) -> `crates/server/src/lib.rs` (D-59, D-69, D-71)
 - Build wizard step-1–4 API (`PUT /api/build/bounds` preset rewrite + Geo reset; `POST /api/build/land-mask/generate` returns seed identity JSON; land-mask cells; geology/elevation generate) -> `crates/server/src/lib.rs` (`wizard-merge-size-grid`, `world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`, D-68/D-69/D-71)
-- World Build Wizard shell (D-57 + D-59 draft resume + D-71 size+grid one screen): Home **Build World**, fullscreen overlay, Save Draft / wizard resume + Home footer version label -> `crates/web/index.html`, `crates/web/src/lib.rs`
+- World Build Wizard shell (D-57 + D-59 draft resume + D-71 size+grid one screen): Home **Build World**, fullscreen overlay, Save Draft / wizard resume + Home footer version row -> `crates/web/index.html`, `crates/web/src/lib.rs`
+- Home footer updates check (D-76): `Check for updates` button, GitHub Releases query, `Open download page` CTA -> `crates/web/index.html`, `crates/web/src/lib.rs`
 - World Build Wizard steps 1–4 (size+blank grid → silhouette → tectonics → elevation → Finish; Back on steps 2–4 via in-app confirm; step 2 gen identity + Edit brush S–XL zoom-adaptive; step 3 geology contrast+legend) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`wizard-merge-size-grid`, `brush-size--zoom-adaptive`, `geology-readable--preview-contrast`, D-43/D-70/D-65/D-66/D-68/D-69/D-71/D-72, `world-pipeline--tectonics-v1`)
 - Brush size S–XL screen tiers → effective hex radius from zoom (editor + wizard Edit; cap 24) -> `crates/web/src/lib.rs` (`brush-size--zoom-adaptive`, D-70)
 - Wizard confirm overlay (`#wiz-confirm-overlay`) for Back / bounds reset — avoids silent `window.confirm` in Tauri -> `crates/web/index.html`, `crates/web/src/lib.rs` (D-69)
