@@ -77,7 +77,7 @@ struct InitArgs {
     /// Target folder for the world project (created if missing).
     #[arg(long, default_value = ".")]
     path: PathBuf,
-    /// Map size preset: small (~127), medium (~1K), large (~8K), epic (~30K), grand (~50K), world (~100K cells).
+    /// Map size preset: small (~510), medium (~1.5K), large (~4.5K), epic (~13.5K), grand (~40K), world (~100K cells).
     #[arg(long)]
     map_preset: Option<String>,
 }
