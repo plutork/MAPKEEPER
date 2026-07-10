@@ -39,12 +39,12 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Build wizard draft state (`[build]` in `mapkeeper.toml`, steps 1–4 + `scheme`, read/write/clear/normalize) -> `crates/core/src/build_state.rs` (`home-build-draft-v1`, D-59, D-69, D-71)
 - Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, `PUT /api/build/bounds`, list `build_draft`/`build_step`) -> `crates/server/src/lib.rs` (D-59, D-69, D-71)
 - Build wizard step-1–4 API (`PUT /api/build/bounds` preset rewrite + Geo reset; `POST /api/build/land-mask/generate` returns seed identity JSON; land-mask cells; geology/elevation generate) -> `crates/server/src/lib.rs` (`wizard-merge-size-grid`, `world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`, D-68/D-69/D-71)
-- World Build Wizard shell (D-57 + D-59 draft resume + D-71 size+grid one screen): Home **Build World**, fullscreen overlay, Save Draft / wizard resume -> `crates/web/index.html`, `crates/web/src/lib.rs`
+- World Build Wizard shell (D-57 + D-59 draft resume + D-71 size+grid one screen): Home **Build World**, fullscreen overlay, Save Draft / wizard resume + Home footer version label -> `crates/web/index.html`, `crates/web/src/lib.rs`
 - World Build Wizard steps 1–4 (size+blank grid → silhouette → tectonics → elevation → Finish; Back on steps 2–4 via in-app confirm; step 2 gen identity + Edit brush S–XL zoom-adaptive; step 3 geology contrast+legend) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`wizard-merge-size-grid`, `brush-size--zoom-adaptive`, `geology-readable--preview-contrast`, D-43/D-70/D-65/D-66/D-68/D-69/D-71/D-72, `world-pipeline--tectonics-v1`)
 - Brush size S–XL screen tiers → effective hex radius from zoom (editor + wizard Edit; cap 24) -> `crates/web/src/lib.rs` (`brush-size--zoom-adaptive`, D-70)
 - Wizard confirm overlay (`#wiz-confirm-overlay`) for Back / bounds reset — avoids silent `window.confirm` in Tauri -> `crates/web/index.html`, `crates/web/src/lib.rs` (D-69)
 - World scaffold source -> `toolchain/template/world/`
-- CI/build behavior -> `.github/workflows/`
+- CI/build behavior -> `.github/workflows/` (`ci.yml`, `release-alpha-0-2.yml`)
 
 ## Key files
 
@@ -55,6 +55,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Server boundary entry: `crates/server/src/lib.rs`
 - Web boundary entry: `crates/web/src/lib.rs`
 - Home screen layout entry: `crates/web/index.html`
+- Alpha tester notes / release body source: `docs/TESTER-NOTES-0.2.0.md`
 - World Build Wizard overlay (D-57 shell + D-59 draft): `crates/web/index.html` (`#build-wizard`), `crates/web/src/lib.rs` (`open_build_wizard`, `persist_build_draft`, `wizard_return_home`)
 - Editor tool dock (rail + collapsible drawers: Inspect/profile, Terrain brushes Land/Water/Raise/Lower + step/falloff, View color mode + elevation overlays, World): `crates/web/index.html`, `crates/web/src/lib.rs`, `crates/web/src/elevation_view.rs` — **overlays** the map (D-39); canvas stable on drawer toggle
 - Project list actions (`open` / `remove` / `delete`, with secondary manage flow): `crates/web/src/lib.rs`, `crates/server/src/lib.rs`

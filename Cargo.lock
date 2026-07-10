@@ -1965,7 +1965,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "mapkeeper-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1979,7 +1979,7 @@ dependencies = [
 
 [[package]]
 name = "mapkeeper-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1988,7 +1988,7 @@ dependencies = [
 
 [[package]]
 name = "mapkeeper-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2004,7 +2004,7 @@ dependencies = [
 
 [[package]]
 name = "mapkeeper-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2019,7 +2019,7 @@ dependencies = [
 
 [[package]]
 name = "mapkeeper-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "console_error_panic_hook",
  "gloo-net",

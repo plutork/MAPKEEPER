@@ -41,7 +41,7 @@ Your **lore lives in a world folder**, not in this product repository. Clone or 
 
 ## Create your world
 
-**Now (Windows desktop):** run the `mapkeeper` app — Home screen to pick or create a world (no browser/`localhost` step). Unsigned builds may show SmartScreen — "More info" → "Run anyway". Build with `cargo tauri build` in `crates/desktop` until packaged releases are published.
+**Now (Windows desktop):** install from [GitHub Releases](https://github.com/plutork/MAPKEEPER/releases) (alpha pre-releases) or run `mapkeeper` locally. Home screen handles pick/create flow directly (no browser/`localhost` step). Unsigned alpha builds may show SmartScreen — "More info" → "Run anyway". Tester checklist: [docs/TESTER-NOTES-0.2.0.md](docs/TESTER-NOTES-0.2.0.md).
 
 **Now (git-native):** [GitHub world template](https://github.com/plutork/mapkeeper-world-template/generate).
 

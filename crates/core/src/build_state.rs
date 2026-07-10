@@ -84,7 +84,7 @@ pub fn clear_build(world_path: &Path) -> Result<(), String> {
 pub fn manifest_toml_with_build(world_id: &str, draft: bool) -> String {
     if draft {
         format!(
-            "# mapkeeper world project\n\n[world]\nid = \"{world_id}\"\nname = \"{world_id}\"\nversion = \"0.1.0\"\n\n[build]\nstatus = \"draft\"\nstep = {BUILD_STEP_SIZE}\nscheme = {BUILD_STEP_SCHEME_V71}\n"
+            "# mapkeeper world project\n\n[world]\nid = \"{world_id}\"\nname = \"{world_id}\"\nversion = \"0.2.0\"\n\n[build]\nstatus = \"draft\"\nstep = {BUILD_STEP_SIZE}\nscheme = {BUILD_STEP_SCHEME_V71}\n"
         )
     } else {
         crate::world::manifest_toml(world_id)
