@@ -96,7 +96,9 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
   `PUT /api/layers/:id/cells/:q/:r` (`WireCellState`) write cells. Value kind is
   resolved against the layer's `value_type` (categorical string / integer);
   `elevation` defaults to integer, other new ids to categorical. Web reads the
-  dense elevation layer and flushes paints via the generic batch. CLI keeps
+  dense elevation layer and flushes paints via the generic batch. Wizard land
+  Edit (D-70) uses the same optimistic local stamp + cooldown batch flush to
+  `PUT /api/build/land-mask/cells` (not await-per-stamp). CLI keeps
   `terrain`/`elevation` plus generic `layer get/set/list/clear <id>`. Dense
   schema: `schemas/map-layer-dense.schema.json` (v2); fixtures
   `fixtures/layers-dense/`.

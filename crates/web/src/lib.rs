@@ -537,9 +537,10 @@ struct AppState {
     wizard_edit_brush: String,
     /// D-70: screen tier 0..=3 (S–XL); effective radius from zoom.
     wizard_brush_radius: i32,
-    /// Wizard land-edit stamp request state (prevent drag flood on M/L/XL).
-    wizard_stamp_in_flight: bool,
-    wizard_stamp_pending: Option<((i32, i32), String)>,
+    /// Wizard land-edit: optimistic local stamps not yet flushed to server.
+    pending_wizard_stamps: HashMap<(i32, i32), String>,
+    wizard_stamp_flush_scheduled: bool,
+    wizard_stamp_flush_in_flight: bool,
     /// Build wizard step: 1 size · 2 grid · 3 silhouette · 4 tectonics · 5 elevation (D-69).
     wizard_step: u32,
     wizard_geo_style: String,
@@ -606,8 +607,9 @@ pub fn start() {
         wizard_edit_mode: false,
         wizard_edit_brush: "land".to_string(),
         wizard_brush_radius: 0,
-        wizard_stamp_in_flight: false,
-        wizard_stamp_pending: None,
+        pending_wizard_stamps: HashMap::new(),
+        wizard_stamp_flush_scheduled: false,
+        wizard_stamp_flush_in_flight: false,
         wizard_step: 1,
         wizard_geo_style: "belts".to_string(),
         wizard_geo_nonce: 0,
@@ -1144,6 +1146,7 @@ async fn apply_wizard_preset_now(state: Rc<RefCell<AppState>>, preset: &str) -> 
         let mut s = state.borrow_mut();
         s.wizard_accepted = false;
         s.wizard_edit_mode = false;
+        clear_wizard_stamp_pending(&mut s);
         s.wizard_geo_accepted = false;
         s.geology = None;
         s.wizard_recipe_id.clear();
@@ -1496,6 +1499,7 @@ async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
     set_wizard_status("Generating silhouette… (can take a moment on large maps)");
     let (recipe_id, character, layout_class, nonce) = {
         let mut s = state.borrow_mut();
+        clear_wizard_stamp_pending(&mut s);
         ensure_wizard_recipe(&mut s);
         (
             s.wizard_recipe_id.clone(),
@@ -1658,95 +1662,112 @@ async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
     set_wizard_status("Elevation generated from land + geology.");
 }
 
-async fn wizard_set_land_mask_stamp(
-    state: Rc<RefCell<AppState>>,
-    center: (i32, i32),
-    kind: String,
+/// Merge stamp cells into pending wizard edits (no I/O — optimistic path guard).
+fn merge_wizard_stamp_pending(
+    pending: &mut HashMap<(i32, i32), String>,
+    cells: &[(i32, i32)],
+    kind: &str,
 ) {
-    let cells = {
-        let s = state.borrow();
-        let radius =
-            effective_brush_radius_from_hex_size(s.wizard_brush_radius, current_hex_size_px(&s));
-        paint_stamp_cells(center, radius, s.map_bounds)
-    };
-    if cells.is_empty() {
-        return;
+    for &(q, r) in cells {
+        pending.insert((q, r), kind.to_string());
     }
-    let payload: Vec<WizardLandMaskCellInput<'_>> = cells
-        .iter()
-        .map(|(q, r)| WizardLandMaskCellInput {
-            q: *q,
-            r: *r,
-            kind: &kind,
-        })
-        .collect();
-    let Ok(resp) = gloo_net::http::Request::put("/api/build/land-mask/cells")
-        .json(&payload)
-        .expect("serialize wizard land_mask stamp")
-        .send()
-        .await
-    else {
-        set_wizard_status("Edit save failed.");
-        return;
-    };
-    if !resp.ok() {
-        let msg = resp
-            .text()
-            .await
-            .unwrap_or_else(|_| "Edit rejected".to_string());
-        set_wizard_status(&msg);
-        return;
-    }
-    {
-        let mut s = state.borrow_mut();
-        let bounds = s.map_bounds;
-        let value = if kind == "land" { 1 } else { 0 };
-        for (q, r) in cells {
-            set_elevation_cell(&mut s.elevation, bounds, q, r, value);
-        }
-        bump_content_rev(&mut s);
-    }
-    schedule_redraw(state);
 }
 
+fn clear_wizard_stamp_pending(s: &mut AppState) {
+    s.pending_wizard_stamps.clear();
+    s.wizard_stamp_flush_scheduled = false;
+    s.wizard_stamp_flush_in_flight = false;
+}
+
+/// Optimistic local stamp + cooldown batch flush (same pattern as editor D-43).
 fn queue_wizard_land_mask_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32)) {
-    let kind = state.borrow().wizard_edit_brush.clone();
-    let should_start = {
+    let painted = {
         let mut s = state.borrow_mut();
-        if s.wizard_stamp_in_flight {
-            s.wizard_stamp_pending = Some((center, kind.clone()));
+        let kind = s.wizard_edit_brush.clone();
+        let radius =
+            effective_brush_radius_from_hex_size(s.wizard_brush_radius, current_hex_size_px(&s));
+        let cells = paint_stamp_cells(center, radius, s.map_bounds);
+        if cells.is_empty() {
+            return;
+        }
+        let value = if kind == "land" { 1 } else { 0 };
+        let bounds = s.map_bounds;
+        for &(q, r) in &cells {
+            set_elevation_cell(&mut s.elevation, bounds, q, r, value);
+        }
+        merge_wizard_stamp_pending(&mut s.pending_wizard_stamps, &cells, &kind);
+        bump_content_rev(&mut s);
+        cells.len()
+    };
+    schedule_redraw(state.clone());
+    if painted > 0 {
+        set_wizard_status("Edit autosave pending…");
+        schedule_wizard_stamp_flush(state);
+    }
+}
+
+fn schedule_wizard_stamp_flush(state: Rc<RefCell<AppState>>) {
+    let should_schedule = {
+        let mut s = state.borrow_mut();
+        if s.wizard_stamp_flush_scheduled || s.pending_wizard_stamps.is_empty() {
             false
         } else {
-            s.wizard_stamp_in_flight = true;
-            s.wizard_stamp_pending = None;
+            s.wizard_stamp_flush_scheduled = true;
             true
         }
     };
-    if should_start {
-        wasm_bindgen_futures::spawn_local(drain_wizard_land_mask_stamps(state, center, kind));
+    if !should_schedule {
+        return;
     }
+    wasm_bindgen_futures::spawn_local(async move {
+        TimeoutFuture::new(PAINT_SAVE_COOLDOWN_MS).await;
+        flush_wizard_land_mask_stamps(state).await;
+    });
 }
 
-async fn drain_wizard_land_mask_stamps(
-    state: Rc<RefCell<AppState>>,
-    mut center: (i32, i32),
-    mut kind: String,
-) {
-    loop {
-        wizard_set_land_mask_stamp(state.clone(), center, kind).await;
-        let Some((next_center, next_kind)) = ({
-            let mut s = state.borrow_mut();
-            if let Some(next) = s.wizard_stamp_pending.take() {
-                Some(next)
-            } else {
-                s.wizard_stamp_in_flight = false;
-                None
-            }
-        }) else {
-            break;
-        };
-        center = next_center;
-        kind = next_kind;
+async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
+    let batch = {
+        let mut s = state.borrow_mut();
+        s.wizard_stamp_flush_scheduled = false;
+        if s.wizard_stamp_flush_in_flight || s.pending_wizard_stamps.is_empty() {
+            return;
+        }
+        s.wizard_stamp_flush_in_flight = true;
+        s.pending_wizard_stamps.drain().collect::<Vec<_>>()
+    };
+
+    let mut failed: Vec<((i32, i32), String)> = Vec::new();
+    for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
+        let payload: Vec<WizardLandMaskCellInput<'_>> = chunk
+            .iter()
+            .map(|((q, r), kind)| WizardLandMaskCellInput {
+                q: *q,
+                r: *r,
+                kind: kind.as_str(),
+            })
+            .collect();
+        let sent = gloo_net::http::Request::put("/api/build/land-mask/cells")
+            .json(&payload)
+            .expect("serialize wizard land_mask batch")
+            .send()
+            .await;
+        if !matches!(sent, Ok(resp) if resp.ok()) {
+            failed.extend(chunk.iter().cloned());
+        }
+    }
+
+    {
+        let mut s = state.borrow_mut();
+        for (cell, kind) in failed {
+            s.pending_wizard_stamps.insert(cell, kind);
+        }
+        s.wizard_stamp_flush_in_flight = false;
+    }
+    if state.borrow().pending_wizard_stamps.is_empty() {
+        set_wizard_status("Edit saved.");
+    } else {
+        set_wizard_status("Edit save failed — retrying…");
+        schedule_wizard_stamp_flush(state);
     }
 }
 
@@ -2024,14 +2045,20 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
-            let mut s = state.borrow_mut();
-            if !s.wizard_accepted {
-                set_wizard_status("Accept a silhouette first.");
-                return;
+            let (edit_now, should_flush) = {
+                let mut s = state.borrow_mut();
+                if !s.wizard_accepted {
+                    set_wizard_status("Accept a silhouette first.");
+                    return;
+                }
+                s.wizard_edit_mode = !s.wizard_edit_mode;
+                let edit_now = s.wizard_edit_mode;
+                sync_wizard_actions(&s);
+                (edit_now, !edit_now && !s.pending_wizard_stamps.is_empty())
+            };
+            if should_flush {
+                wasm_bindgen_futures::spawn_local(flush_wizard_land_mask_stamps(state.clone()));
             }
-            s.wizard_edit_mode = !s.wizard_edit_mode;
-            let edit_now = s.wizard_edit_mode;
-            sync_wizard_actions(&s);
             if edit_now {
                 set_wizard_status(
                     "Edit mode: paint land/ocean — S–XL follows zoom (zoom out = larger stamp).",
@@ -3571,6 +3598,8 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
             }
             if !wizard_is_active() {
                 wasm_bindgen_futures::spawn_local(flush_pending_paints(up_state.clone()));
+            } else if up_state.borrow().wizard_edit_mode {
+                wasm_bindgen_futures::spawn_local(flush_wizard_land_mask_stamps(up_state.clone()));
             }
         });
     let _ = window().add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
@@ -4675,4 +4704,21 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
         .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
         .expect("attaching project-list handler");
     closure.forget();
+}
+
+#[cfg(test)]
+mod wizard_stamp_pending_tests {
+    use super::merge_wizard_stamp_pending;
+    use std::collections::HashMap;
+
+    #[test]
+    fn merge_overwrites_same_cell_with_latest_kind() {
+        let mut pending = HashMap::new();
+        merge_wizard_stamp_pending(&mut pending, &[(0, 0), (1, 0)], "land");
+        merge_wizard_stamp_pending(&mut pending, &[(1, 0), (2, 0)], "ocean");
+        assert_eq!(pending.get(&(0, 0)).map(String::as_str), Some("land"));
+        assert_eq!(pending.get(&(1, 0)).map(String::as_str), Some("ocean"));
+        assert_eq!(pending.get(&(2, 0)).map(String::as_str), Some("ocean"));
+        assert_eq!(pending.len(), 3);
+    }
 }
