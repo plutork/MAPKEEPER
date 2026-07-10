@@ -410,6 +410,7 @@ struct WizardGeologyGenerateInput<'a> {
 #[derive(Serialize)]
 struct WizardElevationGenerateInput {
     style: &'static str,
+    regenerate_nonce: u32,
 }
 
 #[derive(Serialize)]
@@ -551,6 +552,7 @@ struct AppState {
     wizard_step: u32,
     wizard_geo_style: String,
     wizard_geo_nonce: u32,
+    wizard_elev_nonce: u32,
     wizard_geo_accepted: bool,
     /// Dense geology cache for tint overlay (index → palette string).
     geology: Option<DenseLayer>,
@@ -620,6 +622,7 @@ pub fn start() {
         wizard_step: 1,
         wizard_geo_style: "belts".to_string(),
         wizard_geo_nonce: 0,
+        wizard_elev_nonce: 0,
         wizard_geo_accepted: false,
         geology: None,
     }));
@@ -1663,7 +1666,11 @@ async fn load_geology(state: &Rc<RefCell<AppState>>) {
 }
 
 async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
-    let body = WizardElevationGenerateInput { style: "default" };
+    let nonce = state.borrow().wizard_elev_nonce;
+    let body = WizardElevationGenerateInput {
+        style: "default",
+        regenerate_nonce: nonce,
+    };
     let Ok(resp) = gloo_net::http::Request::post("/api/build/elevation/generate")
         .json(&body)
         .expect("serialize elevation generate")
@@ -2303,6 +2310,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 {
                     let mut s = state.borrow_mut();
                     s.wizard_step = 4;
+                    s.wizard_elev_nonce = 0;
                     sync_wizard_actions(&s);
                 }
                 wasm_bindgen_futures::spawn_local(generate_wizard_elevation(state.clone()));
@@ -2316,6 +2324,10 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
+            {
+                let mut s = state.borrow_mut();
+                s.wizard_elev_nonce = s.wizard_elev_nonce.saturating_add(1);
+            }
             set_wizard_status("Generating elevation…");
             wasm_bindgen_futures::spawn_local(generate_wizard_elevation(state.clone()));
         });
@@ -2437,6 +2449,7 @@ async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.wizard_step = 1;
     state_mut.wizard_geo_style = "belts".to_string();
     state_mut.wizard_geo_nonce = 0;
+    state_mut.wizard_elev_nonce = 0;
     state_mut.wizard_geo_accepted = false;
     state_mut.geology = None;
     set_drawer_open(false);

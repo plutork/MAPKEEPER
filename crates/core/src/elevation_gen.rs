@@ -270,6 +270,25 @@ mod tests {
     }
 
     #[test]
+    fn different_nonce_changes_elevation_layout() {
+        let bounds = MapBounds::new(48, 28);
+        let mask = generate_land_mask(&bounds, LayoutClass::Pangea, ShoreCharacter::Smooth, 4);
+        let geo = generate_geology(&bounds, &mask, GeologyStyle::Belts, 11);
+        let a = elevation_from_land_mask_and_geology(&bounds, &mask, &geo, 1);
+        let b = elevation_from_land_mask_and_geology(&bounds, &mask, &geo, 2);
+        let mut diff = 0usize;
+        for i in 0..bounds.len() {
+            if a.int_or(i, -1) != b.int_or(i, -1) {
+                diff += 1;
+            }
+        }
+        assert!(
+            diff > 10,
+            "regenerate nonce should shift elevation (got {diff} differing cells)"
+        );
+    }
+
+    #[test]
     fn ridge_higher_than_basin_on_fixture_cells() {
         let bounds = MapBounds::new(8, 6);
         let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());

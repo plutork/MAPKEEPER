@@ -198,6 +198,8 @@ struct ElevationGenerateInput {
     #[serde(default)]
     #[allow(dead_code)]
     style: Option<String>,
+    #[serde(default)]
+    regenerate_nonce: Option<u32>,
 }
 
 /// step3-recipe-seed-debug-line (D-68): generation identity for wizard dogfood.
@@ -1064,7 +1066,7 @@ async fn generate_geology_handler(
 /// Step 5: elevation from land_mask + geology (bridge).
 async fn generate_elevation_handler(
     State(state): State<Arc<Mutex<AppState>>>,
-    Json(_input): Json<ElevationGenerateInput>,
+    Json(input): Json<ElevationGenerateInput>,
 ) -> impl IntoResponse {
     let (world_path, world_id) = {
         let guard = state.lock().unwrap();
@@ -1076,7 +1078,8 @@ async fn generate_elevation_handler(
     let bounds = map_bounds(&world_path);
     let mask = read_dense_layer(&world_path, LAND_MASK_LAYER_ID, &bounds);
     let geology = read_dense_layer(&world_path, GEOLOGY_LAYER_ID, &bounds);
-    let seed = elevation_seed(&world_id);
+    let nonce = input.regenerate_nonce.unwrap_or(0) as u64;
+    let seed = elevation_seed(&world_id, nonce);
     let elevation = elevation_from_land_mask_and_geology(&bounds, &mask, &geology, seed);
     if let Err(err) = write_dense_layer(&world_path, &elevation) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
@@ -1288,13 +1291,13 @@ fn geology_seed(world_id: &str, style: GeologyStyle, regenerate_nonce: u64) -> u
     hash ^ regenerate_nonce
 }
 
-fn elevation_seed(world_id: &str) -> u64 {
+fn elevation_seed(world_id: &str, regenerate_nonce: u64) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for b in world_id.bytes() {
         hash ^= b as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }
-    hash ^ 0xE1E8_01
+    hash ^ 0xE1E8_01 ^ regenerate_nonce
 }
 
 fn silhouette_seed(
