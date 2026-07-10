@@ -668,7 +668,9 @@ async fn list_projects(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoRe
             let legacy_map = valid && legacy_map_folder(world_path);
             let (build_draft, build_step) = if valid {
                 match build_state::read_build(world_path) {
-                    Some(b) if build_state::is_draft(&b) => (true, Some(b.step)),
+                    Some(b) if build_state::is_draft(&b) => {
+                        (true, Some(build_state::normalize_wizard_step(&b)))
+                    }
                     _ => (false, None),
                 }
             } else {

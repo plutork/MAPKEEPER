@@ -21,7 +21,7 @@ live in `profiles/` (which is *not* a layer). Both are anchored by the same
 - Hydro (`land`/`water`) is derived from elevation threshold:
   `elevation <= 0` => water, `elevation > 0` => land.
 
-During Build Wizard step 3, accepted `land_mask` syncs elevation (`land=1`, water/inland_sea=0).
+During Build Wizard step 2, accepted `land_mask` syncs elevation (`land=1`, water/inland_sea=0).
 
 **New worlds start as ocean:** create/init writes a dense `elevation` layer
 with every cell at `0` (sea level), sized to the map bounds. You paint islands

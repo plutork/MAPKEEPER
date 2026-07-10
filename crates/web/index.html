@@ -431,7 +431,7 @@
   .wiz-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .wiz-btn-row.hidden { display: none; }
   #wiz-panel-step1.hidden, #wiz-panel-step2.hidden,
-  #wiz-panel-step4.hidden, #wiz-panel-step5.hidden, #wiz-panel-step3.hidden { display: none; }
+  #wiz-panel-step3.hidden, #wiz-panel-step4.hidden { display: none; }
   .wiz-section {
     display: flex;
     flex-direction: column;
@@ -738,12 +738,11 @@
         <div class="wiz-group expanded">
           <button type="button" class="wiz-group-head" data-wiz-group="geo">&#9660; Geo</button>
           <ul class="wiz-steps">
-            <li class="wiz-step active">1 &middot; Size &amp; shape</li>
-            <li class="wiz-step locked">2 &middot; Grid</li>
-            <li class="wiz-step locked">3 &middot; Land silhouette</li>
-            <li class="wiz-step locked">4 &middot; Tectonics</li>
-            <li class="wiz-step locked">5 &middot; Elevation</li>
-            <li class="wiz-step locked">6 &middot; Coasts</li>
+            <li class="wiz-step active">1 &middot; Size &amp; grid</li>
+            <li class="wiz-step locked">2 &middot; Land silhouette</li>
+            <li class="wiz-step locked">3 &middot; Tectonics</li>
+            <li class="wiz-step locked">4 &middot; Elevation</li>
+            <li class="wiz-step locked">5 &middot; Coasts</li>
           </ul>
         </div>
         <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Climate</button></div>
@@ -756,7 +755,7 @@
       <aside class="wiz-right">
         <div id="wiz-panel-step1">
           <h2>Map size</h2>
-          <p class="wiz-hint">Confirm the hex map size on a blank grid before generating land.</p>
+          <p class="wiz-hint">Pick a preset and check the blank hex grid. Continue when the scale looks right.</p>
           <section class="wiz-section">
             <p class="wiz-label">Preset</p>
             <select id="wiz-preset">
@@ -778,20 +777,6 @@
         </div>
 
         <div id="wiz-panel-step2" class="hidden">
-          <div class="wiz-btn-row wiz-back-top">
-            <button id="wiz-grid-back" class="wiz-action-btn warn" type="button">Back</button>
-          </div>
-          <h2>Grid</h2>
-          <p class="wiz-hint">Blank hex grid at the chosen size. Continue to land silhouette when the scale looks right.</p>
-          <section class="wiz-section">
-            <p class="wiz-hint" id="wiz-grid-meta">—</p>
-            <div class="wiz-btn-row wiz-bottom-actions">
-              <button id="wiz-grid-continue" class="wiz-action-btn primary" type="button">Continue</button>
-            </div>
-          </section>
-        </div>
-
-        <div id="wiz-panel-step3" class="hidden">
         <div class="wiz-btn-row wiz-back-top">
           <button id="wiz-sil-back" class="wiz-action-btn warn" type="button">Back</button>
         </div>
@@ -854,11 +839,11 @@
           <div class="wiz-btn-row wiz-bottom-actions">
             <button id="wiz-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
           </div>
-          <p class="wiz-hint" id="wiz-right-note">Pick a class, regenerate until you like the shape, accept, then continue. Orange Back (top) returns to grid/size — confirm required; changing size resets Geo.</p>
+          <p class="wiz-hint" id="wiz-right-note">Pick a class, regenerate until you like the shape, accept, then continue. Orange Back (top) returns to size — confirm required; changing size resets Geo.</p>
         </section>
         </div>
 
-        <div id="wiz-panel-step4" class="hidden">
+        <div id="wiz-panel-step3" class="hidden">
         <div class="wiz-btn-row wiz-back-top">
           <button id="wiz-geo-back" class="wiz-action-btn warn" type="button">Back</button>
         </div>
@@ -893,7 +878,7 @@
         </section>
         </div>
 
-        <div id="wiz-panel-step5" class="hidden">
+        <div id="wiz-panel-step4" class="hidden">
         <div class="wiz-btn-row wiz-back-top">
           <button id="wiz-elev-back" class="wiz-action-btn warn" type="button">Back</button>
         </div>

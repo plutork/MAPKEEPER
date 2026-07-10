@@ -1067,9 +1067,8 @@ fn show_wiz_confirm(msg: &str) {
 
 fn wizard_back_message(from_step: u32) -> &'static str {
     match from_step {
-        5 => "Go back to tectonics? You can regenerate elevation later.",
-        4 => "Go back to land silhouette? Geology accept state stays until you regenerate.",
-        3 => "Go back to grid/size? Changing map size will reset land and later Geo layers.",
+        4 => "Go back to tectonics? You can regenerate elevation later.",
+        3 => "Go back to land silhouette? Geology accept state stays until you regenerate.",
         2 => "Go back to map size? Changing the preset will reset Geo if land already exists.",
         _ => "Go back to the previous wizard step?",
     }
@@ -1149,13 +1148,13 @@ async fn apply_wizard_preset_now(state: Rc<RefCell<AppState>>, preset: &str) -> 
     true
 }
 
-/// D-69: navigate back one Geo step (3→2→1, 4→3, 5→4).
+/// D-71: navigate back one Geo step (4→3→2→1).
 async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
     let from = state.borrow().wizard_step;
     let to = match from {
-        5 => 4,
         4 => 3,
-        3 | 2 => from.saturating_sub(1).max(1),
+        3 => 2,
+        2 => 1,
         _ => 1,
     };
     if !persist_build_draft(to).await {
@@ -1166,7 +1165,7 @@ async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
         let mut s = state.borrow_mut();
         s.wizard_step = to;
         s.wizard_edit_mode = false;
-        if to <= 2 {
+        if to <= 1 {
             s.show_grid = true;
             if let Some(id) = preset_id_for_bounds(&s.map_bounds) {
                 set_select_value("wiz-preset", id);
@@ -1180,9 +1179,8 @@ async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
         1 => set_wizard_status(
             "Map size — change preset to resize (resets Geo if you already generated land).",
         ),
-        2 => set_wizard_status("Grid preview — Back to size, or Continue to silhouette."),
-        3 => set_wizard_status("Land silhouette — Back to grid/size if the map is too large/small."),
-        4 => set_wizard_status("Tectonics — Back returns to silhouette."),
+        2 => set_wizard_status("Land silhouette — Back to size if the map is too large/small."),
+        3 => set_wizard_status("Tectonics — Back returns to silhouette."),
         _ => {}
     }
 }
@@ -1232,10 +1230,9 @@ fn set_panel_hidden(id: &str, hidden: bool) {
 fn sync_wizard_nav(step: u32) {
     if let Some(crumb) = document().query_selector(".wiz-crumb").ok().flatten() {
         let text = match step {
-            1 => "Geo › Size & shape",
-            2 => "Geo › Grid",
-            4 => "Geo › Tectonics",
-            5 => "Geo › Elevation",
+            1 => "Geo › Size & grid",
+            3 => "Geo › Tectonics",
+            4 => "Geo › Elevation",
             _ => "Geo › Land silhouette",
         };
         crumb.set_text_content(Some(text));
@@ -1252,7 +1249,7 @@ fn sync_wizard_nav(step: u32) {
                 let _ = el.class_list().remove_1("active");
                 let _ = el.class_list().remove_1("done");
                 let _ = el.class_list().remove_1("locked");
-                // items: 0=size,1=grid,2=land,3=tectonics,4=elev,5=coasts
+                // items: 0=size,1=land,2=tectonics,3=elev,4=coasts
                 let step_num = i + 1;
                 if step_num < step {
                     let _ = el.class_list().add_1("done");
@@ -1272,17 +1269,15 @@ fn show_wizard_step(state: &AppState) {
     set_panel_hidden("wiz-panel-step2", step != 2);
     set_panel_hidden("wiz-panel-step3", step != 3);
     set_panel_hidden("wiz-panel-step4", step != 4);
-    set_panel_hidden("wiz-panel-step5", step != 5);
     sync_wizard_nav(step);
-    if step <= 2 {
+    if step <= 1 {
         sync_wizard_size_meta(state);
     }
     match step {
         1 => set_wizard_status("Confirm map size on the blank grid, then continue."),
-        2 => set_wizard_status("Grid preview — continue to land silhouette when scale looks right."),
-        4 => set_wizard_status("Step 4: generate geology, accept, continue."),
-        5 => set_wizard_status("Step 5: generate elevation from land + geology, then Finish."),
-        _ => set_wizard_status("Step 3 flow: 1) parameters, 2) generate, 3) accept/edit, 4) continue."),
+        3 => set_wizard_status("Step 3: generate geology, accept, continue."),
+        4 => set_wizard_status("Step 4: generate elevation from land + geology, then Finish."),
+        _ => set_wizard_status("Step 2 flow: 1) parameters, 2) generate, 3) accept/edit, 4) continue."),
     }
 }
 
@@ -1291,7 +1286,6 @@ fn sync_wizard_size_meta(state: &AppState) {
     let n = state.map_bounds.len();
     let line = format!("{w}×{h} hex-rectangle · {n} cells");
     set_text("wiz-size-meta", &line);
-    set_text("wiz-grid-meta", &line);
 }
 
 fn preset_id_for_bounds(bounds: &MapBounds) -> Option<&'static str> {
@@ -1313,7 +1307,7 @@ fn set_select_value(id: &str, value: &str) {
 }
 
 fn wizard_has_downstream(state: &AppState) -> bool {
-    if state.wizard_accepted || state.wizard_geo_accepted || state.wizard_step > 3 {
+    if state.wizard_accepted || state.wizard_geo_accepted || state.wizard_step > 2 {
         return true;
     }
     if state.geology.is_some() {
@@ -1771,7 +1765,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 flush_pending_paints(state.clone()).await;
-                if persist_build_draft(state.borrow().wizard_step.max(3)).await {
+                if persist_build_draft(state.borrow().wizard_step.max(2)).await {
                     set_wizard_status("Draft saved.");
                 } else {
                     set_wizard_status("Could not save draft.");
@@ -1802,7 +1796,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // wizard-size-grid-step (D-69): size confirm → grid → silhouette.
+    // wizard-merge-size-grid (D-71): size+blank grid → silhouette.
     {
         let state = state.clone();
         let pending = pending_confirm.clone();
@@ -1813,7 +1807,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             let pending = pending.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let step = state.borrow().wizard_step;
-                if step > 2 {
+                if step > 1 {
                     return;
                 }
                 let _ = apply_wizard_preset_if_needed(state, &preset, &pending).await;
@@ -1837,15 +1831,17 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                     return;
                 }
                 if !persist_build_draft(2).await {
-                    set_wizard_status("Could not save size step.");
+                    set_wizard_status("Could not advance to silhouette.");
                     return;
                 }
                 {
                     let mut s = state.borrow_mut();
                     s.wizard_step = 2;
-                    s.show_grid = true;
+                    s.show_grid = false;
+                    ensure_wizard_recipe(&mut s);
                     sync_wizard_actions(&s);
                 }
+                set_wizard_status("Pick a layout class and generate a silhouette.");
                 schedule_redraw(state.clone());
             });
         });
@@ -1854,7 +1850,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         }
         closure.forget();
     }
-    for back_id in ["wiz-grid-back", "wiz-sil-back", "wiz-geo-back", "wiz-elev-back"] {
+    for back_id in ["wiz-sil-back", "wiz-geo-back", "wiz-elev-back"] {
         let state = state.clone();
         let pending = pending_confirm.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
@@ -1863,29 +1859,6 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             show_wiz_confirm(wizard_back_message(from));
         });
         if let Some(btn) = document().get_element_by_id(back_id) {
-            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
-        }
-        closure.forget();
-    }
-    {
-        let state = state.clone();
-        let closure = Closure::<dyn FnMut()>::new(move || {
-            let state = state.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                if !persist_build_draft(3).await {
-                    set_wizard_status("Could not advance to silhouette.");
-                    return;
-                }
-                {
-                    let mut s = state.borrow_mut();
-                    s.wizard_step = 3;
-                    ensure_wizard_recipe(&mut s);
-                    sync_wizard_actions(&s);
-                }
-                set_wizard_status("Pick a layout class and generate a silhouette.");
-            });
-        });
-        if let Some(btn) = document().get_element_by_id("wiz-grid-continue") {
             let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
         closure.forget();
@@ -2079,7 +2052,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Continue: step 3 → draft step 4 (tectonics).
+    // Continue: step 2 → draft step 3 (tectonics).
     for id in ["wiz-continue"] {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
@@ -2090,19 +2063,19 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                if !persist_build_draft(4).await {
+                if !persist_build_draft(3).await {
                     set_wizard_status("Could not advance to tectonics.");
                     return;
                 }
                 {
                     let mut s = state.borrow_mut();
-                    s.wizard_step = 4;
+                    s.wizard_step = 3;
                     s.wizard_edit_mode = false;
                     s.wizard_geo_accepted = false;
                     s.wizard_geo_nonce = 0;
                     sync_wizard_actions(&s);
                 }
-                set_wizard_status("Step 4 · Tectonics — generate geology.");
+                set_wizard_status("Step 3 · Tectonics — generate geology.");
                 wasm_bindgen_futures::spawn_local(generate_wizard_geology(state.clone()));
             });
         });
@@ -2114,7 +2087,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Step 4 geology style / generate / accept / continue.
+    // Step 3 geology style / generate / accept / continue.
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
@@ -2179,13 +2152,13 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                if !persist_build_draft(5).await {
+                if !persist_build_draft(4).await {
                     set_wizard_status("Could not advance to elevation.");
                     return;
                 }
                 {
                     let mut s = state.borrow_mut();
-                    s.wizard_step = 5;
+                    s.wizard_step = 4;
                     sync_wizard_actions(&s);
                 }
                 wasm_bindgen_futures::spawn_local(generate_wizard_elevation(state.clone()));
@@ -2214,7 +2187,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             wasm_bindgen_futures::spawn_local(async move {
                 let body = BuildStateInput {
                     status: "complete",
-                    step: 5,
+                    step: 4,
                 };
                 let Ok(resp) = gloo_net::http::Request::put("/api/build")
                     .json(&body)
@@ -2231,7 +2204,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 }
                 {
                     let mut s = state.borrow_mut();
-                    s.wizard_step = 3;
+                    s.wizard_step = 2;
                     s.wizard_accepted = false;
                     s.wizard_geo_accepted = false;
                     s.wizard_edit_mode = false;
@@ -2290,7 +2263,7 @@ async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
         .get_element_by_id("editor")
         .is_some_and(|el| el.class_list().contains("wizard-active"))
     {
-        let _ = persist_build_draft(state.borrow().wizard_step.max(3)).await;
+        let _ = persist_build_draft(state.borrow().wizard_step.max(2)).await;
     }
     close_build_wizard();
     let _ = gloo_net::http::Request::post("/api/projects/close")
@@ -2527,8 +2500,8 @@ fn redraw(state: &AppState) -> usize {
                 }
             }
             ctx.fill();
-            // world-pipeline--tectonics-v1: subtle geology tint on step 4
-            if wizard_is_active() && state.wizard_step == 4 {
+            // world-pipeline--tectonics-v1: subtle geology tint on step 3
+            if wizard_is_active() && state.wizard_step == 3 {
                 if let Some(geo) = state.geology.as_ref() {
                     if let Some(tint) = geology_tint(geo, bounds, q, r) {
                         ctx.set_fill_style_str(tint);
@@ -4402,7 +4375,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                 .get_attribute("data-build-step")
                 .and_then(|s| s.parse::<u32>().ok())
                 .unwrap_or(1)
-                .clamp(1, 5);
+                .clamp(1, 4);
 
             let state = state.clone();
             set_text("home-status", "Opening…");
@@ -4426,34 +4399,34 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                             {
                                 let mut s = state.borrow_mut();
                                 s.wizard_step = resume_step;
-                                s.wizard_accepted = resume_step > 3;
+                                s.wizard_accepted = resume_step > 2;
                                 s.wizard_edit_mode = false;
-                                s.wizard_geo_accepted = resume_step > 4;
-                                s.show_grid = resume_step <= 2;
+                                s.wizard_geo_accepted = resume_step > 3;
+                                s.show_grid = resume_step <= 1;
                                 if let Some(id) = preset_id_for_bounds(&s.map_bounds) {
                                     set_select_value("wiz-preset", id);
                                 }
                                 sync_preset_size_warning("wiz-preset", "wiz-preset-warn");
-                                if resume_step >= 3 {
+                                if resume_step >= 2 {
                                     ensure_wizard_recipe(&mut s);
                                 }
                                 sync_wizard_actions(&s);
                             }
                             match resume_step {
-                                1 | 2 => {
+                                1 => {
                                     set_wizard_status(
-                                        "Resumed at size/grid — confirm scale, then continue.",
+                                        "Resumed at size — confirm scale on the blank grid, then continue.",
                                     );
                                     schedule_redraw(state.clone());
                                 }
-                                4 => {
+                                3 => {
                                     set_wizard_status("Resumed at tectonics — generate or accept geology.");
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
                                         schedule_redraw(state.clone());
                                     });
                                 }
-                                5 => {
+                                4 => {
                                     set_wizard_status("Resumed at elevation — generate or Finish.");
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
