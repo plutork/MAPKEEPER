@@ -54,6 +54,8 @@ pub fn generate_geology(
     seed: u64,
 ) -> DenseLayer {
     let mut layer = DenseLayer::new_categorical(GEOLOGY_LAYER_ID, bounds.len());
+    let land_cells = count_land_cells(land_mask);
+    let belt_count = belt_count_for_land(land_cells);
     let (max_x, max_y) = half_extent(bounds);
     for index in 0..bounds.len() {
         let Some(cell) = bounds.from_index(index) else {
@@ -66,7 +68,7 @@ pub fn generate_geology(
             let nx = if max_x > 0.0 { x / max_x } else { 0.0 };
             let ny = if max_y > 0.0 { y / max_y } else { 0.0 };
             let coast = coast_proximity(bounds, land_mask, cell);
-            classify_land(style, nx, ny, coast, cell, seed)
+            classify_land(style, nx, ny, coast, cell, seed, belt_count)
         };
         layer.set(
             index,
@@ -112,19 +114,20 @@ fn classify_land(
     coast: f64,
     cell: Axial,
     seed: u64,
+    belt_count: usize,
 ) -> &'static str {
     let n = hash01(seed ^ 0x6E01, cell.q, cell.r);
-    // Seed-driven band angle/phase so Regenerate yields another layout (D-63/D-72).
-    let band = belt_band_signal(nx, ny, seed);
+    // Multi-band proximity: large land → more ridge/rift belts (D-63 v1, no plate sim).
+    let belt_near = belt_proximity(nx, ny, seed, belt_count);
     match style {
         GeologyStyle::Belts => {
-            if band.abs() < 0.20 {
+            if belt_near < 0.20 {
                 if n > 0.55 {
                     GEOLOGY_RIFT
                 } else {
                     GEOLOGY_RIDGE
                 }
-            } else if band.abs() < 0.30 && n > 0.78 {
+            } else if belt_near < 0.30 && n > 0.78 {
                 GEOLOGY_BASIN
             } else if coast > 0.40 && n > 0.72 {
                 // coast_proximity_inverted fix: arcs prefer high coast
@@ -134,7 +137,7 @@ fn classify_land(
             }
         }
         GeologyStyle::Shields => {
-            if band.abs() < 0.10 && n > 0.55 {
+            if belt_near < 0.10 && n > 0.55 {
                 GEOLOGY_RIDGE
             } else if (nx * nx + ny * ny).sqrt() < 0.32 && n > 0.70 {
                 GEOLOGY_BASIN
@@ -153,7 +156,7 @@ fn classify_land(
                 } else {
                     GEOLOGY_STABLE
                 }
-            } else if band.abs() < 0.12 {
+            } else if belt_near < 0.12 {
                 GEOLOGY_RIDGE
             } else if n > 0.88 {
                 GEOLOGY_BASIN
@@ -254,12 +257,45 @@ fn half_extent(bounds: &MapBounds) -> (f64, f64) {
     (max_x.max(1.0), max_y.max(1.0))
 }
 
+fn count_land_cells(land_mask: &DenseLayer) -> usize {
+    (0..land_mask.len())
+        .filter(|&i| is_land_cell(land_mask, i))
+        .count()
+}
+
+/// Ridge/rift belt count scales with land area (more crust → more interior structure).
+fn belt_count_for_land(land_cells: usize) -> usize {
+    if land_cells < 600 {
+        1
+    } else if land_cells < 2_000 {
+        2
+    } else if land_cells < 8_000 {
+        3
+    } else if land_cells < 25_000 {
+        4
+    } else {
+        5
+    }
+}
+
+/// Min |sin| across seed-offset bands — cell near any belt qualifies.
+fn belt_proximity(nx: f64, ny: f64, seed: u64, belt_count: usize) -> f64 {
+    let n = belt_count.max(1);
+    let mut best = 1.0f64;
+    for i in 0..n {
+        let sub = seed ^ (i as u64).wrapping_mul(0xD6E8_FEB1_8665_4A93);
+        best = best.min(belt_band_signal(nx, ny, sub).abs());
+    }
+    best
+}
+
 /// Low-frequency ridge/rift belt coordinate; seed rotates/shifts the band.
 fn belt_band_signal(nx: f64, ny: f64, seed: u64) -> f64 {
     let angle = hash01(seed, -3, 7) * std::f64::consts::PI;
     let phase = hash01(seed, 5, -2) * std::f64::consts::TAU;
+    let freq = 1.4 + hash01(seed, 11, -5) * 0.8;
     let along = nx * angle.cos() + ny * angle.sin();
-    (along * 1.7 + phase).sin()
+    (along * freq + phase).sin()
 }
 
 fn hash01(seed: u64, q: i32, r: i32) -> f64 {
@@ -537,6 +573,61 @@ mod tests {
         assert!(
             dist > 2.0,
             "ridge centroid should shift between seeds (got {dist})"
+        );
+    }
+
+    fn ridge_q_span(bounds: &MapBounds, geo: &DenseLayer) -> i32 {
+        let mut min_q = i32::MAX;
+        let mut max_q = i32::MIN;
+        for i in 0..bounds.len() {
+            if geology_kind(geo, i) != GEOLOGY_RIDGE {
+                continue;
+            }
+            let Some(cell) = bounds.from_index(i) else {
+                continue;
+            };
+            min_q = min_q.min(cell.q);
+            max_q = max_q.max(cell.q);
+        }
+        if min_q == i32::MAX {
+            0
+        } else {
+            max_q - min_q
+        }
+    }
+
+    #[test]
+    fn belt_count_scales_with_land_area() {
+        assert_eq!(belt_count_for_land(400), 1);
+        assert_eq!(belt_count_for_land(1_500), 2);
+        assert_eq!(belt_count_for_land(5_000), 3);
+        assert!(belt_count_for_land(30_000) >= 4);
+    }
+
+    #[test]
+    fn large_land_gets_wider_ridge_spread_than_small() {
+        // failure_class: recipe_not_distinct — World-scale land should not collapse to one stripe
+        let bounds_small = MapBounds::new(24, 14);
+        let mut mask_small = DenseLayer::new_categorical("land_mask", bounds_small.len());
+        fill_land_disk(&bounds_small, &mut mask_small, 4);
+
+        let bounds_large = MapBounds::new(80, 45);
+        let mut mask_large = DenseLayer::new_categorical("land_mask", bounds_large.len());
+        fill_land_disk(&bounds_large, &mut mask_large, 28);
+
+        let land_small = count_land_cells(&mask_small);
+        let land_large = count_land_cells(&mask_large);
+        assert!(land_large > land_small * 8);
+        assert!(belt_count_for_land(land_large) > belt_count_for_land(land_small));
+
+        let geo_small = generate_geology(&bounds_small, &mask_small, GeologyStyle::Belts, 7);
+        let geo_large = generate_geology(&bounds_large, &mask_large, GeologyStyle::Belts, 7);
+        let span_small = ridge_q_span(&bounds_small, &geo_small);
+        let span_large = ridge_q_span(&bounds_large, &geo_large);
+        assert!(count_kind(&geo_large, GEOLOGY_RIDGE) > count_kind(&geo_small, GEOLOGY_RIDGE));
+        assert!(
+            span_large > span_small.saturating_mul(2),
+            "large land ridge span {span_large} should exceed small {span_small}"
         );
     }
 }
