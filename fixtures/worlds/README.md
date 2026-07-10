@@ -1,6 +1,7 @@
 # River dogfood fixture worlds
 
-Curated **Small** (14×8, 112 cells) elevation worlds for manual and auto river
+Curated **dogfood** (14×8, 112 cells) elevation worlds for manual and auto river
+dogfood — fixed small rectangle, **not** the author Small preset (D-73 Small is 30×17 / ~510).
 testing. Maintainer/CI assets — not author-facing generator UX (roadmap 7.8).
 
 ## Worlds

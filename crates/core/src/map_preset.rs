@@ -1,11 +1,11 @@
-//! World map size presets — hex-rectangle 16:9 bounds for new worlds (D-40, D-49).
+//! World map size presets — hex-rectangle 16:9 bounds for new worlds (D-40, D-49, D-73).
 //!
 //! Author-facing presets map to `hex-rectangle` in `map/manifest.json`.
 //! Canvas/viewport is separate (pan/zoom — roadmap 4.2).
 
 use crate::hex::MapBounds;
 
-/// Author-facing map size presets for create/generate wizards (D-40, D-48, D-49).
+/// Author-facing map size presets for create/generate wizards (D-40, D-48, D-49, D-73).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MapPreset {
     Small,
@@ -31,12 +31,12 @@ impl MapPreset {
     /// Width × height (odd-r offset rectangle, 16:9) for this tier.
     pub fn dimensions(self) -> (i32, i32) {
         match self {
-            // map-bounds--hex-rectangle-16x9: W×H tuned to ~tier N at 16:9.
-            MapPreset::Small => (14, 8),
-            MapPreset::Medium => (43, 24),
-            MapPreset::Large => (117, 66),
-            MapPreset::Epic => (233, 131),
-            MapPreset::Grand => (299, 168),
+            // map-preset--ladder-retune-500 (D-73): geo ×~3 from Small~500 → World~100k
+            MapPreset::Small => (30, 17),
+            MapPreset::Medium => (52, 29),
+            MapPreset::Large => (89, 50),
+            MapPreset::Epic => (155, 87),
+            MapPreset::Grand => (267, 150),
             MapPreset::World => (421, 237),
         }
     }
@@ -54,11 +54,11 @@ impl MapPreset {
 
     pub fn author_label(self) -> &'static str {
         match self {
-            MapPreset::Small => "Small (~112 cells)",
-            MapPreset::Medium => "Medium (~1,032 cells)",
-            MapPreset::Large => "Large (~7,722 cells)",
-            MapPreset::Epic => "Epic (~30,523 cells)",
-            MapPreset::Grand => "Grand (~50,232 cells)",
+            MapPreset::Small => "Small (~510 cells)",
+            MapPreset::Medium => "Medium (~1,508 cells)",
+            MapPreset::Large => "Large (~4,450 cells)",
+            MapPreset::Epic => "Epic (~13,485 cells)",
+            MapPreset::Grand => "Grand (~40,050 cells)",
             MapPreset::World => "World (~99,777 cells, not stable)",
         }
     }
@@ -104,11 +104,11 @@ mod tests {
 
     #[test]
     fn preset_cell_counts() {
-        assert_eq!(MapPreset::Small.approx_cell_count(), 112);
-        assert_eq!(MapPreset::Medium.approx_cell_count(), 1032);
-        assert_eq!(MapPreset::Large.approx_cell_count(), 7722);
-        assert_eq!(MapPreset::Epic.approx_cell_count(), 30523);
-        assert_eq!(MapPreset::Grand.approx_cell_count(), 50232);
+        assert_eq!(MapPreset::Small.approx_cell_count(), 510);
+        assert_eq!(MapPreset::Medium.approx_cell_count(), 1508);
+        assert_eq!(MapPreset::Large.approx_cell_count(), 4450);
+        assert_eq!(MapPreset::Epic.approx_cell_count(), 13485);
+        assert_eq!(MapPreset::Grand.approx_cell_count(), 40050);
         assert_eq!(MapPreset::World.approx_cell_count(), 99777);
     }
 
