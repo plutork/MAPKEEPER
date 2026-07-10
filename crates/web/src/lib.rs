@@ -48,6 +48,8 @@ const MAX_BRUSH_TIER: i32 = 3;
 const MAX_EFFECTIVE_BRUSH_RADIUS: i32 = 24;
 /// Screen-space brush diameters (px) for tiers S/M/L/XL.
 const BRUSH_SCREEN_DIAMETERS_PX: [f64; 4] = [28.0, 56.0, 96.0, 144.0];
+/// Hex-boundary preview above this radius freezes the UI — use a circle instead.
+const BRUSH_PREVIEW_HEX_DETAIL_MAX: i32 = 2;
 // Legacy aliases — tier index still stored as brush_radius field.
 const MIN_BRUSH_RADIUS: i32 = MIN_BRUSH_TIER;
 const MAX_BRUSH_RADIUS: i32 = MAX_BRUSH_TIER;
@@ -892,6 +894,10 @@ fn sync_brush_effective_label(state: &AppState) {
     set_text("brush-effective-radius", &eff.to_string());
 }
 
+fn brush_preview_uses_circle(radius: i32) -> bool {
+    radius > BRUSH_PREVIEW_HEX_DETAIL_MAX
+}
+
 fn draw_preview_boundary(
     state: &AppState,
     ctx: &CanvasRenderingContext2d,
@@ -907,13 +913,26 @@ fn draw_preview_boundary(
         return;
     };
     let radius = effective_paint_radius(state);
+    let (cx, cy) = {
+        let (x, y) = Axial::new(center.0, center.1).to_pixel(size);
+        (ox + x, oy + y)
+    };
+    ctx.set_line_width(2.0);
+    ctx.set_stroke_style_str("#9fe3c4");
+    // Large M/L/XL: per-hex boundary walk freezes the app (esp. with labels on).
+    if brush_preview_uses_circle(radius) {
+        let hex_w = (3f64.sqrt() * size).max(1.0);
+        let r_px = hex_w * (radius as f64 + 0.55);
+        ctx.begin_path();
+        let _ = ctx.arc(cx, cy, r_px, 0.0, std::f64::consts::PI * 2.0);
+        ctx.stroke();
+        return;
+    }
     let cells = paint_stamp_cells(center, radius, state.map_bounds);
     if cells.is_empty() {
         return;
     }
     let cell_set: HashSet<(i32, i32)> = cells.iter().copied().collect();
-    ctx.set_line_width(2.0);
-    ctx.set_stroke_style_str("#9fe3c4");
     for (q, r) in cells {
         let axial = Axial::new(q, r);
         let is_boundary = axial
@@ -2163,8 +2182,10 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             };
             let mut s = state.borrow_mut();
             s.wizard_brush_radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
+            // Panel sits over the map: keep last hover → huge preview redraw freeze.
+            s.hover_cell = None;
             sync_wizard_actions(&s);
-            schedule_redraw(state.clone());
+            // No map redraw required to flip S/M/L/XL active state.
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-edit-sizes") {
             let _ =
@@ -3661,11 +3682,14 @@ fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
                 let s = move_state.borrow();
                 let show = brush_paints(&s.brush)
                     || (wizard_is_active() && s.wizard_edit_mode);
-                if show {
+                if !show {
+                    None
+                } else if pointer_over_wizard_chrome(&event) {
+                    // Right/left panels overlay hit-testing; clear preview there.
+                    None
+                } else {
                     drop(s);
                     cell_from_mouse_event(&move_state, &event)
-                } else {
-                    None
                 }
             };
             let changed = {
@@ -3681,8 +3705,9 @@ fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
                 schedule_redraw(move_state.clone());
             }
         });
+    // Window-level so moving onto wiz-right clears hover before size clicks.
     let _ =
-        canvas().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
+        window().add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
     on_move.forget();
 
     let leave_state = state.clone();
@@ -3703,6 +3728,16 @@ fn attach_brush_hover_preview(state: Rc<RefCell<AppState>>) {
     let _ =
         canvas().add_event_listener_with_callback("mouseleave", on_leave.as_ref().unchecked_ref());
     on_leave.forget();
+}
+
+fn pointer_over_wizard_chrome(event: &web_sys::MouseEvent) -> bool {
+    let Some(el) = click_target_element(event) else {
+        return false;
+    };
+    el.closest(".wiz-left, .wiz-right, .wiz-top, #wiz-confirm-overlay")
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 /// Wheel zoom with cursor anchor, clamped to the chosen 0.6x–2.5x range.
@@ -4776,5 +4811,14 @@ mod wizard_stamp_pending_tests {
         // strokes must still stamp on every new hex under the cursor.
         let centers = [(0, 0), (1, 0), (2, 0), (3, 0)];
         assert_eq!(centers.len(), 4);
+    }
+
+    #[test]
+    fn large_brush_preview_uses_circle_not_hex_walk() {
+        use super::brush_preview_uses_circle;
+        assert!(!brush_preview_uses_circle(0));
+        assert!(!brush_preview_uses_circle(2));
+        assert!(brush_preview_uses_circle(3));
+        assert!(brush_preview_uses_circle(24));
     }
 }
