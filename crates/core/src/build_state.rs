@@ -12,6 +12,7 @@ pub const BUILD_STEP_SIZE: u32 = 1;
 pub const BUILD_STEP_LAND_SILHOUETTE: u32 = 2;
 pub const BUILD_STEP_TECTONICS: u32 = 3;
 pub const BUILD_STEP_ELEVATION: u32 = 4;
+pub const BUILD_STEP_CLIMATE: u32 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuildSection {
@@ -44,7 +45,7 @@ pub fn is_draft(section: &BuildSection) -> bool {
 pub fn normalize_wizard_step(section: &BuildSection) -> u32 {
     let raw = section.step.max(1);
     if section.scheme.unwrap_or(1) >= BUILD_STEP_SCHEME_V71 {
-        return raw.min(BUILD_STEP_ELEVATION);
+        return raw.min(BUILD_STEP_CLIMATE);
     }
     // D-69: 1 size, 2 grid, 3 land, 4 tect, 5 elev → drop grid
     match raw {
@@ -65,7 +66,7 @@ pub fn write_build_draft(world_path: &Path, step: u32) -> Result<(), String> {
     let mut doc: MapkeeperToml = toml::from_str(&raw).map_err(|e| e.to_string())?;
     doc.build = Some(BuildSection {
         status: "draft".into(),
-        step: step.max(1).min(BUILD_STEP_ELEVATION),
+        step: step.max(1).min(BUILD_STEP_CLIMATE),
         scheme: Some(BUILD_STEP_SCHEME_V71),
     });
     let out = toml::to_string_pretty(&doc).map_err(|e| e.to_string())?;

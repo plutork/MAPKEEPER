@@ -3,6 +3,8 @@
 
 pub mod build_state;
 pub mod cell_id;
+pub mod climate;
+pub mod coast_distance;
 pub mod elevation_gen;
 pub mod geology;
 pub mod plates;

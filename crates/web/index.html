@@ -530,7 +530,8 @@
     border: 1px solid rgba(255, 255, 255, 0.2);
   }
   #wiz-panel-step1.hidden, #wiz-panel-step2.hidden,
-  #wiz-panel-step3.hidden, #wiz-panel-step4.hidden { display: none; }
+  #wiz-panel-step3.hidden, #wiz-panel-step4.hidden,
+  #wiz-panel-step5.hidden { display: none; }
   .wiz-section {
     display: flex;
     flex-direction: column;
@@ -859,7 +860,12 @@
             <li class="wiz-step locked">5 &middot; Coasts</li>
           </ul>
         </div>
-        <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Climate</button></div>
+        <div class="wiz-group locked" id="wiz-group-climate">
+          <button type="button" class="wiz-group-head" data-wiz-group="climate" disabled>&#9654; Climate</button>
+          <ul class="wiz-steps">
+            <li class="wiz-step locked">1 &middot; Climate</li>
+          </ul>
+        </div>
         <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Water</button></div>
         <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Soils</button></div>
         <div class="wiz-group locked"><button type="button" class="wiz-group-head" disabled>&#9654; Life</button></div>
@@ -1021,6 +1027,34 @@
           <p class="wiz-label">2. Generate</p>
           <div class="wiz-btn-row">
             <button id="wiz-elev-generate" class="wiz-action-btn" type="button">Generate elevation</button>
+          </div>
+          <p class="wiz-hint">Regenerate to try another layout with the same style.</p>
+        </section>
+        <section class="wiz-section">
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-elev-continue" class="wiz-action-btn primary" type="button">Continue</button>
+          </div>
+        </section>
+        </div>
+
+        <div id="wiz-panel-step5" class="hidden">
+        <div class="wiz-btn-row wiz-back-top">
+          <button id="wiz-climate-back" class="wiz-action-btn warn" type="button">Back</button>
+        </div>
+        <h2>Climate</h2>
+        <p class="wiz-hint">Temperature and rainfall follow latitude, elevation, and coast distance. North is colder.</p>
+        <section class="wiz-section">
+          <p class="wiz-label">1. Precipitation style</p>
+          <div class="wiz-btn-row" id="wiz-climate-styles">
+            <button class="wiz-style-btn active" type="button" data-wiz-climate-style="balanced">Balanced</button>
+            <button class="wiz-style-btn" type="button" data-wiz-climate-style="wet_coasts">Wet coasts</button>
+            <button class="wiz-style-btn" type="button" data-wiz-climate-style="dry_interior">Dry interior</button>
+          </div>
+        </section>
+        <section class="wiz-section">
+          <p class="wiz-label">2. Generate</p>
+          <div class="wiz-btn-row">
+            <button id="wiz-climate-generate" class="wiz-action-btn" type="button">Generate climate</button>
           </div>
           <p class="wiz-hint">Regenerate to try another layout with the same style.</p>
         </section>

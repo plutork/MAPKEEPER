@@ -28,6 +28,10 @@ use axum::routing::get;
 use axum::{Json, Router};
 use mapkeeper_core::build_state::{self, BUILD_STEP_SIZE};
 use mapkeeper_core::cell_id::CellId;
+use mapkeeper_core::climate::{
+    generate_climate_layers, PrecipitationStyle, ICE_LAYER_ID, PRECIPITATION_LAYER_ID,
+    TEMPERATURE_LAYER_ID,
+};
 use mapkeeper_core::elevation_gen::{elevation_from_land_mask_and_geology, ElevationIntensity};
 use mapkeeper_core::geology::{generate_geology, GeologyStyle, GEOLOGY_LAYER_ID};
 use mapkeeper_core::hex::{Axial, MapBounds};
@@ -200,6 +204,14 @@ struct ElevationGenerateInput {
     regenerate_nonce: Option<u32>,
 }
 
+#[derive(Deserialize)]
+struct ClimateGenerateInput {
+    #[serde(default)]
+    style: Option<String>,
+    #[serde(default)]
+    regenerate_nonce: Option<u32>,
+}
+
 /// step3-recipe-seed-debug-line (D-68): generation identity for wizard dogfood.
 #[derive(Serialize)]
 struct LandMaskGenerateResponse {
@@ -298,7 +310,15 @@ fn rewrite_world_bounds(
     std::fs::write(&path, manifest.to_json_pretty()?)?;
     let bounds = MapBounds::new(width, height);
     if reset_pipeline {
-        for id in [LAND_MASK_LAYER_ID, GEOLOGY_LAYER_ID, "terrain", RIVER_ID_LAYER_ID] {
+        for id in [
+            LAND_MASK_LAYER_ID,
+            GEOLOGY_LAYER_ID,
+            "terrain",
+            RIVER_ID_LAYER_ID,
+            TEMPERATURE_LAYER_ID,
+            PRECIPITATION_LAYER_ID,
+            ICE_LAYER_ID,
+        ] {
             let _ = std::fs::remove_file(layer_file_path(world_path, id));
         }
         let rivers = world_path.join("map").join(RIVER_CATALOG_FILE);
@@ -584,6 +604,10 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         .route(
             "/api/build/elevation/generate",
             axum::routing::post(generate_elevation_handler),
+        )
+        .route(
+            "/api/build/climate/generate",
+            axum::routing::post(generate_climate_handler),
         )
         .route("/api/fixture-worlds", get(list_fixture_worlds_handler))
         .route(
@@ -1086,6 +1110,33 @@ async fn generate_elevation_handler(
     StatusCode::NO_CONTENT.into_response()
 }
 
+/// Step 7–10 climate T2 (D-90): zonal heuristic layers from land_mask + elevation.
+async fn generate_climate_handler(
+    State(state): State<Arc<Mutex<AppState>>>,
+    Json(input): Json<ClimateGenerateInput>,
+) -> impl IntoResponse {
+    let (world_path, world_id) = {
+        let guard = state.lock().unwrap();
+        let Some(active) = guard.active.as_ref() else {
+            return (StatusCode::CONFLICT, "no active world").into_response();
+        };
+        (active.path.clone(), active.id.clone())
+    };
+    let bounds = map_bounds(&world_path);
+    let mask = read_dense_layer(&world_path, LAND_MASK_LAYER_ID, &bounds);
+    let elevation = read_dense_layer(&world_path, ELEVATION_LAYER_ID, &bounds);
+    let style = PrecipitationStyle::parse(input.style.as_deref().unwrap_or("balanced"));
+    let nonce = input.regenerate_nonce.unwrap_or(0) as u64;
+    let seed = climate_seed(&world_id, style, nonce);
+    let layers = generate_climate_layers(&bounds, &mask, &elevation, style, seed);
+    for layer in [layers.temperature, layers.precipitation, layers.ice] {
+        if let Err(err) = write_dense_layer(&world_path, &layer) {
+            return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+        }
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
 /// Step-3 edit brush writes land/ocean into `land_mask` and keeps elevation in sync.
 async fn put_land_mask_cells(
     State(state): State<Arc<Mutex<AppState>>>,
@@ -1251,7 +1302,12 @@ fn layer_file_path(world_path: &Path, layer_id: &str) -> PathBuf {
 /// Default value kind for a not-yet-created layer. Only `elevation` is integer
 /// today; everything else defaults to categorical.
 fn default_value_type(layer_id: &str) -> ValueType {
-    if layer_id == ELEVATION_LAYER_ID || layer_id == RIVER_ID_LAYER_ID {
+    if layer_id == ELEVATION_LAYER_ID
+        || layer_id == RIVER_ID_LAYER_ID
+        || layer_id == TEMPERATURE_LAYER_ID
+        || layer_id == PRECIPITATION_LAYER_ID
+        || layer_id == ICE_LAYER_ID
+    {
         ValueType::Integer
     } else {
         ValueType::Categorical
@@ -1288,6 +1344,19 @@ fn geology_seed(world_id: &str, style: GeologyStyle, regenerate_nonce: u64) -> u
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash ^ regenerate_nonce
+}
+
+fn climate_seed(world_id: &str, style: PrecipitationStyle, regenerate_nonce: u64) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for b in world_id.bytes() {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    for b in style.id().bytes() {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash ^ 0xC1AA_7E ^ regenerate_nonce
 }
 
 fn elevation_seed(world_id: &str, intensity: ElevationIntensity, regenerate_nonce: u64) -> u64 {

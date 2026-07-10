@@ -414,6 +414,12 @@ struct WizardElevationGenerateInput<'a> {
 }
 
 #[derive(Serialize)]
+struct WizardClimateGenerateInput<'a> {
+    style: &'a str,
+    regenerate_nonce: u32,
+}
+
+#[derive(Serialize)]
 struct WizardLandMaskCellInput<'a> {
     q: i32,
     r: i32,
@@ -548,12 +554,14 @@ struct AppState {
     wizard_stamp_flush_in_flight: bool,
     /// Hex distance throttle between drag stamp centers.
     wizard_stamp_last_center: Option<(i32, i32)>,
-    /// Build wizard step: 1 size · 2 grid · 3 silhouette · 4 tectonics · 5 elevation (D-69).
+    /// Build wizard step: 1 size · 2 land · 3 tectonics · 4 elevation · 5 climate (D-71/D-90).
     wizard_step: u32,
     wizard_geo_style: String,
     wizard_geo_nonce: u32,
     wizard_elev_style: String,
     wizard_elev_nonce: u32,
+    wizard_climate_style: String,
+    wizard_climate_nonce: u32,
     wizard_geo_accepted: bool,
     /// Dense geology cache for tint overlay (index → palette string).
     geology: Option<DenseLayer>,
@@ -625,6 +633,8 @@ pub fn start() {
         wizard_geo_nonce: 0,
         wizard_elev_style: "standard".to_string(),
         wizard_elev_nonce: 0,
+        wizard_climate_style: "balanced".to_string(),
+        wizard_climate_nonce: 0,
         wizard_geo_accepted: false,
         geology: None,
     }));
@@ -1072,11 +1082,11 @@ fn show_view(name: &str) {
 
 fn build_step_label(step: u32) -> &'static str {
     match step {
-        1 => "Step 1 · Size & shape",
-        2 => "Step 2 · Grid",
-        4 => "Step 4 · Tectonics",
-        5 => "Step 5 · Elevation",
-        _ => "Step 3 · Land silhouette",
+        1 => "Step 1 · Size & grid",
+        3 => "Step 3 · Tectonics",
+        4 => "Step 4 · Elevation",
+        5 => "Step 5 · Climate",
+        _ => "Step 2 · Land silhouette",
     }
 }
 
@@ -1112,6 +1122,7 @@ fn show_wiz_confirm(msg: &str) {
 
 fn wizard_back_message(from_step: u32) -> &'static str {
     match from_step {
+        5 => "Go back to elevation? You can regenerate climate later.",
         4 => "Go back to tectonics? You can regenerate elevation later.",
         3 => "Go back to land silhouette? Geology accept state stays until you regenerate.",
         2 => "Go back to map size? Changing the preset will reset Geo if land already exists.",
@@ -1280,11 +1291,12 @@ fn sync_wizard_nav(step: u32) {
             1 => "Geo › Size & grid",
             3 => "Geo › Tectonics",
             4 => "Geo › Elevation",
+            5 => "Climate › Precipitation",
             _ => "Geo › Land silhouette",
         };
         crumb.set_text_content(Some(text));
     }
-    if let Ok(Some(list)) = document().query_selector(".wiz-steps") {
+    if let Ok(Some(list)) = document().query_selector(".wiz-group.expanded .wiz-steps") {
         if let Ok(items) = list.query_selector_all(".wiz-step") {
             for i in 0..items.length() {
                 let Some(node) = items.item(i) else {
@@ -1296,15 +1308,53 @@ fn sync_wizard_nav(step: u32) {
                 let _ = el.class_list().remove_1("active");
                 let _ = el.class_list().remove_1("done");
                 let _ = el.class_list().remove_1("locked");
-                // items: 0=size,1=land,2=tectonics,3=elev,4=coasts
                 let step_num = i + 1;
-                if step_num < step {
+                if step_num < step.min(5) {
                     let _ = el.class_list().add_1("done");
-                } else if step_num == step {
+                } else if step_num == step && step < 5 {
                     let _ = el.class_list().add_1("active");
+                } else if step >= 5 {
+                    let _ = el.class_list().add_1("done");
                 } else {
                     let _ = el.class_list().add_1("locked");
                 }
+            }
+        }
+    }
+    if let Some(climate_group) = document().get_element_by_id("wiz-group-climate") {
+        if step >= 5 {
+            let _ = climate_group.class_list().remove_1("locked");
+            let _ = climate_group.class_list().add_1("expanded");
+            if let Ok(Some(head)) = climate_group.query_selector(".wiz-group-head") {
+                let _ = head.remove_attribute("disabled");
+                head.set_text_content(Some("▼ Climate"));
+            }
+            if let Ok(Some(list)) = climate_group.query_selector(".wiz-steps") {
+                if let Ok(items) = list.query_selector_all(".wiz-step") {
+                    for i in 0..items.length() {
+                        let Some(node) = items.item(i) else {
+                            continue;
+                        };
+                        let Ok(el) = node.dyn_into::<web_sys::Element>() else {
+                            continue;
+                        };
+                        let _ = el.class_list().remove_1("active");
+                        let _ = el.class_list().remove_1("done");
+                        let _ = el.class_list().remove_1("locked");
+                        if step == 5 {
+                            let _ = el.class_list().add_1("active");
+                        } else {
+                            let _ = el.class_list().add_1("done");
+                        }
+                    }
+                }
+            }
+        } else {
+            let _ = climate_group.class_list().add_1("locked");
+            let _ = climate_group.class_list().remove_1("expanded");
+            if let Ok(Some(head)) = climate_group.query_selector(".wiz-group-head") {
+                let _ = head.set_attribute("disabled", "");
+                head.set_text_content(Some("▶ Climate"));
             }
         }
     }
@@ -1316,6 +1366,7 @@ fn show_wizard_step(state: &AppState) {
     set_panel_hidden("wiz-panel-step2", step != 2);
     set_panel_hidden("wiz-panel-step3", step != 3);
     set_panel_hidden("wiz-panel-step4", step != 4);
+    set_panel_hidden("wiz-panel-step5", step != 5);
     sync_wizard_nav(step);
     if step <= 1 {
         sync_wizard_size_meta(state);
@@ -1323,7 +1374,8 @@ fn show_wizard_step(state: &AppState) {
     match step {
         1 => set_wizard_status("Confirm map size on the blank grid, then continue."),
         3 => set_wizard_status("Step 3: generate geology, accept, continue."),
-        4 => set_wizard_status("Step 4: pick relief style, generate elevation, then Finish."),
+        4 => set_wizard_status("Step 4: pick relief style, generate elevation, then continue."),
+        5 => set_wizard_status("Step 5: pick precipitation style, generate climate, then Finish."),
         _ => set_wizard_status("Step 2 flow: 1) parameters, 2) generate, 3) accept/edit, 4) continue."),
     }
 }
@@ -1698,6 +1750,36 @@ async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
     set_wizard_status("Elevation generated from land + geology.");
 }
 
+async fn generate_wizard_climate(state: Rc<RefCell<AppState>>) {
+    let (style, nonce) = {
+        let s = state.borrow();
+        (s.wizard_climate_style.clone(), s.wizard_climate_nonce)
+    };
+    let body = WizardClimateGenerateInput {
+        style: &style,
+        regenerate_nonce: nonce,
+    };
+    let Ok(resp) = gloo_net::http::Request::post("/api/build/climate/generate")
+        .json(&body)
+        .expect("serialize climate generate")
+        .send()
+        .await
+    else {
+        set_wizard_status("Climate generation failed (network).");
+        return;
+    };
+    if !resp.ok() {
+        let msg = resp
+            .text()
+            .await
+            .unwrap_or_else(|_| "Climate generation rejected".to_string());
+        set_wizard_status(&msg);
+        return;
+    }
+    schedule_redraw(state.clone());
+    set_wizard_status("Climate generated — temperature and precipitation layers saved.");
+}
+
 /// Merge stamp cells into pending wizard edits (no I/O — optimistic path guard).
 fn merge_wizard_stamp_pending(
     pending: &mut HashMap<(i32, i32), bool>,
@@ -1995,7 +2077,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         }
         closure.forget();
     }
-    for back_id in ["wiz-sil-back", "wiz-geo-back", "wiz-elev-back"] {
+    for back_id in ["wiz-sil-back", "wiz-geo-back", "wiz-elev-back", "wiz-climate-back"] {
         let state = state.clone();
         let pending = pending_confirm.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
@@ -2367,9 +2449,68 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         let closure = Closure::<dyn FnMut()>::new(move || {
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
+                if !persist_build_draft(5).await {
+                    set_wizard_status("Could not advance to climate.");
+                    return;
+                }
+                {
+                    let mut s = state.borrow_mut();
+                    s.wizard_step = 5;
+                    s.wizard_climate_nonce = 0;
+                    sync_wizard_actions(&s);
+                }
+                wasm_bindgen_futures::spawn_local(generate_wizard_climate(state.clone()));
+            });
+        });
+        if let Some(btn) = document().get_element_by_id("wiz-elev-continue") {
+            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else {
+                return;
+            };
+            let Some(el) = click_target_element(&mouse) else {
+                return;
+            };
+            if let Some(style) = el.get_attribute("data-wiz-climate-style") {
+                wiz_toggle_style_group("wiz-climate-styles", "data-wiz-climate-style", &el);
+                state.borrow_mut().wizard_climate_style = style;
+                set_wizard_status("Precipitation style updated — Generate to apply.");
+            }
+        });
+        if let Ok(Some(root)) = document().query_selector("#wiz-climate-styles") {
+            let _ = root
+                .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            {
+                let mut s = state.borrow_mut();
+                s.wizard_climate_nonce = s.wizard_climate_nonce.saturating_add(1);
+            }
+            set_wizard_status("Generating climate…");
+            wasm_bindgen_futures::spawn_local(generate_wizard_climate(state.clone()));
+        });
+        if let Some(btn) = document().get_element_by_id("wiz-climate-generate") {
+            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let state = state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
                 let body = BuildStateInput {
                     status: "complete",
-                    step: 4,
+                    step: 5,
                 };
                 let Ok(resp) = gloo_net::http::Request::put("/api/build")
                     .json(&body)
@@ -2477,6 +2618,8 @@ async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.wizard_geo_nonce = 0;
     state_mut.wizard_elev_style = "standard".to_string();
     state_mut.wizard_elev_nonce = 0;
+    state_mut.wizard_climate_style = "balanced".to_string();
+    state_mut.wizard_climate_nonce = 0;
     state_mut.wizard_geo_accepted = false;
     state_mut.geology = None;
     set_drawer_open(false);
@@ -4810,7 +4953,15 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                     });
                                 }
                                 4 => {
-                                    set_wizard_status("Resumed at elevation — generate or Finish.");
+                                    set_wizard_status("Resumed at elevation — generate or continue to climate.");
+                                    wasm_bindgen_futures::spawn_local(async move {
+                                        load_geology(&state).await;
+                                        load_elevation(&state).await;
+                                        schedule_redraw(state.clone());
+                                    });
+                                }
+                                5 => {
+                                    set_wizard_status("Resumed at climate — generate or Finish.");
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
                                         load_elevation(&state).await;
