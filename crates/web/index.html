@@ -1010,9 +1010,19 @@
         <h2>Elevation</h2>
         <p class="wiz-hint">Heights follow geology: ridges and arcs rise, basins stay low. Edit further in the editor after Finish.</p>
         <section class="wiz-section">
+          <p class="wiz-label">1. Relief style</p>
+          <div class="wiz-btn-row" id="wiz-elev-styles">
+            <button class="wiz-style-btn active" type="button" data-wiz-elev-style="standard">Standard</button>
+            <button class="wiz-style-btn" type="button" data-wiz-elev-style="bold">Bold</button>
+            <button class="wiz-style-btn" type="button" data-wiz-elev-style="chaos">Chaos</button>
+          </div>
+        </section>
+        <section class="wiz-section">
+          <p class="wiz-label">2. Generate</p>
           <div class="wiz-btn-row">
             <button id="wiz-elev-generate" class="wiz-action-btn" type="button">Generate elevation</button>
           </div>
+          <p class="wiz-hint">Regenerate to try another layout with the same style.</p>
         </section>
         <section class="wiz-section">
           <div class="wiz-btn-row wiz-bottom-actions">

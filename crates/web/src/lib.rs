@@ -408,8 +408,8 @@ struct WizardGeologyGenerateInput<'a> {
 }
 
 #[derive(Serialize)]
-struct WizardElevationGenerateInput {
-    style: &'static str,
+struct WizardElevationGenerateInput<'a> {
+    style: &'a str,
     regenerate_nonce: u32,
 }
 
@@ -552,6 +552,7 @@ struct AppState {
     wizard_step: u32,
     wizard_geo_style: String,
     wizard_geo_nonce: u32,
+    wizard_elev_style: String,
     wizard_elev_nonce: u32,
     wizard_geo_accepted: bool,
     /// Dense geology cache for tint overlay (index → palette string).
@@ -622,6 +623,7 @@ pub fn start() {
         wizard_step: 1,
         wizard_geo_style: "belts".to_string(),
         wizard_geo_nonce: 0,
+        wizard_elev_style: "standard".to_string(),
         wizard_elev_nonce: 0,
         wizard_geo_accepted: false,
         geology: None,
@@ -1321,7 +1323,7 @@ fn show_wizard_step(state: &AppState) {
     match step {
         1 => set_wizard_status("Confirm map size on the blank grid, then continue."),
         3 => set_wizard_status("Step 3: generate geology, accept, continue."),
-        4 => set_wizard_status("Step 4: generate elevation from land + geology, then Finish."),
+        4 => set_wizard_status("Step 4: pick relief style, generate elevation, then Finish."),
         _ => set_wizard_status("Step 2 flow: 1) parameters, 2) generate, 3) accept/edit, 4) continue."),
     }
 }
@@ -1666,9 +1668,12 @@ async fn load_geology(state: &Rc<RefCell<AppState>>) {
 }
 
 async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
-    let nonce = state.borrow().wizard_elev_nonce;
+    let (style, nonce) = {
+        let s = state.borrow();
+        (s.wizard_elev_style.clone(), s.wizard_elev_nonce)
+    };
     let body = WizardElevationGenerateInput {
-        style: "default",
+        style: &style,
         regenerate_nonce: nonce,
     };
     let Ok(resp) = gloo_net::http::Request::post("/api/build/elevation/generate")
@@ -2323,6 +2328,27 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
     }
     {
         let state = state.clone();
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else {
+                return;
+            };
+            let Some(el) = click_target_element(&mouse) else {
+                return;
+            };
+            if let Some(style) = el.get_attribute("data-wiz-elev-style") {
+                wiz_toggle_style_group("wiz-elev-styles", "data-wiz-elev-style", &el);
+                state.borrow_mut().wizard_elev_style = style;
+                set_wizard_status("Relief style updated — Generate to apply.");
+            }
+        });
+        if let Ok(Some(root)) = document().query_selector("#wiz-elev-styles") {
+            let _ = root
+                .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
             {
                 let mut s = state.borrow_mut();
@@ -2449,6 +2475,7 @@ async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.wizard_step = 1;
     state_mut.wizard_geo_style = "belts".to_string();
     state_mut.wizard_geo_nonce = 0;
+    state_mut.wizard_elev_style = "standard".to_string();
     state_mut.wizard_elev_nonce = 0;
     state_mut.wizard_geo_accepted = false;
     state_mut.geology = None;

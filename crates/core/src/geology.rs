@@ -228,7 +228,7 @@ fn orogenic_class_for_boundary(
 }
 
 /// Step 5 bridge — see `elevation_gen` (D-88 continuous intensity).
-pub use crate::elevation_gen::elevation_from_land_mask_and_geology;
+pub use crate::elevation_gen::{elevation_from_land_mask_and_geology, ElevationIntensity};
 
 fn despeckle_isolated_minors(bounds: &MapBounds, layer: &mut DenseLayer) {
     let mut demote = Vec::new();
@@ -419,7 +419,7 @@ mod tests {
             1,
             DenseState::Value(LayerValue::Text(GEOLOGY_BASIN.to_string())),
         );
-        let elev = elevation_from_land_mask_and_geology(&bounds, &mask, &geo, 5);
+        let elev = elevation_from_land_mask_and_geology(&bounds, &mask, &geo, 5, ElevationIntensity::Standard);
         assert!(elev.int_or(0, 0) > elev.int_or(1, 0));
         assert!((48..=64).contains(&elev.int_or(0, 0)));
         assert!((8..=14).contains(&elev.int_or(1, 0)));
@@ -777,7 +777,7 @@ mod tests {
         let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
         fill_land_disk(&bounds, &mut mask, 12);
         let geo = generate_geology(&bounds, &mask, GeologyStyle::Belts, 21);
-        let elev = elevation_from_land_mask_and_geology(&bounds, &mask, &geo, 21);
+        let elev = elevation_from_land_mask_and_geology(&bounds, &mask, &geo, 21, ElevationIntensity::Standard);
         let high = (0..bounds.len())
             .filter(|&i| elev.int_or(i, 0) >= 55)
             .count();

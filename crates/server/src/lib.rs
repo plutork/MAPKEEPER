@@ -28,9 +28,8 @@ use axum::routing::get;
 use axum::{Json, Router};
 use mapkeeper_core::build_state::{self, BUILD_STEP_SIZE};
 use mapkeeper_core::cell_id::CellId;
-use mapkeeper_core::geology::{
-    elevation_from_land_mask_and_geology, generate_geology, GeologyStyle, GEOLOGY_LAYER_ID,
-};
+use mapkeeper_core::elevation_gen::{elevation_from_land_mask_and_geology, ElevationIntensity};
+use mapkeeper_core::geology::{generate_geology, GeologyStyle, GEOLOGY_LAYER_ID};
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::land_mask::{
     elevation_from_land_mask, find_recipe, generate_land_mask, generate_land_mask_recipe,
@@ -196,7 +195,6 @@ struct GeologyGenerateInput {
 #[derive(Deserialize)]
 struct ElevationGenerateInput {
     #[serde(default)]
-    #[allow(dead_code)]
     style: Option<String>,
     #[serde(default)]
     regenerate_nonce: Option<u32>,
@@ -1079,8 +1077,9 @@ async fn generate_elevation_handler(
     let mask = read_dense_layer(&world_path, LAND_MASK_LAYER_ID, &bounds);
     let geology = read_dense_layer(&world_path, GEOLOGY_LAYER_ID, &bounds);
     let nonce = input.regenerate_nonce.unwrap_or(0) as u64;
-    let seed = elevation_seed(&world_id, nonce);
-    let elevation = elevation_from_land_mask_and_geology(&bounds, &mask, &geology, seed);
+    let intensity = ElevationIntensity::parse(input.style.as_deref().unwrap_or("standard"));
+    let seed = elevation_seed(&world_id, intensity, nonce);
+    let elevation = elevation_from_land_mask_and_geology(&bounds, &mask, &geology, seed, intensity);
     if let Err(err) = write_dense_layer(&world_path, &elevation) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
@@ -1291,9 +1290,13 @@ fn geology_seed(world_id: &str, style: GeologyStyle, regenerate_nonce: u64) -> u
     hash ^ regenerate_nonce
 }
 
-fn elevation_seed(world_id: &str, regenerate_nonce: u64) -> u64 {
+fn elevation_seed(world_id: &str, intensity: ElevationIntensity, regenerate_nonce: u64) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for b in world_id.bytes() {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    for b in intensity.id().bytes() {
         hash ^= b as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }
