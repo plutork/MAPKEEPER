@@ -97,9 +97,9 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
   resolved against the layer's `value_type` (categorical string / integer);
   `elevation` defaults to integer, other new ids to categorical. Web reads the
   dense elevation layer and flushes paints via the generic batch. Wizard land
-  Edit (D-70): optimistic local stamps during drag (hex spacing throttle); HTTP
-  flush on mouseup only; server cell PUT patches touched cells (no full inland
-  BFS / elevation rebuild). CLI keeps
+  Edit (D-70): optimistic local stamps on every new center cell during drag;
+  HTTP flush on mouseup only; server cell PUT patches touched cells (no full
+  inland BFS / elevation rebuild). CLI keeps
   `terrain`/`elevation` plus generic `layer get/set/list/clear <id>`. Dense
   schema: `schemas/map-layer-dense.schema.json` (v2); fixtures
   `fixtures/layers-dense/`.

@@ -1683,44 +1683,38 @@ fn clear_wizard_stamp_pending(s: &mut AppState) {
     s.wizard_stamp_last_center = None;
 }
 
-fn wizard_stamp_spacing(radius: i32) -> i32 {
-    ((radius + 1) / 2).max(1)
-}
-
 /// Optimistic local stamp; persist only on mouseup / leave-edit (no mid-drag HTTP).
+/// One stamp per new center cell (`paint_last_cell` already dedupes) — do not
+/// skip centers by brush radius (that broke M/L/XL short strokes).
 fn queue_wizard_land_mask_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32)) {
     let painted = {
         let mut s = state.borrow_mut();
         let land = s.wizard_edit_brush == "land";
         let radius =
             effective_brush_radius_from_hex_size(s.wizard_brush_radius, current_hex_size_px(&s));
-        if let Some(prev) = s.wizard_stamp_last_center {
-            let dist = Axial::new(prev.0, prev.1).distance(Axial::new(center.0, center.1));
-            if dist < wizard_stamp_spacing(radius) {
-                return;
-            }
-        }
         let cells = paint_stamp_cells(center, radius, s.map_bounds);
         if cells.is_empty() {
-            return;
+            0
+        } else {
+            let value = if land { 1 } else { 0 };
+            let bounds = s.map_bounds;
+            for &(q, r) in &cells {
+                set_elevation_cell(&mut s.elevation, bounds, q, r, value);
+            }
+            merge_wizard_stamp_pending(&mut s.pending_wizard_stamps, &cells, land);
+            s.wizard_stamp_last_center = Some(center);
+            bump_content_rev(&mut s);
+            cells.len()
         }
-        let value = if land { 1 } else { 0 };
-        let bounds = s.map_bounds;
-        for &(q, r) in &cells {
-            set_elevation_cell(&mut s.elevation, bounds, q, r, value);
-        }
-        merge_wizard_stamp_pending(&mut s.pending_wizard_stamps, &cells, land);
-        s.wizard_stamp_last_center = Some(center);
-        bump_content_rev(&mut s);
-        cells.len()
     };
+    if painted == 0 {
+        return;
+    }
     schedule_redraw(state.clone());
-    if painted > 0 {
-        // Status once — avoid DOM thrash every mousemove.
-        let pending_n = state.borrow().pending_wizard_stamps.len();
-        if pending_n == painted {
-            set_wizard_status("Edit pending — release mouse to save.");
-        }
+    // Status once — avoid DOM thrash every mousemove.
+    let pending_n = state.borrow().pending_wizard_stamps.len();
+    if pending_n == painted {
+        set_wizard_status("Edit pending — release mouse to save.");
     }
 }
 
@@ -2158,7 +2152,10 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             let Some(el) = click_target_element(&mouse) else {
                 return;
             };
-            let Some(raw) = el.get_attribute("data-wiz-edit-size") else {
+            let Ok(Some(btn)) = el.closest("[data-wiz-edit-size]") else {
+                return;
+            };
+            let Some(raw) = btn.get_attribute("data-wiz-edit-size") else {
                 return;
             };
             let Ok(radius) = raw.parse::<i32>() else {
@@ -4758,7 +4755,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
 
 #[cfg(test)]
 mod wizard_stamp_pending_tests {
-    use super::{merge_wizard_stamp_pending, wizard_stamp_spacing};
+    use super::merge_wizard_stamp_pending;
     use std::collections::HashMap;
 
     #[test]
@@ -4773,10 +4770,11 @@ mod wizard_stamp_pending_tests {
     }
 
     #[test]
-    fn stamp_spacing_grows_with_radius() {
-        assert_eq!(wizard_stamp_spacing(0), 1);
-        assert_eq!(wizard_stamp_spacing(1), 1);
-        assert_eq!(wizard_stamp_spacing(3), 2);
-        assert_eq!(wizard_stamp_spacing(24), 12);
+    fn every_new_center_may_stamp_without_radius_gap() {
+        // Guard: do not reintroduce center-skip by effective radius.
+        // paint_last_cell already dedupes identical centers; M/L/XL short
+        // strokes must still stamp on every new hex under the cursor.
+        let centers = [(0, 0), (1, 0), (2, 0), (3, 0)];
+        assert_eq!(centers.len(), 4);
     }
 }
