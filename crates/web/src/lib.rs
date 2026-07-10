@@ -545,6 +545,9 @@ struct AppState {
     wizard_edit_brush: String,
     /// D-70: screen tier 0..=3 (S–XL); effective radius from zoom.
     wizard_brush_radius: i32,
+    /// Wizard land-edit stamp request state (prevent drag flood on M/L/XL).
+    wizard_stamp_in_flight: bool,
+    wizard_stamp_pending: Option<((i32, i32), String)>,
     /// Build wizard step: 1 size · 2 grid · 3 silhouette · 4 tectonics · 5 elevation (D-69).
     wizard_step: u32,
     wizard_geo_style: String,
@@ -610,6 +613,8 @@ pub fn start() {
         wizard_edit_mode: false,
         wizard_edit_brush: "land".to_string(),
         wizard_brush_radius: 0,
+        wizard_stamp_in_flight: false,
+        wizard_stamp_pending: None,
         wizard_step: 1,
         wizard_geo_style: "belts".to_string(),
         wizard_geo_nonce: 0,
@@ -1756,7 +1761,43 @@ async fn wizard_set_land_mask_stamp(
 
 fn queue_wizard_land_mask_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32)) {
     let kind = state.borrow().wizard_edit_brush.clone();
-    wasm_bindgen_futures::spawn_local(wizard_set_land_mask_stamp(state, center, kind));
+    let should_start = {
+        let mut s = state.borrow_mut();
+        if s.wizard_stamp_in_flight {
+            s.wizard_stamp_pending = Some((center, kind.clone()));
+            false
+        } else {
+            s.wizard_stamp_in_flight = true;
+            s.wizard_stamp_pending = None;
+            true
+        }
+    };
+    if should_start {
+        wasm_bindgen_futures::spawn_local(drain_wizard_land_mask_stamps(state, center, kind));
+    }
+}
+
+async fn drain_wizard_land_mask_stamps(
+    state: Rc<RefCell<AppState>>,
+    mut center: (i32, i32),
+    mut kind: String,
+) {
+    loop {
+        wizard_set_land_mask_stamp(state.clone(), center, kind).await;
+        let Some((next_center, next_kind)) = ({
+            let mut s = state.borrow_mut();
+            if let Some(next) = s.wizard_stamp_pending.take() {
+                Some(next)
+            } else {
+                s.wizard_stamp_in_flight = false;
+                None
+            }
+        }) else {
+            break;
+        };
+        center = next_center;
+        kind = next_kind;
+    }
 }
 
 fn wiz_toggle_style_group(container_id: &str, attr: &str, active: &web_sys::Element) {
