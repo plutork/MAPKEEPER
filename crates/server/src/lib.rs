@@ -1066,17 +1066,18 @@ async fn generate_elevation_handler(
     State(state): State<Arc<Mutex<AppState>>>,
     Json(_input): Json<ElevationGenerateInput>,
 ) -> impl IntoResponse {
-    let world_path = {
+    let (world_path, world_id) = {
         let guard = state.lock().unwrap();
         let Some(active) = guard.active.as_ref() else {
             return (StatusCode::CONFLICT, "no active world").into_response();
         };
-        active.path.clone()
+        (active.path.clone(), active.id.clone())
     };
     let bounds = map_bounds(&world_path);
     let mask = read_dense_layer(&world_path, LAND_MASK_LAYER_ID, &bounds);
     let geology = read_dense_layer(&world_path, GEOLOGY_LAYER_ID, &bounds);
-    let elevation = elevation_from_land_mask_and_geology(&bounds, &mask, &geology);
+    let seed = elevation_seed(&world_id);
+    let elevation = elevation_from_land_mask_and_geology(&bounds, &mask, &geology, seed);
     if let Err(err) = write_dense_layer(&world_path, &elevation) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
@@ -1285,6 +1286,15 @@ fn geology_seed(world_id: &str, style: GeologyStyle, regenerate_nonce: u64) -> u
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash ^ regenerate_nonce
+}
+
+fn elevation_seed(world_id: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for b in world_id.bytes() {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash ^ 0xE1E8_01
 }
 
 fn silhouette_seed(

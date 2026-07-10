@@ -227,31 +227,8 @@ fn orogenic_class_for_boundary(
     }
 }
 
-/// Step 5 bridge: elevation from land_mask + geology (no plate sim).
-/// Water → 0; land heights biased by geology class (D-72 readable contrast).
-pub fn elevation_from_land_mask_and_geology(
-    bounds: &MapBounds,
-    land_mask: &DenseLayer,
-    geology: &DenseLayer,
-) -> DenseLayer {
-    let mut elevation = DenseLayer::new_integer("elevation", bounds.len());
-    for index in 0..bounds.len() {
-        let z = if !is_land_cell(land_mask, index) {
-            0
-        } else {
-            match geology_kind(geology, index) {
-                GEOLOGY_BASIN => 10,
-                GEOLOGY_RIFT => 18,
-                GEOLOGY_STABLE | GEOLOGY_NONE => 30,
-                GEOLOGY_RIDGE => 55,
-                GEOLOGY_VOLCANIC_ARC => 72,
-                _ => 30,
-            }
-        };
-        elevation.set(index, DenseState::Value(LayerValue::Int(z)));
-    }
-    elevation
-}
+/// Step 5 bridge — see `elevation_gen` (D-88 continuous intensity).
+pub use crate::elevation_gen::elevation_from_land_mask_and_geology;
 
 fn despeckle_isolated_minors(bounds: &MapBounds, layer: &mut DenseLayer) {
     let mut demote = Vec::new();
@@ -317,6 +294,11 @@ fn is_land_cell(land_mask: &DenseLayer, index: usize) -> bool {
 }
 
 fn geology_kind(geology: &DenseLayer, index: usize) -> &'static str {
+    geology_kind_at(geology, index)
+}
+
+/// Geology category at index (for elevation bridge).
+pub fn geology_kind_at(geology: &DenseLayer, index: usize) -> &'static str {
     match geology.state(index) {
         DenseState::Value(LayerValue::Text(ref t)) => match t.as_str() {
             GEOLOGY_STABLE => GEOLOGY_STABLE,
@@ -437,10 +419,10 @@ mod tests {
             1,
             DenseState::Value(LayerValue::Text(GEOLOGY_BASIN.to_string())),
         );
-        let elev = elevation_from_land_mask_and_geology(&bounds, &mask, &geo);
+        let elev = elevation_from_land_mask_and_geology(&bounds, &mask, &geo, 5);
         assert!(elev.int_or(0, 0) > elev.int_or(1, 0));
-        assert_eq!(elev.int_or(0, 0), 55);
-        assert_eq!(elev.int_or(1, 0), 10);
+        assert!((48..=64).contains(&elev.int_or(0, 0)));
+        assert!((8..=14).contains(&elev.int_or(1, 0)));
     }
 
     #[test]
@@ -795,7 +777,7 @@ mod tests {
         let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
         fill_land_disk(&bounds, &mut mask, 12);
         let geo = generate_geology(&bounds, &mask, GeologyStyle::Belts, 21);
-        let elev = elevation_from_land_mask_and_geology(&bounds, &mask, &geo);
+        let elev = elevation_from_land_mask_and_geology(&bounds, &mask, &geo, 21);
         let high = (0..bounds.len())
             .filter(|&i| elev.int_or(i, 0) >= 55)
             .count();
