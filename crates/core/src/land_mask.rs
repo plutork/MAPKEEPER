@@ -341,12 +341,12 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
             0.55, 0.2, 0.10, 0.10
         ),
         hole: None,
-        land_fraction: 0.23,
+        land_fraction: 0.20,
         primary_count: 4,
-        satellite_count: 6,
-        merge_bias: 0.06,
-        elongation: 0.35,
-        irregularity: 0.6,
+        satellite_count: 7,
+        merge_bias: 0.03,
+        elongation: 0.42,
+        irregularity: 0.64,
     },
     LayoutRecipe {
         id: "island_hooked",
@@ -1240,6 +1240,35 @@ fn pick_ocean_seed_away(bounds: &MapBounds, layer: &DenseLayer, seed: u64) -> Op
     let mut best_score = -1.0f64;
     for k in 0..64u64 {
         let idx = (mix64(seed ^ k.wrapping_mul(0x9E37)) as usize) % n.max(1);
+        if is_land_cell(layer, idx) {
+            continue;
+        }
+        let Some(cell) = bounds.from_index(idx) else {
+            continue;
+        };
+        let land_n = cell
+            .neighbors()
+            .iter()
+            .filter(|nb| bounds.index_of(**nb).is_some_and(|ni| is_land_cell(layer, ni)))
+            .count();
+        if land_n > 0 {
+            continue;
+        }
+        let (x, y) = cell.to_pixel(1.0);
+        let min_d = cents
+            .iter()
+            .map(|(cx, cy)| (x - cx).hypot(y - cy))
+            .fold(f64::MAX, f64::min);
+        if min_d.is_finite() && min_d > best_score {
+            best_score = min_d;
+            best = Some(idx);
+        }
+    }
+    if best.is_some() {
+        return best;
+    }
+    // Fallback: full scan when random probes miss a valid ocean seed.
+    for idx in 0..n {
         if is_land_cell(layer, idx) {
             continue;
         }
