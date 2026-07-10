@@ -56,7 +56,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Cursor alpha guide (D-80/D-81): `docs/CURSOR-ALPHA.md`
 - Full symbol codemap (generated): `docs/CODEMAP.md`
 - Codemap generator script: `scripts/gen_codemap.py`
-- Alpha Windows launch/update: `run.ps1`, `update.ps1`; troubleshooting: `.cursor/commands/doctor.md`
+- Alpha Windows launch/update: `run.ps1`, `update.ps1`; troubleshooting role: `.cursor/commands/doctor.md` (D-82)
 - Core boundary entry: `crates/core/src/lib.rs`
 - Server boundary entry: `crates/server/src/lib.rs`
 - Web boundary entry: `crates/web/src/lib.rs`

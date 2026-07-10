@@ -8,7 +8,7 @@ This is **not** a world lore repo. Worlds live outside this folder (default: `Do
 
 1. `.\run.ps1` — build web + launch Tauri desktop (no agent required)
 2. `.\update.ps1` — pull + rebuild when the tester wants an update
-3. `/doctor` — only if stuck (interactive diagnose/repair with consent)
+3. `/doctor` — only if stuck (full role prompt in `.cursor/commands/doctor.md`)
 
 Human guide: [`docs/CURSOR-ALPHA.md`](docs/CURSOR-ALPHA.md).
 
