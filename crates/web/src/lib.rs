@@ -537,10 +537,12 @@ struct AppState {
     wizard_edit_brush: String,
     /// D-70: screen tier 0..=3 (S–XL); effective radius from zoom.
     wizard_brush_radius: i32,
-    /// Wizard land-edit: optimistic local stamps not yet flushed to server.
-    pending_wizard_stamps: HashMap<(i32, i32), String>,
+    /// Wizard land-edit: optimistic local stamps not yet flushed (true=land).
+    pending_wizard_stamps: HashMap<(i32, i32), bool>,
     wizard_stamp_flush_scheduled: bool,
     wizard_stamp_flush_in_flight: bool,
+    /// Hex distance throttle between drag stamp centers.
+    wizard_stamp_last_center: Option<(i32, i32)>,
     /// Build wizard step: 1 size · 2 grid · 3 silhouette · 4 tectonics · 5 elevation (D-69).
     wizard_step: u32,
     wizard_geo_style: String,
@@ -610,6 +612,7 @@ pub fn start() {
         pending_wizard_stamps: HashMap::new(),
         wizard_stamp_flush_scheduled: false,
         wizard_stamp_flush_in_flight: false,
+        wizard_stamp_last_center: None,
         wizard_step: 1,
         wizard_geo_style: "belts".to_string(),
         wizard_geo_nonce: 0,
@@ -1664,12 +1667,12 @@ async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
 
 /// Merge stamp cells into pending wizard edits (no I/O — optimistic path guard).
 fn merge_wizard_stamp_pending(
-    pending: &mut HashMap<(i32, i32), String>,
+    pending: &mut HashMap<(i32, i32), bool>,
     cells: &[(i32, i32)],
-    kind: &str,
+    land: bool,
 ) {
-    for &(q, r) in cells {
-        pending.insert((q, r), kind.to_string());
+    for &cell in cells {
+        pending.insert(cell, land);
     }
 }
 
@@ -1677,32 +1680,47 @@ fn clear_wizard_stamp_pending(s: &mut AppState) {
     s.pending_wizard_stamps.clear();
     s.wizard_stamp_flush_scheduled = false;
     s.wizard_stamp_flush_in_flight = false;
+    s.wizard_stamp_last_center = None;
 }
 
-/// Optimistic local stamp + cooldown batch flush (same pattern as editor D-43).
+fn wizard_stamp_spacing(radius: i32) -> i32 {
+    ((radius + 1) / 2).max(1)
+}
+
+/// Optimistic local stamp; persist only on mouseup / leave-edit (no mid-drag HTTP).
 fn queue_wizard_land_mask_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32)) {
     let painted = {
         let mut s = state.borrow_mut();
-        let kind = s.wizard_edit_brush.clone();
+        let land = s.wizard_edit_brush == "land";
         let radius =
             effective_brush_radius_from_hex_size(s.wizard_brush_radius, current_hex_size_px(&s));
+        if let Some(prev) = s.wizard_stamp_last_center {
+            let dist = Axial::new(prev.0, prev.1).distance(Axial::new(center.0, center.1));
+            if dist < wizard_stamp_spacing(radius) {
+                return;
+            }
+        }
         let cells = paint_stamp_cells(center, radius, s.map_bounds);
         if cells.is_empty() {
             return;
         }
-        let value = if kind == "land" { 1 } else { 0 };
+        let value = if land { 1 } else { 0 };
         let bounds = s.map_bounds;
         for &(q, r) in &cells {
             set_elevation_cell(&mut s.elevation, bounds, q, r, value);
         }
-        merge_wizard_stamp_pending(&mut s.pending_wizard_stamps, &cells, &kind);
+        merge_wizard_stamp_pending(&mut s.pending_wizard_stamps, &cells, land);
+        s.wizard_stamp_last_center = Some(center);
         bump_content_rev(&mut s);
         cells.len()
     };
     schedule_redraw(state.clone());
     if painted > 0 {
-        set_wizard_status("Edit autosave pending…");
-        schedule_wizard_stamp_flush(state);
+        // Status once — avoid DOM thrash every mousemove.
+        let pending_n = state.borrow().pending_wizard_stamps.len();
+        if pending_n == painted {
+            set_wizard_status("Edit pending — release mouse to save.");
+        }
     }
 }
 
@@ -1720,30 +1738,58 @@ fn schedule_wizard_stamp_flush(state: Rc<RefCell<AppState>>) {
         return;
     }
     wasm_bindgen_futures::spawn_local(async move {
-        TimeoutFuture::new(PAINT_SAVE_COOLDOWN_MS).await;
+        // Short yield so mouseup UI stays responsive before heavy save.
+        TimeoutFuture::new(0).await;
         flush_wizard_land_mask_stamps(state).await;
     });
 }
 
 async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
-    let batch = {
+    let (batch, need_retry) = {
         let mut s = state.borrow_mut();
         s.wizard_stamp_flush_scheduled = false;
-        if s.wizard_stamp_flush_in_flight || s.pending_wizard_stamps.is_empty() {
-            return;
+        if s.wizard_stamp_flush_in_flight {
+            let retry = !s.pending_wizard_stamps.is_empty();
+            if retry {
+                s.wizard_stamp_flush_scheduled = true;
+            }
+            (None, retry)
+        } else if s.pending_wizard_stamps.is_empty() {
+            (None, false)
+        } else {
+            s.wizard_stamp_flush_in_flight = true;
+            (
+                Some(s.pending_wizard_stamps.drain().collect::<Vec<_>>()),
+                false,
+            )
         }
-        s.wizard_stamp_flush_in_flight = true;
-        s.pending_wizard_stamps.drain().collect::<Vec<_>>()
+    };
+    if need_retry {
+        let retry = state.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            TimeoutFuture::new(PAINT_SAVE_COOLDOWN_MS).await;
+            flush_wizard_land_mask_stamps(retry).await;
+        });
+        return;
+    }
+    let Some(batch) = batch else {
+        return;
     };
 
-    let mut failed: Vec<((i32, i32), String)> = Vec::new();
+    set_wizard_status("Saving edit…");
+    let mut failed: Vec<((i32, i32), bool)> = Vec::new();
     for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
+        let kinds: Vec<&'static str> = chunk
+            .iter()
+            .map(|(_, land)| if *land { "land" } else { "ocean" })
+            .collect();
         let payload: Vec<WizardLandMaskCellInput<'_>> = chunk
             .iter()
-            .map(|((q, r), kind)| WizardLandMaskCellInput {
+            .zip(kinds.iter())
+            .map(|(((q, r), _), kind)| WizardLandMaskCellInput {
                 q: *q,
                 r: *r,
-                kind: kind.as_str(),
+                kind: *kind,
             })
             .collect();
         let sent = gloo_net::http::Request::put("/api/build/land-mask/cells")
@@ -1752,14 +1798,14 @@ async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
             .send()
             .await;
         if !matches!(sent, Ok(resp) if resp.ok()) {
-            failed.extend(chunk.iter().cloned());
+            failed.extend(chunk.iter().copied());
         }
     }
 
     {
         let mut s = state.borrow_mut();
-        for (cell, kind) in failed {
-            s.pending_wizard_stamps.insert(cell, kind);
+        for (cell, land) in failed {
+            s.pending_wizard_stamps.insert(cell, land);
         }
         s.wizard_stamp_flush_in_flight = false;
     }
@@ -2057,7 +2103,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 (edit_now, !edit_now && !s.pending_wizard_stamps.is_empty())
             };
             if should_flush {
-                wasm_bindgen_futures::spawn_local(flush_wizard_land_mask_stamps(state.clone()));
+                schedule_wizard_stamp_flush(state.clone());
             }
             if edit_now {
                 set_wizard_status(
@@ -3497,6 +3543,7 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
                     s.paint_active = true;
                     s.paint_moved = false;
                     s.paint_last_cell = Some((q, r));
+                    s.wizard_stamp_last_center = None;
                     // mousedown already stamps; skip the following click.
                     s.suppress_next_click = true;
                 }
@@ -3592,14 +3639,17 @@ fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
                 s.paint_active = false;
                 s.paint_moved = false;
                 s.paint_last_cell = None;
+                s.wizard_stamp_last_center = None;
                 if moved {
                     s.suppress_next_click = true;
                 }
             }
             if !wizard_is_active() {
                 wasm_bindgen_futures::spawn_local(flush_pending_paints(up_state.clone()));
-            } else if up_state.borrow().wizard_edit_mode {
-                wasm_bindgen_futures::spawn_local(flush_wizard_land_mask_stamps(up_state.clone()));
+            } else if up_state.borrow().wizard_edit_mode
+                || !up_state.borrow().pending_wizard_stamps.is_empty()
+            {
+                schedule_wizard_stamp_flush(up_state.clone());
             }
         });
     let _ = window().add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
@@ -4708,17 +4758,25 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
 
 #[cfg(test)]
 mod wizard_stamp_pending_tests {
-    use super::merge_wizard_stamp_pending;
+    use super::{merge_wizard_stamp_pending, wizard_stamp_spacing};
     use std::collections::HashMap;
 
     #[test]
     fn merge_overwrites_same_cell_with_latest_kind() {
         let mut pending = HashMap::new();
-        merge_wizard_stamp_pending(&mut pending, &[(0, 0), (1, 0)], "land");
-        merge_wizard_stamp_pending(&mut pending, &[(1, 0), (2, 0)], "ocean");
-        assert_eq!(pending.get(&(0, 0)).map(String::as_str), Some("land"));
-        assert_eq!(pending.get(&(1, 0)).map(String::as_str), Some("ocean"));
-        assert_eq!(pending.get(&(2, 0)).map(String::as_str), Some("ocean"));
+        merge_wizard_stamp_pending(&mut pending, &[(0, 0), (1, 0)], true);
+        merge_wizard_stamp_pending(&mut pending, &[(1, 0), (2, 0)], false);
+        assert_eq!(pending.get(&(0, 0)).copied(), Some(true));
+        assert_eq!(pending.get(&(1, 0)).copied(), Some(false));
+        assert_eq!(pending.get(&(2, 0)).copied(), Some(false));
         assert_eq!(pending.len(), 3);
+    }
+
+    #[test]
+    fn stamp_spacing_grows_with_radius() {
+        assert_eq!(wizard_stamp_spacing(0), 1);
+        assert_eq!(wizard_stamp_spacing(1), 1);
+        assert_eq!(wizard_stamp_spacing(3), 2);
+        assert_eq!(wizard_stamp_spacing(24), 12);
     }
 }

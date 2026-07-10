@@ -1100,15 +1100,18 @@ async fn put_land_mask_cells(
     };
     let bounds = map_bounds(&world_path);
     let mut mask = read_dense_layer(&world_path, LAND_MASK_LAYER_ID, &bounds);
+    let mut elevation = read_dense_layer(&world_path, "elevation", &bounds);
+    // Incremental edit: patch touched cells only. Skip full-map inland BFS +
+    // elevation rebuild (those run on generate) so wizard paint stays responsive.
     for cell in cells {
         let Some(index) = bounds.index_of(Axial::new(cell.q, cell.r)) else {
             continue;
         };
         let kind = normalize_kind(&cell.kind);
         mask.set(index, DenseState::Value(LayerValue::Text(kind.to_string())));
+        let elev = if kind == LAND_MASK_LAND { 1 } else { 0 };
+        elevation.set(index, DenseState::Value(LayerValue::Int(elev)));
     }
-    mark_inland_for_unknown_pools(&bounds, &mut mask);
-    let elevation = elevation_from_land_mask(&bounds, &mask);
     if let Err(err) = write_dense_layer(&world_path, &mask) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
@@ -1312,6 +1315,7 @@ fn silhouette_seed(
     hash ^ regenerate_nonce
 }
 
+#[allow(dead_code)] // kept for generate-time inland refresh if edit path needs it later
 fn mark_inland_for_unknown_pools(bounds: &MapBounds, mask: &mut DenseLayer) {
     let mut seen = vec![false; bounds.len()];
     let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
