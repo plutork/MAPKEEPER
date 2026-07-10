@@ -1,37 +1,31 @@
 ---
 name: mapkeeper-world-template
 description: >-
-  Author world template bundle — toolchain/template/world, GitHub template
-  sync, /user command in bundle. Use when editing world scaffold, template
-  sync, or author onboarding files.
-paths: toolchain/template/world/**, toolchain/template/sync-template.ps1
+  Embedded author-world scaffold — toolchain/template/world for editor/CLI
+  (D-26). Use when editing world scaffold files. GitHub Template sync retired (D-84).
+paths: toolchain/template/world/**
 ---
 
-# World template (mapkeeper)
+# World scaffold (mapkeeper)
 
-**Decisions:** D-08 GitHub Template · D-10 sync CI · D-12 wizard replaces Template for V0-done persona.
+**Decisions:** D-26 embedded scaffold · **D-84** GitHub Template distribution retired · D-09 wizard primary for writers.
 
 ## Source of truth
 
-Edit **`toolchain/template/world/`** only — not manual copy from legacy `toolchain/cursor/`.
+Edit **`toolchain/template/world/`** only — not legacy `toolchain/cursor/` hand-copy as author UX.
 
-`/user` ships **inside** template bundle at `.cursor/commands/user.md`.
+`/user` ships **inside** the scaffold bundle at `.cursor/commands/user.md` and is created with new worlds via the editor.
 
-## Sync (D-10)
+## Do not
 
-- Local optional: `toolchain/template/sync-template.ps1`
-- CI: `.github/workflows/sync-world-template.yml` → `mapkeeper-world-template`
-- Agents: edit `world/` → commit → CI mirrors; no manual robocopy workflow.
+- Reintroduce sync to `mapkeeper-world-template` or `MAPKEEPER_WORLD_TEMPLATE_PAT`.
+- Document «Use this GitHub template» as author onboarding.
+- Put private maintainer text in the public kit.
 
-## Author layout *(world repo)*
+## Author layout *(world folder)*
 
 `mapkeeper.toml`, `map/`, `canon/`, `profiles/`, `data/`, `journal/`, `.cursor/commands/user.md`, `AGENTS.md`
 
-## Public MAPKEEPER rules
-
-- No private maintainer text in the public kit.
-- Template is **interim** onboarding until editor wizard (D-09).
-
 ## Gate
 
-Template changes are product work — only through approved `/real` scope with D-* backing.
+Scaffold changes are product work — only through approved `/real` scope with D-* backing.

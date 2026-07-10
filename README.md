@@ -38,7 +38,7 @@ Details: [docs/CURSOR-ALPHA.md](docs/CURSOR-ALPHA.md).
 - Flow opens **Build World wizard** directly.
 - Blank **Create** remains available under advanced options.
 
-Git-native interim world scaffold: [mapkeeper-world-template](https://github.com/plutork/mapkeeper-world-template/generate).
+Your lore stays in the world folder (usually under `Documents/MAPKEEPER Worlds`), not in this product repository.
 
 ## Invariants
 
