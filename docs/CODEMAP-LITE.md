@@ -9,19 +9,20 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 ## Task -> first path
 
 - Core rules, ids, geometry, profile model -> `crates/core/src/`
+- **World generation pipeline (D-92)** — dependency order land → coast/plates → geology → elevation → climate → hydrology -> `crates/core/src/worldgen/`
 - Spatial contract (distance/ring/range/bounds) -> `crates/core/src/hex.rs`
 - Map size presets (Small/Medium/Large/Epic/Grand/World -> hex-rectangle 16:9 W×H; D-73 ladder Small~510…World~100k) -> `crates/core/src/map_preset.rs` (`map-preset--ladder-retune-500`)
 - Map state model (dense layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
 - Cell index (`(q,r) <-> linear index`, `MapBounds::index_of`/`from_index`/`len`) -> `crates/core/src/hex.rs`
 - Dense typed-layer model (index-addressed, palette categorical + integer; `read_or_empty`; generic wire `WireCellState`/`LayerCellWrite`) -> `crates/core/src/layer.rs` (`DenseLayer`)
-- Step-3 silhouette model (`land_mask`, six layout classes + growth-plan catalog, seeded layered land growth → cleanup, shore character, inland sea, elevation sync; UI: 6 class cards + recipe-only Regenerate below cards + always-visible gen identity line; Continents balance + Archipelago multi-island enforce, incl. `archipelago_twin_groups` anti-blob retune) -> `crates/core/src/land_mask.rs` (`world-pipeline--land-silhouette-v1`, D-62…D-66 / D-68 / `step3-organic-silhouette-v1`)
-- Step-4 geology model (`geology` categorical, **D-87 hidden plate substrate** in `plates.rs`, boundary-distance field, probabilistic orogenic width/gaps along plate edges, styles belts/shields/arcs/random) -> `crates/core/src/geology.rs`, `crates/core/src/plates.rs` (`hidden-plates-geology-foundation`, D-63, D-87)
-- Step-5 elevation bridge (`elevation_gen.rs`: geology band jitter + class-aware hex smooth; **D-89** Standard/Bold/Chaos; D-88 amends D-72; seed from world_id + style + regenerate_nonce) -> `crates/core/src/elevation_gen.rs`, `crates/server/src/lib.rs`, `crates/web/src/lib.rs`, `crates/web/index.html`
-- Step-6 coast foundation (auto `coast_distance` from `land_mask`; no wizard UI; **D-90**) -> `crates/core/src/coast_distance.rs`
-- Climate T2 zonal heuristic (`temperature`/`precipitation`/`ice`; internal west wind; wizard step 5; **D-90**) -> `crates/core/src/climate.rs`, `crates/server/src/lib.rs`, `crates/web/`
+- Step-3 silhouette model (`land_mask`, six layout classes + growth-plan catalog, seeded layered land growth → cleanup, shore character, inland sea, elevation sync; UI: 6 class cards + recipe-only Regenerate below cards + always-visible gen identity line; Continents balance + Archipelago multi-island enforce, incl. `archipelago_twin_groups` anti-blob retune) -> `crates/core/src/worldgen/land.rs` (`world-pipeline--land-silhouette-v1`, D-62…D-66 / D-68 / `step3-organic-silhouette-v1`; legacy import `mapkeeper_core::land_mask`)
+- Step-4 geology model (`geology` categorical, **D-87 hidden plate substrate** in `worldgen/plates.rs`, boundary-distance field, probabilistic orogenic width/gaps along plate edges, styles belts/shields/arcs/random) -> `crates/core/src/worldgen/geology/` (`hidden-plates-geology-foundation`, D-63, D-87; legacy `mapkeeper_core::geology`)
+- Step-5 elevation bridge (`worldgen/elevation/`: geology band jitter + class-aware hex smooth; **D-89** Standard/Bold/Chaos; D-88 amends D-72; seed from world_id + style + regenerate_nonce) -> `crates/core/src/worldgen/elevation/`, `crates/server/src/lib.rs`, `crates/web/src/lib.rs`, `crates/web/index.html` (legacy `mapkeeper_core::elevation_gen`)
+- Step-6 coast foundation (auto `coast_distance` from `land_mask`; no wizard UI; **D-90**) -> `crates/core/src/worldgen/coast.rs` (legacy `mapkeeper_core::coast_distance`)
+- Climate T2 zonal heuristic (`temperature`/`precipitation`/`ice`; internal west wind; wizard step 5; **D-90**) -> `crates/core/src/worldgen/climate/`, `crates/server/src/lib.rs`, `crates/web/` (legacy `mapkeeper_core::climate`)
 - Elevation/hydro threshold model (`elevation <= 0 => water`) + stamp falloff math -> `crates/core/src/hydro.rs` (`elevation-authoring-v2`: `filled_elevation_layer`, `stamp_delta`)
 - River catalog + `river_id` dense sync (`map/rivers.json`, neighbor chain validation) -> `crates/core/src/rivers.rs` (`river-overlay-layer-v1`, D-54)
-- Elevation-driven river auto-generation (flux, depression fill, confluence, `parent`/`basin`; **D-91** reads `precipitation` when present, uniform fallback) -> `crates/core/src/river_flux.rs` (`rivers-auto-from-elevation-v1`, D-55; `rivers-flux-v2--climate-precip`, D-91)
+- Elevation-driven river auto-generation (flux, depression fill, confluence, `parent`/`basin`; **D-91** reads `precipitation` when present, uniform fallback) -> `crates/core/src/worldgen/hydrology/river_flux.rs` (`rivers-auto-from-elevation-v1`, D-55; `rivers-flux-v2--climate-precip`, D-91; legacy `mapkeeper_core::river_flux`)
 - HTTP API, world file I/O, launcher endpoints -> `crates/server/src/`
 - Generic layer endpoints (`GET /api/layers/:id`, `PUT /api/layers/:id/batch`, `PUT /api/layers/:id/cells/:q/:r`) -> `crates/server/src/lib.rs`
 - River catalog API (`GET/PUT /api/rivers`, `POST /api/rivers/append`, `POST /api/rivers/:id/pop`, `DELETE /api/rivers/:id`) + `river_id` sync -> `crates/server/src/lib.rs` (`river-overlay-layer-v1`)
@@ -60,7 +61,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Full symbol codemap (generated): `docs/CODEMAP.md`
 - Codemap generator script: `scripts/gen_codemap.py`
 - Alpha Windows bootstrap/launch/update: `setup.ps1`, `run.ps1` (D-86 pull-in-run), `update.ps1`; troubleshooting: `.cursor/commands/doctor.md`
-- Core boundary entry: `crates/core/src/lib.rs`
+- Core boundary entry: `crates/core/src/lib.rs` (facade; worldgen under `worldgen/`, legacy top-level re-exports for adapters)
 - Server boundary entry: `crates/server/src/lib.rs`
 - Web boundary entry: `crates/web/src/lib.rs`
 - Home screen layout entry: `crates/web/index.html`
@@ -77,7 +78,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 
 ## Boundary rule
 
-- New procedural/generative map logic goes to `crates/core`.
+- New procedural/generative map logic goes to `crates/core`, preferably under `crates/core/src/worldgen/` by pipeline stage (D-92).
 - `web`, `server`, `desktop`, `cli` call into core and own adapter concerns only.
 
 ## Model boundary (D-36)

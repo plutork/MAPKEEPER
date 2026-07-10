@@ -152,7 +152,12 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         id: "pangea_crescent",
         layout_class: LayoutClass::Pangea,
         seed_zones: zones!(0.0, 0.0, 0.45, 0.40),
-        hole: Some(LayoutBlob { cx: 0.28, cy: 0.05, rx: 0.28, ry: 0.32 }),
+        hole: Some(LayoutBlob {
+            cx: 0.28,
+            cy: 0.05,
+            rx: 0.28,
+            ry: 0.32,
+        }),
         land_fraction: 0.50,
         primary_count: 1,
         satellite_count: 7,
@@ -205,7 +210,12 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         id: "continents_crescent_pair",
         layout_class: LayoutClass::Continents,
         seed_zones: zones!(-0.48, 0.0, 0.28, 0.35; 0.48, 0.08, 0.26, 0.32),
-        hole: Some(LayoutBlob { cx: -0.28, cy: 0.0, rx: 0.16, ry: 0.22 }),
+        hole: Some(LayoutBlob {
+            cx: -0.28,
+            cy: 0.0,
+            rx: 0.16,
+            ry: 0.22,
+        }),
         land_fraction: 0.40,
         primary_count: 2,
         satellite_count: 4,
@@ -364,7 +374,12 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         id: "island_crescent",
         layout_class: LayoutClass::Island,
         seed_zones: zones!(0.0, 0.05, 0.22, 0.20),
-        hole: Some(LayoutBlob { cx: 0.12, cy: 0.0, rx: 0.12, ry: 0.14 }),
+        hole: Some(LayoutBlob {
+            cx: 0.12,
+            cy: 0.0,
+            rx: 0.12,
+            ry: 0.14,
+        }),
         land_fraction: 0.13,
         primary_count: 1,
         satellite_count: 3,
@@ -445,7 +460,12 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         id: "cai_crescent_sats",
         layout_class: LayoutClass::ContinentAndIslands,
         seed_zones: zones!(0.1, 0.0, 0.32, 0.28; -0.55, 0.15, 0.12, 0.12),
-        hole: Some(LayoutBlob { cx: 0.28, cy: 0.05, rx: 0.14, ry: 0.16 }),
+        hole: Some(LayoutBlob {
+            cx: 0.28,
+            cy: 0.05,
+            rx: 0.14,
+            ry: 0.16,
+        }),
         land_fraction: 0.34,
         primary_count: 1,
         satellite_count: 6,
@@ -490,7 +510,12 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         id: "med_ring_gap",
         layout_class: LayoutClass::Mediterranean,
         seed_zones: zones!(0.0, 0.0, 0.48, 0.42),
-        hole: Some(LayoutBlob { cx: 0.0, cy: 0.0, rx: 0.28, ry: 0.24 }),
+        hole: Some(LayoutBlob {
+            cx: 0.0,
+            cy: 0.0,
+            rx: 0.28,
+            ry: 0.24,
+        }),
         land_fraction: 0.44,
         primary_count: 1,
         satellite_count: 6,
@@ -502,7 +527,12 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         id: "med_center_basin",
         layout_class: LayoutClass::Mediterranean,
         seed_zones: zones!(0.0, 0.05, 0.50, 0.40),
-        hole: Some(LayoutBlob { cx: 0.05, cy: 0.0, rx: 0.32, ry: 0.26 }),
+        hole: Some(LayoutBlob {
+            cx: 0.05,
+            cy: 0.0,
+            rx: 0.32,
+            ry: 0.26,
+        }),
         land_fraction: 0.46,
         primary_count: 1,
         satellite_count: 5,
@@ -519,7 +549,12 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
             0.1, 0.35, 0.28, 0.18;
             0.35, -0.1, 0.22, 0.24
         ),
-        hole: Some(LayoutBlob { cx: -0.05, cy: 0.05, rx: 0.22, ry: 0.20 }),
+        hole: Some(LayoutBlob {
+            cx: -0.05,
+            cy: 0.05,
+            rx: 0.22,
+            ry: 0.20,
+        }),
         land_fraction: 0.42,
         primary_count: 3,
         satellite_count: 4,
@@ -531,7 +566,12 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         id: "med_offset_basin",
         layout_class: LayoutClass::Mediterranean,
         seed_zones: zones!(0.1, -0.05, 0.48, 0.40),
-        hole: Some(LayoutBlob { cx: -0.15, cy: 0.1, rx: 0.24, ry: 0.22 }),
+        hole: Some(LayoutBlob {
+            cx: -0.15,
+            cy: 0.1,
+            rx: 0.24,
+            ry: 0.22,
+        }),
         land_fraction: 0.43,
         primary_count: 1,
         satellite_count: 6,
@@ -543,7 +583,12 @@ pub static RECIPE_CATALOG: &[LayoutRecipe] = &[
         id: "med_twin_split",
         layout_class: LayoutClass::Mediterranean,
         seed_zones: zones!(-0.25, 0.0, 0.32, 0.38; 0.35, 0.05, 0.28, 0.32),
-        hole: Some(LayoutBlob { cx: 0.05, cy: 0.0, rx: 0.18, ry: 0.28 }),
+        hole: Some(LayoutBlob {
+            cx: 0.05,
+            cy: 0.0,
+            rx: 0.18,
+            ry: 0.28,
+        }),
         land_fraction: 0.45,
         primary_count: 2,
         satellite_count: 5,
@@ -837,7 +882,10 @@ fn grow_blob(
         }
         let (px, py) = cell.to_pixel(1.0);
         let mut neigh = cell.neighbors();
-        shuffle_six(&mut neigh, seed ^ step.wrapping_mul(0xC2B2) ^ (index as u64));
+        shuffle_six(
+            &mut neigh,
+            seed ^ step.wrapping_mul(0xC2B2) ^ (index as u64),
+        );
         for ncell in neigh {
             let Some(ni) = bounds.index_of(ncell) else {
                 continue;
@@ -1145,12 +1193,7 @@ fn flood_ocean(layer: &mut DenseLayer, cells: &[usize]) {
 
 /// Third pass after growth: enforce class identity (D-66 dogfood).
 /// Pangea/Island → one mass; Continents → two roughly equal masses; CAI → main + small sats.
-fn enforce_layout_class(
-    bounds: &MapBounds,
-    layer: &mut DenseLayer,
-    class: LayoutClass,
-    seed: u64,
-) {
+fn enforce_layout_class(bounds: &MapBounds, layer: &mut DenseLayer, class: LayoutClass, seed: u64) {
     let components = land_components(bounds, layer);
     if components.is_empty() {
         return;
@@ -1249,7 +1292,11 @@ fn pick_ocean_seed_away(bounds: &MapBounds, layer: &DenseLayer, seed: u64) -> Op
         let land_n = cell
             .neighbors()
             .iter()
-            .filter(|nb| bounds.index_of(**nb).is_some_and(|ni| is_land_cell(layer, ni)))
+            .filter(|nb| {
+                bounds
+                    .index_of(**nb)
+                    .is_some_and(|ni| is_land_cell(layer, ni))
+            })
             .count();
         if land_n > 0 {
             continue;
@@ -1278,7 +1325,11 @@ fn pick_ocean_seed_away(bounds: &MapBounds, layer: &DenseLayer, seed: u64) -> Op
         let land_n = cell
             .neighbors()
             .iter()
-            .filter(|nb| bounds.index_of(**nb).is_some_and(|ni| is_land_cell(layer, ni)))
+            .filter(|nb| {
+                bounds
+                    .index_of(**nb)
+                    .is_some_and(|ni| is_land_cell(layer, ni))
+            })
             .count();
         if land_n > 0 {
             continue;
@@ -1414,12 +1465,7 @@ fn component_centroid(bounds: &MapBounds, cells: &[usize]) -> (f64, f64) {
     }
 }
 
-fn grow_second_continent(
-    bounds: &MapBounds,
-    layer: &mut DenseLayer,
-    main: &[usize],
-    seed: u64,
-) {
+fn grow_second_continent(bounds: &MapBounds, layer: &mut DenseLayer, main: &[usize], seed: u64) {
     let (mx, my) = component_centroid(bounds, main);
     let (max_x, max_y) = half_extent(bounds);
     // Seed in the opposite half of the map from the main centroid.
@@ -1617,8 +1663,7 @@ fn grow_organic_mass(
         let along = dx * ex + dy * ey;
         let across = dx * -ey + dy * ex;
         let d = (along * along + (across * 1.2).powi(2)).sqrt();
-        let wobble =
-            1.0 + 0.2 * (unit01(seed ^ (index as u64).wrapping_mul(0x45) ^ 0xF00D) - 0.5);
+        let wobble = 1.0 + 0.2 * (unit01(seed ^ (index as u64).wrapping_mul(0x45) ^ 0xF00D) - 0.5);
         let r = soft_r * wobble;
         if d > r {
             let t = ((d - r) / (r * 0.8)).clamp(0.0, 1.0);
@@ -1679,12 +1724,7 @@ fn grow_organic_mass(
 
 /// Peel land from the coast inward until `target` cells remain.
 /// Frontier-based — O(n log n), not O(n²) full rescans (Continents dogfood).
-fn erode_land_mass(
-    bounds: &MapBounds,
-    layer: &mut DenseLayer,
-    mass: &[usize],
-    target: usize,
-) {
+fn erode_land_mass(bounds: &MapBounds, layer: &mut DenseLayer, mass: &[usize], target: usize) {
     if mass.len() <= target {
         return;
     }
@@ -1947,12 +1987,7 @@ mod tests {
     #[test]
     fn generate_keeps_bounds_length() {
         let bounds = MapBounds::new(14, 8);
-        let layer = generate_land_mask(
-            &bounds,
-            LayoutClass::Pangea,
-            ShoreCharacter::Smooth,
-            42,
-        );
+        let layer = generate_land_mask(&bounds, LayoutClass::Pangea, ShoreCharacter::Smooth, 42);
         assert_eq!(layer.len(), bounds.len());
         assert_eq!(layer.layer_id, LAND_MASK_LAYER_ID);
     }
@@ -2011,7 +2046,10 @@ mod tests {
         let recipe = find_recipe("cai_irregular_main").expect("recipe");
         let layer = generate_land_mask_recipe(&bounds, recipe, ShoreCharacter::Smooth, 19);
         let land = count_kind(&layer, LAND_MASK_LAND);
-        assert!(land > 40, "main continent should be substantial, got {land}");
+        assert!(
+            land > 40,
+            "main continent should be substantial, got {land}"
+        );
         let mut left_land = false;
         for index in 0..bounds.len() {
             let Some(cell) = bounds.from_index(index) else {
@@ -2037,7 +2075,8 @@ mod tests {
     fn pangea_is_single_landmass() {
         let bounds = MapBounds::new(28, 16);
         for seed in [0u64, 3, 11, 42, 99] {
-            let layer = generate_land_mask(&bounds, LayoutClass::Pangea, ShoreCharacter::Jagged, seed);
+            let layer =
+                generate_land_mask(&bounds, LayoutClass::Pangea, ShoreCharacter::Jagged, seed);
             let comps = land_components(&bounds, &layer);
             assert_eq!(
                 comps.len(),
@@ -2059,7 +2098,11 @@ mod tests {
             );
         }
         // Two separate blobs.
-        for cell in [Axial { q: -2, r: 0 }, Axial { q: -1, r: 0 }, Axial { q: 0, r: 0 }] {
+        for cell in [
+            Axial { q: -2, r: 0 },
+            Axial { q: -1, r: 0 },
+            Axial { q: 0, r: 0 },
+        ] {
             let i = bounds.index_of(cell).expect("in bounds");
             layer.set(
                 i,
@@ -2081,8 +2124,12 @@ mod tests {
     fn continents_masses_are_comparable() {
         let bounds = MapBounds::new(32, 18);
         for seed in [0u64, 5, 17, 42, 88] {
-            let layer =
-                generate_land_mask(&bounds, LayoutClass::Continents, ShoreCharacter::Jagged, seed);
+            let layer = generate_land_mask(
+                &bounds,
+                LayoutClass::Continents,
+                ShoreCharacter::Jagged,
+                seed,
+            );
             let comps = land_components(&bounds, &layer);
             assert!(
                 comps.len() >= 2,
@@ -2120,11 +2167,7 @@ mod tests {
             "expected substantial Continents land, got {land} ({frac:.3})"
         );
         let comps = land_components(&bounds, &layer);
-        assert!(
-            comps.len() >= 2,
-            "expected ≥2 masses, got {}",
-            comps.len()
-        );
+        assert!(comps.len() >= 2, "expected ≥2 masses, got {}", comps.len());
         let ratio = comps[1].len() as f64 / comps[0].len().max(1) as f64;
         assert!(
             ratio >= 0.35,

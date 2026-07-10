@@ -33,7 +33,9 @@ pub fn generate_with_owners(
     }
 
     let use_climate = precipitation
-        .map(|p| p.layer_id == PRECIPITATION_LAYER_ID && land_precip_sample_count(p, elevation, n) > 0)
+        .map(|p| {
+            p.layer_id == PRECIPITATION_LAYER_ID && land_precip_sample_count(p, elevation, n) > 0
+        })
         .unwrap_or(false);
     let precip_mean = precipitation
         .filter(|_| use_climate)

@@ -3,8 +3,8 @@
 use std::collections::VecDeque;
 
 use crate::hex::MapBounds;
-use crate::land_mask::LAND_MASK_LAND;
 use crate::layer::{DenseLayer, DenseState, LayerValue};
+use crate::worldgen::land::LAND_MASK_LAND;
 
 /// Hex steps from each cell to the nearest non-land cell (water = 0).
 pub fn coast_distance_land_steps(bounds: &MapBounds, land_mask: &DenseLayer) -> Vec<u32> {
@@ -53,7 +53,7 @@ fn is_land_cell(land_mask: &DenseLayer, index: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::land_mask::{generate_land_mask, LayoutClass, ShoreCharacter, LAND_MASK_LAND};
+    use crate::worldgen::land::{generate_land_mask, LayoutClass, ShoreCharacter, LAND_MASK_LAND};
 
     #[test]
     fn water_zero_land_increases_inland() {
