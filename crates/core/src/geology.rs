@@ -114,8 +114,8 @@ fn classify_land(
     seed: u64,
 ) -> &'static str {
     let n = hash01(seed ^ 0x6E01, cell.q, cell.r);
-    // Low-frequency band so ridge/rift read as belts, not salt.
-    let band = (nx * 1.7 + ny * 0.9).sin();
+    // Seed-driven band angle/phase so Regenerate yields another layout (D-63/D-72).
+    let band = belt_band_signal(nx, ny, seed);
     match style {
         GeologyStyle::Belts => {
             if band.abs() < 0.20 {
@@ -252,6 +252,14 @@ fn half_extent(bounds: &MapBounds) -> (f64, f64) {
         max_y = max_y.max(y.abs());
     }
     (max_x.max(1.0), max_y.max(1.0))
+}
+
+/// Low-frequency ridge/rift belt coordinate; seed rotates/shifts the band.
+fn belt_band_signal(nx: f64, ny: f64, seed: u64) -> f64 {
+    let angle = hash01(seed, -3, 7) * std::f64::consts::PI;
+    let phase = hash01(seed, 5, -2) * std::f64::consts::TAU;
+    let along = nx * angle.cos() + ny * angle.sin();
+    (along * 1.7 + phase).sin()
 }
 
 fn hash01(seed: u64, q: i32, r: i32) -> f64 {
@@ -488,5 +496,47 @@ mod tests {
                 style
             );
         }
+    }
+
+    fn ridge_mean_pixel(bounds: &MapBounds, geo: &DenseLayer) -> (f64, f64) {
+        let mut sx = 0.0;
+        let mut sy = 0.0;
+        let mut n = 0usize;
+        for i in 0..bounds.len() {
+            if geology_kind(geo, i) != GEOLOGY_RIDGE {
+                continue;
+            }
+            let Some(cell) = bounds.from_index(i) else {
+                continue;
+            };
+            let (x, y) = cell.to_pixel(1.0);
+            sx += x;
+            sy += y;
+            n += 1;
+        }
+        if n == 0 {
+            (0.0, 0.0)
+        } else {
+            (sx / n as f64, sy / n as f64)
+        }
+    }
+
+    #[test]
+    fn belts_seed_changes_layout_not_only_speckle() {
+        // failure_class: recipe_not_distinct — regenerate must move belt geometry
+        let bounds = MapBounds::new(48, 28);
+        let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
+        fill_land_disk(&bounds, &mut mask, 12);
+        let a = generate_geology(&bounds, &mask, GeologyStyle::Belts, 1);
+        let b = generate_geology(&bounds, &mask, GeologyStyle::Belts, 42);
+        let (ax, ay) = ridge_mean_pixel(&bounds, &a);
+        let (bx, by) = ridge_mean_pixel(&bounds, &b);
+        assert!(count_kind(&a, GEOLOGY_RIDGE) > 0);
+        assert!(count_kind(&b, GEOLOGY_RIDGE) > 0);
+        let dist = ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt();
+        assert!(
+            dist > 2.0,
+            "ridge centroid should shift between seeds (got {dist})"
+        );
     }
 }
