@@ -279,6 +279,29 @@
   #project-list li.manage-open .manage-row { display: flex; }
   #project-empty { color: #666f7a; font-size: 13px; display: none; }
   #project-empty.visible { display: block; }
+  .first-world-cta {
+    display: none;
+    margin-top: 10px;
+    padding: 12px;
+    border: 1px solid #3f536a;
+    border-radius: 10px;
+    background: rgba(47, 71, 96, 0.2);
+  }
+  .first-world-cta.visible { display: block; }
+  .first-world-cta h3 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    color: #d7e5f5;
+  }
+  .first-world-cta p {
+    margin: 0;
+    color: #9eb0c4;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .first-world-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .first-world-primary { background: #2f6b4f; color: #e9fff2; }
+  .first-world-secondary { background: #2a2f36; color: #d2d7de; }
   #home input, #home select {
     display: block;
     width: 100%;
@@ -295,6 +318,7 @@
   #home label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #8a8f98; }
   #home-status { font-size: 12px; color: #d97757; min-height: 16px; margin-top: 8px; }
   .create-wrap { margin-top: 14px; padding-top: 12px; border-top: 1px solid #2a2f36; }
+  .create-wrap.demoted { display: none; }
   .create-wrap h3 {
     margin: 0 0 10px;
     font-size: 12px;
@@ -341,6 +365,32 @@
   #editor.wizard-active #tool-dock { display: none !important; }
   #editor.wizard-active #hint { display: none; }
   #build-wizard { display: none; }
+  .post-finish-note {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid #3f536a;
+    border-radius: 8px;
+    background: rgba(20, 28, 36, 0.94);
+    color: #c9d8e8;
+    font-size: 12px;
+    line-height: 1.4;
+    z-index: 15;
+    display: none;
+  }
+  .post-finish-note.visible { display: block; }
+  .post-finish-note button {
+    margin-left: 10px;
+    background: transparent;
+    border: 1px solid #4f6176;
+    color: #d5e4f4;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
 
   .wiz-top {
     grid-area: wiz-top;
@@ -646,8 +696,16 @@
         <p class="card-note">World data stays local. Agents read your world folder (`mapkeeper.toml` + `profiles/`).</p>
         <ul id="project-list"></ul>
         <p id="project-empty">No worlds yet — create one below.</p>
+        <section id="first-world-cta" class="first-world-cta" aria-live="polite">
+          <h3>Create your first world</h3>
+          <p id="first-world-hint">Start Build World with defaults (Small map in Documents) — then adjust if needed.</p>
+          <div class="first-world-actions">
+            <button id="first-world-start" class="first-world-primary" type="button">Create your first world</button>
+            <button id="first-world-advanced" class="first-world-secondary" type="button">Advanced options</button>
+          </div>
+        </section>
 
-        <div class="create-wrap">
+        <div id="create-wrap" class="create-wrap">
           <h3>Create a new world</h3>
           <label for="new-id">World name</label>
           <input id="new-id" placeholder="my-world" autocomplete="off" />
@@ -686,6 +744,10 @@
     <div class="map-wrap">
       <canvas id="map" width="720" height="560"></canvas>
       <div id="hint">mapkeeper — LMB drag pan, wheel zoom, tool dock on the right (Inspect names cells; Terrain paints elevation)</div>
+      <div id="post-finish-note" class="post-finish-note">
+        World saved. Reopen from Home with Open, then continue in Inspect/Terrain. If anything feels confusing, send feedback.
+        <button id="post-finish-dismiss" type="button">Dismiss</button>
+      </div>
     </div>
     <aside id="tool-dock">
       <nav id="dock-rail" aria-label="Tools">

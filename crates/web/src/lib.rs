@@ -641,6 +641,8 @@ pub fn start() {
     attach_generate_id_input(state.clone());
     attach_generate_path_input(state.clone());
     attach_check_updates_click();
+    attach_first_world_handlers(state.clone());
+    attach_post_finish_note_dismiss();
 
     wasm_bindgen_futures::spawn_local(refresh_projects(state));
 }
@@ -1077,6 +1079,9 @@ fn show_view(name: &str) {
             }
         }
     }
+    if name != "editor" {
+        hide_post_finish_note();
+    }
 }
 
 fn build_step_label(step: u32) -> &'static str {
@@ -1253,6 +1258,7 @@ fn set_wizard_active(active: bool) {
 }
 
 fn open_build_wizard() {
+    hide_post_finish_note();
     set_wizard_active(true);
 }
 
@@ -2265,7 +2271,8 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                     sync_wizard_actions(&s);
                 }
                 close_build_wizard();
-                set_wizard_status("Build finished — edit elevation in the editor.");
+                set_wizard_status("Build finished.");
+                show_post_finish_note();
             });
         });
         if let Some(btn) = document().get_element_by_id("wiz-finish") {
@@ -2675,7 +2682,7 @@ async fn refresh_projects(state: Rc<RefCell<AppState>>) {
         state_mut.default_worlds_root = Some(data.default_worlds_root.clone());
     }
     refresh_suggested_path(&state);
-    render_project_list(&data.projects);
+    render_project_list(&data.projects, &state);
 
     if let Some(active) = data.active {
         let _ = active;
@@ -2686,22 +2693,40 @@ async fn refresh_projects(state: Rc<RefCell<AppState>>) {
     }
 }
 
-fn render_project_list(projects: &[ProjectStatus]) {
+fn render_project_list(projects: &[ProjectStatus], state: &Rc<RefCell<AppState>>) {
     let document = document();
     let Some(list) = document.get_element_by_id("project-list") else {
         return;
     };
     let empty = document.get_element_by_id("project-empty");
+    let first_world_cta = document.get_element_by_id("first-world-cta");
+    let create_wrap = document.get_element_by_id("create-wrap");
 
     if projects.is_empty() {
         list.set_inner_html("");
         if let Some(empty) = empty {
             let _ = empty.class_list().add_1("visible");
         }
+        if let Some(cta) = first_world_cta {
+            let _ = cta.class_list().add_1("visible");
+        }
+        if let Some(wrap) = create_wrap {
+            let _ = wrap.class_list().add_1("demoted");
+        }
+        if let Some(btn) = document.get_element_by_id("first-world-advanced") {
+            btn.set_text_content(Some("Advanced options"));
+        }
+        sync_first_world_defaults(state, projects);
         return;
     }
     if let Some(empty) = empty {
         let _ = empty.class_list().remove_1("visible");
+    }
+    if let Some(cta) = first_world_cta {
+        let _ = cta.class_list().remove_1("visible");
+    }
+    if let Some(wrap) = create_wrap {
+        let _ = wrap.class_list().remove_1("demoted");
     }
 
     let mut html = String::new();
@@ -2798,6 +2823,72 @@ fn refresh_suggested_path(state: &Rc<RefCell<AppState>>) {
             input("generate-path").set_value(&path);
         }
     }
+}
+
+fn slugify_world_id(name: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for ch in name.chars() {
+        let lower = ch.to_ascii_lowercase();
+        if lower.is_ascii_alphanumeric() {
+            out.push(lower);
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "my-world".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn pick_unique_first_world_id_and_path(
+    state: &Rc<RefCell<AppState>>,
+    projects: &[ProjectStatus],
+) -> (String, String) {
+    let base = slugify_world_id("My First World");
+    let used_ids: HashSet<String> = projects.iter().map(|p| p.id.to_ascii_lowercase()).collect();
+    let used_paths: HashSet<String> =
+        projects.iter().map(|p| p.path.to_ascii_lowercase()).collect();
+    for n in 1..1000 {
+        let candidate = if n == 1 {
+            base.clone()
+        } else {
+            format!("{base}-{n}")
+        };
+        if used_ids.contains(&candidate) {
+            continue;
+        }
+        let path = {
+            let state_ref = state.borrow();
+            suggested_world_path(&state_ref, &candidate).unwrap_or_default()
+        };
+        if path.is_empty() || !used_paths.contains(&path.to_ascii_lowercase()) {
+            return (candidate, path);
+        }
+    }
+    let fallback_id = format!("{base}-{}", perf_now() as u64);
+    let fallback_path = {
+        let state_ref = state.borrow();
+        suggested_world_path(&state_ref, &fallback_id).unwrap_or_default()
+    };
+    (fallback_id, fallback_path)
+}
+
+fn sync_first_world_defaults(state: &Rc<RefCell<AppState>>, projects: &[ProjectStatus]) {
+    let (id, path) = pick_unique_first_world_id_and_path(state, projects);
+    if let Some(btn) = document().get_element_by_id("first-world-start") {
+        let _ = btn.set_attribute("data-default-id", &id);
+        let _ = btn.set_attribute("data-default-path", &path);
+    }
+    set_text(
+        "first-world-hint",
+        &format!("Start Build World with defaults ({id} in Documents, Small map) — then adjust if needed."),
+    );
 }
 
 async fn load_map(state: Rc<RefCell<AppState>>) {
@@ -4415,6 +4506,81 @@ fn attach_check_updates_click() {
             .expect("attaching check-updates-open handler");
         closure.forget();
     }
+}
+
+// tester-first-run-flow-0.2: empty-home primary CTA + demoted advanced create path.
+fn attach_first_world_handlers(state: Rc<RefCell<AppState>>) {
+    if let Some(btn) = document().get_element_by_id("first-world-start") {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let button = document()
+                .get_element_by_id("first-world-start")
+                .expect("missing #first-world-start");
+            if let Some(id) = button.get_attribute("data-default-id") {
+                input("generate-id").set_value(&id);
+            }
+            if let Some(path) = button.get_attribute("data-default-path") {
+                input("generate-path").set_value(&path);
+                state.borrow_mut().build_path_touched = false;
+            }
+            set_select_value("generate-preset", "small");
+            if let Some(start) = document().get_element_by_id("build-start") {
+                if let Ok(start) = start.dyn_into::<HtmlElement>() {
+                    start.click();
+                }
+            }
+        });
+        let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        closure.forget();
+    }
+    if let Some(btn) = document().get_element_by_id("first-world-advanced") {
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let Some(wrap) = document().get_element_by_id("create-wrap") else {
+                return;
+            };
+            if wrap.class_list().contains("demoted") {
+                let _ = wrap.class_list().remove_1("demoted");
+                set_text("first-world-hint", "Defaults ready above. Advanced create options are now visible below.");
+                if let Some(btn) = document().get_element_by_id("first-world-advanced") {
+                    btn.set_text_content(Some("Hide advanced options"));
+                }
+            } else {
+                let _ = wrap.class_list().add_1("demoted");
+                set_text(
+                    "first-world-hint",
+                    "Start Build World with defaults (Small map in Documents) — then adjust if needed.",
+                );
+                if let Some(btn) = document().get_element_by_id("first-world-advanced") {
+                    btn.set_text_content(Some("Advanced options"));
+                }
+            }
+        });
+        let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        closure.forget();
+    }
+}
+
+fn show_post_finish_note() {
+    let Some(note) = document().get_element_by_id("post-finish-note") else {
+        return;
+    };
+    let _ = note.class_list().add_1("visible");
+}
+
+fn hide_post_finish_note() {
+    let Some(note) = document().get_element_by_id("post-finish-note") else {
+        return;
+    };
+    let _ = note.class_list().remove_1("visible");
+}
+
+fn attach_post_finish_note_dismiss() {
+    let Some(btn) = document().get_element_by_id("post-finish-dismiss") else {
+        return;
+    };
+    let closure = Closure::<dyn FnMut()>::new(move || hide_post_finish_note());
+    let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+    closure.forget();
 }
 
 /// Delegated click on the project list: any `.open-btn` opens that world.
