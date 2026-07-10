@@ -4,6 +4,7 @@
 pub mod build_state;
 pub mod cell_id;
 pub mod geology;
+pub mod plates;
 pub mod hex;
 pub mod hydro;
 pub mod land_mask;

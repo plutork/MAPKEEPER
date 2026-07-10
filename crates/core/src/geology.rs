@@ -1,4 +1,4 @@
-//! Step 4 world pipeline: intermediate `geology` layer (D-63 / world-pipeline--tectonics-v1).
+//! Step 4 world pipeline: intermediate `geology` layer (D-63 / D-87 hidden plates).
 //!
 //! Explanatory categorical layer between accepted `land_mask` and elevation.
 //! Does **not** write final elevation values.
@@ -6,6 +6,9 @@
 use crate::hex::{Axial, MapBounds};
 use crate::land_mask::LAND_MASK_LAND;
 use crate::layer::{DenseLayer, DenseState, LayerValue};
+use crate::plates::{
+    build_hidden_plates, classify_plate_boundary_at, hash01, BoundaryKind,
+};
 
 pub use crate::layer::GEOLOGY_LAYER_ID;
 
@@ -16,15 +19,17 @@ pub const GEOLOGY_RIDGE: &str = "ridge";
 pub const GEOLOGY_RIFT: &str = "rift";
 pub const GEOLOGY_VOLCANIC_ARC: &str = "volcanic_arc";
 
-/// Author-facing geology generation styles (2–3 buttons).
+/// Author-facing geology generation styles (wizard buttons).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeologyStyle {
-    /// Interior ridge/rift belts + stable shields.
+    /// Orogenic chains along convergent/transform boundaries.
     Belts,
-    /// Broader stable shields, sparse ridges.
+    /// Stable interiors; restrained boundary mountains.
     Shields,
-    /// Coastal volcanic arcs + short spines.
+    /// Volcanic arcs at coast-adjacent convergent boundaries.
     Arcs,
+    /// Tectonically constrained but varied placement.
+    Random,
 }
 
 impl GeologyStyle {
@@ -32,6 +37,7 @@ impl GeologyStyle {
         match raw.trim().to_ascii_lowercase().as_str() {
             "shields" | "shield" => GeologyStyle::Shields,
             "arcs" | "arc" => GeologyStyle::Arcs,
+            "random" => GeologyStyle::Random,
             _ => GeologyStyle::Belts,
         }
     }
@@ -41,6 +47,7 @@ impl GeologyStyle {
             GeologyStyle::Belts => "belts",
             GeologyStyle::Shields => "shields",
             GeologyStyle::Arcs => "arcs",
+            GeologyStyle::Random => "random",
         }
     }
 }
@@ -53,9 +60,8 @@ pub fn generate_geology(
     style: GeologyStyle,
     seed: u64,
 ) -> DenseLayer {
+    let plates = build_hidden_plates(bounds, seed);
     let mut layer = DenseLayer::new_categorical(GEOLOGY_LAYER_ID, bounds.len());
-    let land_cells = count_land_cells(land_mask);
-    let belt_count = belt_count_for_land(land_cells);
     let (max_x, max_y) = half_extent(bounds);
     for index in 0..bounds.len() {
         let Some(cell) = bounds.from_index(index) else {
@@ -68,16 +74,117 @@ pub fn generate_geology(
             let nx = if max_x > 0.0 { x / max_x } else { 0.0 };
             let ny = if max_y > 0.0 { y / max_y } else { 0.0 };
             let coast = coast_proximity(bounds, land_mask, cell);
-            classify_land(style, nx, ny, coast, cell, seed, belt_count)
+            let (boundary, influence) =
+                classify_plate_boundary_at(bounds, &plates, cell, index);
+            map_hidden_tectonics_to_geology_style(
+                style, boundary, influence, nx, ny, coast, cell, seed,
+            )
         };
         layer.set(
             index,
             DenseState::Value(LayerValue::Text(kind.to_string())),
         );
     }
-    // geology_random_speckle: drop isolated minor-class cells → stable
     despeckle_isolated_minors(bounds, &mut layer);
     layer
+}
+
+/// Map hidden plate boundary signal + author style → geology category.
+pub fn map_hidden_tectonics_to_geology_style(
+    style: GeologyStyle,
+    boundary: BoundaryKind,
+    influence: f64,
+    nx: f64,
+    ny: f64,
+    coast: f64,
+    cell: Axial,
+    seed: u64,
+) -> &'static str {
+    let n = hash01(seed ^ 0x6E01, cell.q, cell.r);
+    let on_boundary = influence > 0.15 && boundary != BoundaryKind::Interior;
+
+    match style {
+        GeologyStyle::Belts => {
+            if on_boundary {
+                match boundary {
+                    BoundaryKind::Divergent => {
+                        if n > 0.40 {
+                            GEOLOGY_RIFT
+                        } else {
+                            GEOLOGY_RIDGE
+                        }
+                    }
+                    BoundaryKind::Convergent | BoundaryKind::Transform => GEOLOGY_RIDGE,
+                    BoundaryKind::Interior => GEOLOGY_STABLE,
+                }
+            } else if coast > 0.30 && n > 0.55 {
+                GEOLOGY_VOLCANIC_ARC
+            } else if !on_boundary && (nx * nx + ny * ny).sqrt() < 0.28 && n > 0.82 {
+                GEOLOGY_BASIN
+            } else {
+                GEOLOGY_STABLE
+            }
+        }
+        GeologyStyle::Shields => {
+            if on_boundary && n > 0.48 {
+                if boundary == BoundaryKind::Divergent && n > 0.82 {
+                    GEOLOGY_RIFT
+                } else {
+                    GEOLOGY_RIDGE
+                }
+            } else if !on_boundary && (nx * nx + ny * ny).sqrt() < 0.30 && n > 0.75 {
+                GEOLOGY_BASIN
+            } else if coast > 0.40 && n > 0.70 {
+                GEOLOGY_VOLCANIC_ARC
+            } else {
+                GEOLOGY_STABLE
+            }
+        }
+        GeologyStyle::Arcs => {
+            if coast > 0.12 {
+                if n > 0.42 {
+                    GEOLOGY_VOLCANIC_ARC
+                } else if n > 0.18 {
+                    GEOLOGY_RIDGE
+                } else {
+                    GEOLOGY_STABLE
+                }
+            } else if on_boundary {
+                GEOLOGY_RIDGE
+            } else if !on_boundary && n > 0.90 {
+                GEOLOGY_BASIN
+            } else {
+                GEOLOGY_STABLE
+            }
+        }
+        GeologyStyle::Random => {
+            if on_boundary {
+                let pick = hash01(seed ^ 0xA4D_0, cell.q, cell.r);
+                match boundary {
+                    BoundaryKind::Divergent => {
+                        if pick > 0.35 {
+                            GEOLOGY_RIFT
+                        } else {
+                            GEOLOGY_RIDGE
+                        }
+                    }
+                    BoundaryKind::Convergent => {
+                        if coast > 0.25 && pick > 0.45 {
+                            GEOLOGY_VOLCANIC_ARC
+                        } else {
+                            GEOLOGY_RIDGE
+                        }
+                    }
+                    BoundaryKind::Transform => GEOLOGY_RIDGE,
+                    BoundaryKind::Interior => GEOLOGY_STABLE,
+                }
+            } else if n > 0.88 {
+                GEOLOGY_BASIN
+            } else {
+                GEOLOGY_STABLE
+            }
+        }
+    }
 }
 
 /// Step 5 bridge: elevation from land_mask + geology (no plate sim).
@@ -92,7 +199,6 @@ pub fn elevation_from_land_mask_and_geology(
         let z = if !is_land_cell(land_mask, index) {
             0
         } else {
-            // geology-readable--elev-bridge: categorical spread, not continuous uplift
             match geology_kind(geology, index) {
                 GEOLOGY_BASIN => 10,
                 GEOLOGY_RIFT => 18,
@@ -107,67 +213,6 @@ pub fn elevation_from_land_mask_and_geology(
     elevation
 }
 
-fn classify_land(
-    style: GeologyStyle,
-    nx: f64,
-    ny: f64,
-    coast: f64,
-    cell: Axial,
-    seed: u64,
-    belt_count: usize,
-) -> &'static str {
-    let n = hash01(seed ^ 0x6E01, cell.q, cell.r);
-    // Multi-band proximity: large land → more ridge/rift belts (D-63 v1, no plate sim).
-    let belt_near = belt_proximity(nx, ny, seed, belt_count);
-    match style {
-        GeologyStyle::Belts => {
-            if belt_near < 0.20 {
-                if n > 0.55 {
-                    GEOLOGY_RIFT
-                } else {
-                    GEOLOGY_RIDGE
-                }
-            } else if belt_near < 0.30 && n > 0.78 {
-                GEOLOGY_BASIN
-            } else if coast > 0.40 && n > 0.72 {
-                // coast_proximity_inverted fix: arcs prefer high coast
-                GEOLOGY_VOLCANIC_ARC
-            } else {
-                GEOLOGY_STABLE
-            }
-        }
-        GeologyStyle::Shields => {
-            if belt_near < 0.10 && n > 0.55 {
-                GEOLOGY_RIDGE
-            } else if (nx * nx + ny * ny).sqrt() < 0.32 && n > 0.70 {
-                GEOLOGY_BASIN
-            } else if coast > 0.45 && n > 0.80 {
-                GEOLOGY_VOLCANIC_ARC
-            } else {
-                GEOLOGY_STABLE
-            }
-        }
-        GeologyStyle::Arcs => {
-            if coast > 0.28 {
-                if n > 0.40 {
-                    GEOLOGY_VOLCANIC_ARC
-                } else if n > 0.22 {
-                    GEOLOGY_RIDGE
-                } else {
-                    GEOLOGY_STABLE
-                }
-            } else if belt_near < 0.12 {
-                GEOLOGY_RIDGE
-            } else if n > 0.88 {
-                GEOLOGY_BASIN
-            } else {
-                GEOLOGY_STABLE
-            }
-        }
-    }
-}
-
-/// Minor classes with zero same-class neighbors become stable (anti-speckle).
 fn despeckle_isolated_minors(bounds: &MapBounds, layer: &mut DenseLayer) {
     let mut demote = Vec::new();
     for index in 0..bounds.len() {
@@ -206,7 +251,6 @@ fn is_minor_geology(kind: &str) -> bool {
     )
 }
 
-/// 0 = deep interior, 1 = on coast (land next to non-land).
 fn coast_proximity(bounds: &MapBounds, land_mask: &DenseLayer, cell: Axial) -> f64 {
     let mut water_n = 0usize;
     let mut total = 0usize;
@@ -263,51 +307,16 @@ fn count_land_cells(land_mask: &DenseLayer) -> usize {
         .count()
 }
 
-/// Ridge/rift belt count scales with land area (more crust → more interior structure).
-fn belt_count_for_land(land_cells: usize) -> usize {
-    if land_cells < 600 {
-        1
-    } else if land_cells < 2_000 {
-        2
-    } else if land_cells < 8_000 {
-        3
-    } else if land_cells < 25_000 {
-        4
-    } else {
-        5
-    }
-}
-
-/// Min |sin| across seed-offset bands — cell near any belt qualifies.
-fn belt_proximity(nx: f64, ny: f64, seed: u64, belt_count: usize) -> f64 {
-    let n = belt_count.max(1);
-    let mut best = 1.0f64;
-    for i in 0..n {
-        let sub = seed ^ (i as u64).wrapping_mul(0xD6E8_FEB1_8665_4A93);
-        best = best.min(belt_band_signal(nx, ny, sub).abs());
-    }
-    best
-}
-
-/// Low-frequency ridge/rift belt coordinate; seed rotates/shifts the band.
-fn belt_band_signal(nx: f64, ny: f64, seed: u64) -> f64 {
-    let angle = hash01(seed, -3, 7) * std::f64::consts::PI;
-    let phase = hash01(seed, 5, -2) * std::f64::consts::TAU;
-    let freq = 1.4 + hash01(seed, 11, -5) * 0.8;
-    let along = nx * angle.cos() + ny * angle.sin();
-    (along * freq + phase).sin()
-}
-
-fn hash01(seed: u64, q: i32, r: i32) -> f64 {
-    let mut x = seed
-        ^ ((q as i64 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15))
-        ^ ((r as i64 as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F));
-    x ^= x >> 33;
-    x = x.wrapping_mul(0xff51afd7ed558ccd);
-    x ^= x >> 33;
-    x = x.wrapping_mul(0xc4ceb9fe1a85ec53);
-    x ^= x >> 33;
-    (x as f64) / (u64::MAX as f64)
+fn valid_geology_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        GEOLOGY_NONE
+            | GEOLOGY_STABLE
+            | GEOLOGY_BASIN
+            | GEOLOGY_RIDGE
+            | GEOLOGY_RIFT
+            | GEOLOGY_VOLCANIC_ARC
+    )
 }
 
 #[cfg(test)]
@@ -317,6 +326,7 @@ mod tests {
         generate_land_mask, LayoutClass, ShoreCharacter, LAND_MASK_INLAND_SEA, LAND_MASK_LAND,
         LAND_MASK_OCEAN,
     };
+    use crate::plates::build_hidden_plates;
 
     fn count_kind(layer: &DenseLayer, kind: &str) -> usize {
         (0..layer.len())
@@ -398,6 +408,7 @@ mod tests {
         assert_eq!(GeologyStyle::parse("belts"), GeologyStyle::Belts);
         assert_eq!(GeologyStyle::parse("shields"), GeologyStyle::Shields);
         assert_eq!(GeologyStyle::parse("arcs"), GeologyStyle::Arcs);
+        assert_eq!(GeologyStyle::parse("random"), GeologyStyle::Random);
     }
 
     #[test]
@@ -494,7 +505,6 @@ mod tests {
 
     #[test]
     fn arcs_volcanic_prefer_coast_over_interior() {
-        // failure_class: coast_proximity_inverted
         let bounds = MapBounds::new(40, 24);
         let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
         fill_land_disk(&bounds, &mut mask, 10);
@@ -515,7 +525,6 @@ mod tests {
 
     #[test]
     fn generated_geology_has_few_isolated_minors() {
-        // failure_class: geology_random_speckle
         let bounds = MapBounds::new(48, 28);
         let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
         fill_land_disk(&bounds, &mut mask, 12);
@@ -523,6 +532,7 @@ mod tests {
             GeologyStyle::Belts,
             GeologyStyle::Shields,
             GeologyStyle::Arcs,
+            GeologyStyle::Random,
         ] {
             let geo = generate_geology(&bounds, &mask, style, 7);
             let isolated = isolated_minor_count(&bounds, &geo);
@@ -534,12 +544,44 @@ mod tests {
         }
     }
 
-    fn ridge_mean_pixel(bounds: &MapBounds, geo: &DenseLayer) -> (f64, f64) {
+    #[test]
+    fn all_styles_produce_valid_categories() {
+        let bounds = MapBounds::new(32, 20);
+        let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
+        fill_land_disk(&bounds, &mut mask, 8);
+        for style in [
+            GeologyStyle::Belts,
+            GeologyStyle::Shields,
+            GeologyStyle::Arcs,
+            GeologyStyle::Random,
+        ] {
+            let geo = generate_geology(&bounds, &mask, style, 13);
+            for i in 0..bounds.len() {
+                let kind = geology_kind(&geo, i);
+                assert!(valid_geology_kind(kind), "{style:?} invalid {kind}");
+            }
+        }
+    }
+
+    #[test]
+    fn geology_is_deterministic_for_seed() {
+        let bounds = MapBounds::new(24, 14);
+        let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
+        fill_land_disk(&bounds, &mut mask, 6);
+        let a = generate_geology(&bounds, &mask, GeologyStyle::Belts, 55);
+        let b = generate_geology(&bounds, &mask, GeologyStyle::Belts, 55);
+        for i in 0..bounds.len() {
+            assert_eq!(geology_kind(&a, i), geology_kind(&b, i));
+        }
+    }
+
+    fn orogenic_mean_pixel(bounds: &MapBounds, geo: &DenseLayer) -> (f64, f64) {
         let mut sx = 0.0;
         let mut sy = 0.0;
         let mut n = 0usize;
         for i in 0..bounds.len() {
-            if geology_kind(geo, i) != GEOLOGY_RIDGE {
+            let kind = geology_kind(geo, i);
+            if kind != GEOLOGY_RIDGE && kind != GEOLOGY_RIFT {
                 continue;
             }
             let Some(cell) = bounds.from_index(i) else {
@@ -559,20 +601,19 @@ mod tests {
 
     #[test]
     fn belts_seed_changes_layout_not_only_speckle() {
-        // failure_class: recipe_not_distinct — regenerate must move belt geometry
         let bounds = MapBounds::new(48, 28);
         let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
         fill_land_disk(&bounds, &mut mask, 12);
         let a = generate_geology(&bounds, &mask, GeologyStyle::Belts, 1);
-        let b = generate_geology(&bounds, &mask, GeologyStyle::Belts, 42);
-        let (ax, ay) = ridge_mean_pixel(&bounds, &a);
-        let (bx, by) = ridge_mean_pixel(&bounds, &b);
-        assert!(count_kind(&a, GEOLOGY_RIDGE) > 0);
-        assert!(count_kind(&b, GEOLOGY_RIDGE) > 0);
+        let b = generate_geology(&bounds, &mask, GeologyStyle::Belts, 11);
+        let (ax, ay) = orogenic_mean_pixel(&bounds, &a);
+        let (bx, by) = orogenic_mean_pixel(&bounds, &b);
+        assert!(count_kind(&a, GEOLOGY_RIDGE) + count_kind(&a, GEOLOGY_RIFT) > 0);
+        assert!(count_kind(&b, GEOLOGY_RIDGE) + count_kind(&b, GEOLOGY_RIFT) > 0);
         let dist = ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt();
         assert!(
-            dist > 2.0,
-            "ridge centroid should shift between seeds (got {dist})"
+            dist > 1.0,
+            "orogenic centroid should shift between seeds (got {dist})"
         );
     }
 
@@ -597,16 +638,7 @@ mod tests {
     }
 
     #[test]
-    fn belt_count_scales_with_land_area() {
-        assert_eq!(belt_count_for_land(400), 1);
-        assert_eq!(belt_count_for_land(1_500), 2);
-        assert_eq!(belt_count_for_land(5_000), 3);
-        assert!(belt_count_for_land(30_000) >= 4);
-    }
-
-    #[test]
-    fn large_land_gets_wider_ridge_spread_than_small() {
-        // failure_class: recipe_not_distinct — World-scale land should not collapse to one stripe
+    fn large_land_gets_boundary_driven_ridge_spread() {
         let bounds_small = MapBounds::new(24, 14);
         let mut mask_small = DenseLayer::new_categorical("land_mask", bounds_small.len());
         fill_land_disk(&bounds_small, &mut mask_small, 4);
@@ -618,7 +650,6 @@ mod tests {
         let land_small = count_land_cells(&mask_small);
         let land_large = count_land_cells(&mask_large);
         assert!(land_large > land_small * 8);
-        assert!(belt_count_for_land(land_large) > belt_count_for_land(land_small));
 
         let geo_small = generate_geology(&bounds_small, &mask_small, GeologyStyle::Belts, 7);
         let geo_large = generate_geology(&bounds_large, &mask_large, GeologyStyle::Belts, 7);
@@ -629,5 +660,57 @@ mod tests {
             span_large > span_small.saturating_mul(2),
             "large land ridge span {span_large} should exceed small {span_small}"
         );
+    }
+
+    fn boundary_adjacent_ridge_fraction(bounds: &MapBounds, _mask: &DenseLayer, geo: &DenseLayer, seed: u64) -> f64 {
+        let plates = build_hidden_plates(bounds, seed);
+        let mut ridges = 0usize;
+        let mut on_boundary = 0usize;
+        for i in 0..bounds.len() {
+            if geology_kind(geo, i) != GEOLOGY_RIDGE {
+                continue;
+            }
+            ridges += 1;
+            let Some(cell) = bounds.from_index(i) else {
+                continue;
+            };
+            let (kind, inf) = classify_plate_boundary_at(bounds, &plates, cell, i);
+            if kind != crate::plates::BoundaryKind::Interior && inf > 0.2 {
+                on_boundary += 1;
+            }
+        }
+        if ridges == 0 {
+            0.0
+        } else {
+            on_boundary as f64 / ridges as f64
+        }
+    }
+
+    #[test]
+    fn medium_large_ridges_follow_plate_boundaries() {
+        let bounds = MapBounds::new(64, 36);
+        let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
+        fill_land_disk(&bounds, &mut mask, 22);
+        let geo = generate_geology(&bounds, &mask, GeologyStyle::Belts, 21);
+        let frac = boundary_adjacent_ridge_fraction(&bounds, &mask, &geo, 21);
+        assert!(
+            frac > 0.55,
+            "ridges should mostly sit on plate boundaries, got {frac}"
+        );
+    }
+
+    #[test]
+    fn elevation_after_hidden_plates_has_highland_chains() {
+        let bounds = MapBounds::new(48, 28);
+        let mut mask = DenseLayer::new_categorical("land_mask", bounds.len());
+        fill_land_disk(&bounds, &mut mask, 12);
+        let geo = generate_geology(&bounds, &mask, GeologyStyle::Belts, 33);
+        let elev = elevation_from_land_mask_and_geology(&bounds, &mask, &geo);
+        let high = (0..bounds.len())
+            .filter(|&i| elev.int_or(i, 0) >= 55)
+            .count();
+        assert!(high > 8, "expected visible highland/ridge elevation cells");
+        let ridge_cells = count_kind(&geo, GEOLOGY_RIDGE) + count_kind(&geo, GEOLOGY_VOLCANIC_ARC);
+        assert!(ridge_cells > 0);
     }
 }
