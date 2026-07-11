@@ -1,5 +1,6 @@
 //! Hydrology: depression analysis, river flux, lake generation.
 
+pub mod channel_graph;
 pub mod depression_fill;
 pub mod diagnostics;
 pub mod drainage_graph;
@@ -8,6 +9,10 @@ pub mod river_flux;
 pub mod river_validate;
 pub mod types;
 
+pub use channel_graph::{
+    build_channel_graph, validate_channel_graph, ChannelGraph, ChannelGraphError, ChannelPolicy,
+    HydrologyFlow, PhysicalSegment, RiverGraph, RiverGraphNode, RiverGraphNodeKind,
+};
 pub use depression_fill::{analyze_depressions, provisional_drainage};
 pub use diagnostics::{
     diagnose_legacy_hydrology, LegacyHydrologyDiagnostics, LegacyRiverTerminal,
