@@ -16,6 +16,7 @@ mod editor;
 mod elevation_view;
 mod home;
 mod state;
+mod water_diag;
 mod wizard;
 
 use canvas::redraw;
@@ -35,7 +36,7 @@ use wizard::attach_wizard_handlers;
 
 use api::refresh_projects;
 use state::{
-    fresh_elevation_layer, AppState, Brush, PerfMetrics, PerfTimers, APP_VERSION,
+    fresh_elevation_layer, AppState, Brush, PerfMetrics, PerfTimers, WaterGenTrace, APP_VERSION,
 };
 
 use std::cell::RefCell;
@@ -68,6 +69,8 @@ pub fn start() {
         active_river_id: None,
         rivers: RiverCatalog::default(),
         lakes: LakeCatalog::default(),
+        precip_layer_present: None,
+        water_gen_trace: WaterGenTrace::default(),
         selected: None,
         map_bounds: initial_bounds,
         zoom: 1.0,

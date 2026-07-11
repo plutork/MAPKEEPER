@@ -126,6 +126,20 @@
   .drawer-pane textarea { min-height: 120px; resize: vertical; }
   .dock-empty { margin: 0; font-size: 13px; color: #666f7a; line-height: 1.45; }
   .dock-note { margin: 0; font-size: 12px; color: #666f7a; line-height: 1.45; }
+  .water-gen-diagnostics {
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.35;
+    color: #9aa3ad;
+    white-space: pre-wrap;
+    margin: 8px 0;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid #2a2f36;
+    border-radius: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
   #world-name { margin: 0; font-size: 14px; font-weight: 600; word-break: break-word; }
   .swatch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .swatch {
@@ -818,6 +832,8 @@
           </div>
           <button id="generate-rivers" class="swatch" type="button">Generate rivers</button>
           <p id="water-gen-status" class="dock-note"></p>
+          <p class="dock-note">Gen diagnostics (copy into /fix reports)</p>
+          <pre id="water-gen-diagnostics" class="water-gen-diagnostics"></pre>
           <p class="pane-label">Manual rivers</p>
           <p class="dock-note">Click each hex in order — neighbor-only chain. Straight stroke overlay (v1).</p>
           <div class="swatch-grid">
@@ -1113,6 +1129,11 @@
             <button id="wiz-water-generate" class="wiz-action-btn" type="button">Generate rivers</button>
           </div>
           <p class="wiz-hint">Regenerate replaces auto-generated water. Manual river edits stay available in the editor.</p>
+        </section>
+        <section class="wiz-section">
+          <p class="wiz-label">Diagnostics</p>
+          <p class="wiz-hint">Copy into /fix reports when dogfooding.</p>
+          <pre id="wizard-water-diagnostics" class="water-gen-diagnostics"></pre>
         </section>
         <section class="wiz-section">
           <div class="wiz-btn-row wiz-bottom-actions">

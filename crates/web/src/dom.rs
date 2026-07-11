@@ -69,6 +69,13 @@ pub(crate) fn set_text(id: &str, text: &str) {
     }
 }
 
+/// Dogfood diagnostics — wizard step 6 + editor rivers drawer.
+pub(crate) fn set_water_diagnostics(text: &str) {
+    for id in ["water-gen-diagnostics", "wizard-water-diagnostics"] {
+        set_text(id, text);
+    }
+}
+
 /// Active preset button value inside a container (`[attr].active`).
 pub(crate) fn active_attr_in_group(container_id: &str, attr: &str, default: &str) -> String {
     let selector = format!("#{container_id} [{attr}].active");

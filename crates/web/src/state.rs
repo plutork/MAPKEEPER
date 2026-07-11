@@ -43,6 +43,15 @@ pub(crate) const BRUSH_PREVIEW_GAP: f64 = 0.92;
 pub(crate) const CANVAS_PAD: f64 = 20.0;
 /// Default land elevation when a cell is unknown/none (hydro projection).
 pub(crate) const DEFAULT_LAND_ELEVATION: i32 = 1;
+
+/// Last water generate call — dogfood diagnostics (not persisted).
+#[derive(Default, Clone)]
+pub(crate) struct WaterGenTrace {
+    pub action: String,
+    pub request: String,
+    pub result: String,
+    pub error: String,
+}
 // Home version label (D-80: in-app Check-for-updates CTA removed; alpha updates via update.ps1).
 pub(crate) const APP_VERSION: &str = "0.2.1";
 
@@ -405,6 +414,10 @@ pub(crate) struct AppState {
     pub(crate) rivers: RiverCatalog,
     /// Lake catalog mirror (hydrology-lake-domain-v1).
     pub(crate) lakes: LakeCatalog,
+    /// Precipitation layer exists on disk (probe on world open).
+    pub(crate) precip_layer_present: Option<bool>,
+    /// Last lakes/rivers generate — copy-paste diagnostics for /fix.
+    pub(crate) water_gen_trace: WaterGenTrace,
     pub(crate) selected: Option<(i32, i32)>,
     /// Hex bounds from `map/manifest.json` (via `/api/map`).
     pub(crate) map_bounds: MapBounds,

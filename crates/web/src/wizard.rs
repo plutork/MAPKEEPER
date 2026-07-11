@@ -8,6 +8,7 @@ use crate::api::{
     flush_pending_paints, load_elevation, load_geology, load_map,
     persist_build_draft, post_lake_generate, post_river_generate, refresh_projects,
 };
+use crate::water_diag::sync_water_diagnostics;
 use crate::brush::{effective_brush_radius_from_hex_size, paint_stamp_cells};
 use crate::canvas::{current_hex_size_px, schedule_redraw};
 use crate::dom::{
@@ -340,7 +341,10 @@ fn show_wizard_step(state: &AppState) {
         5 => {
             set_wizard_status("Step 5: pick precipitation style, generate climate, then continue.")
         }
-        6 => set_wizard_status("Step 6: generate lakes, then rivers from climate rainfall."),
+        6 => {
+            set_wizard_status("Step 6: generate lakes, then rivers from climate rainfall.");
+            sync_water_diagnostics(state);
+        }
         _ => set_wizard_status(
             "Step 2 flow: 1) parameters, 2) generate, 3) accept/edit, 4) continue.",
         ),

@@ -17,8 +17,9 @@ use crate::home::{refresh_suggested_path, render_project_list};
 use crate::state::{
     bump_content_rev, draw_snapshot, fresh_elevation_layer, AppState, BuildStateInput,
     LayerCellWrite, MapResponse, PerfMetrics, ProjectsResponse, PAINT_BATCH_MAX_CELLS,
-    PAINT_SAVE_COOLDOWN_MS,
+    PAINT_SAVE_COOLDOWN_MS, WaterGenTrace,
 };
+use crate::water_diag::{lake_catalog_stats, river_catalog_stats, set_water_gen_trace, sync_water_diagnostics};
 use crate::wizard::sync_wizard_actions;
 
 pub(crate) async fn persist_build_draft(step: u32) -> bool {
@@ -121,6 +122,7 @@ pub(crate) async fn load_map(state: Rc<RefCell<AppState>>) {
         }
     }
     load_elevation(&state).await;
+    probe_precip_layer(&state).await;
     load_lakes(&state).await;
     load_rivers(&state).await;
     let redraw_start = perf_now();
@@ -182,6 +184,20 @@ pub(crate) async fn load_lakes(state: &Rc<RefCell<AppState>>) {
     let mut s = state.borrow_mut();
     s.lakes = catalog;
     bump_content_rev(&mut s);
+    sync_water_diagnostics(&s);
+}
+
+async fn probe_precip_layer(state: &Rc<RefCell<AppState>>) {
+    let present = gloo_net::http::Request::get("/api/layers/precipitation")
+        .send()
+        .await
+        .map(|r| r.ok())
+        .unwrap_or(false);
+    {
+        let mut s = state.borrow_mut();
+        s.precip_layer_present = Some(present);
+    }
+    sync_water_diagnostics(&state.borrow());
 }
 
 /// Fetch river catalog (river-overlay-layer-v1).
@@ -196,6 +212,7 @@ pub(crate) async fn load_rivers(state: &Rc<RefCell<AppState>>) {
     s.rivers = catalog;
     s.active_river_id = None;
     sync_river_status(&s);
+    sync_water_diagnostics(&s);
 }
 #[derive(Serialize)]
 pub(crate) struct LakesGenerateInput {
@@ -355,13 +372,27 @@ pub(crate) async fn post_lake_generate(
     density: String,
 ) {
     set_text(status_id, "Generating lakes…");
-    let body = LakesGenerateInput { density, seed: 1 };
+    let req_line = format!("density={density} seed=1");
+    let body = LakesGenerateInput {
+        density: density.clone(),
+        seed: 1,
+    };
     let Ok(resp) = gloo_net::http::Request::post("/api/lakes/generate")
         .json(&body)
         .expect("serialize lakes generate")
         .send()
         .await
     else {
+        let mut s = state.borrow_mut();
+        set_water_gen_trace(
+            &mut s,
+            WaterGenTrace {
+                action: "generate_lakes".into(),
+                request: req_line,
+                result: String::new(),
+                error: "network failure".into(),
+            },
+        );
         set_text(status_id, "Generate failed (network)");
         return;
     };
@@ -370,30 +401,63 @@ pub(crate) async fn post_lake_generate(
             .text()
             .await
             .unwrap_or_else(|_| "Generate rejected".into());
+        let mut s = state.borrow_mut();
+        set_water_gen_trace(
+            &mut s,
+            WaterGenTrace {
+                action: "generate_lakes".into(),
+                request: req_line,
+                result: String::new(),
+                error: msg.clone(),
+            },
+        );
         set_text(status_id, &msg);
         return;
     }
     let Ok(body) = resp.json::<LakesGenerateResponse>().await else {
+        let mut s = state.borrow_mut();
+        set_water_gen_trace(
+            &mut s,
+            WaterGenTrace {
+                action: "generate_lakes".into(),
+                request: req_line,
+                result: String::new(),
+                error: "response parse failure".into(),
+            },
+        );
         set_text(status_id, "Generate failed (parse)");
         return;
     };
-    let lake_count = body.catalog.lakes.len();
+    let (lake_n, lake_cells, endorheic) = lake_catalog_stats(&body.catalog);
+    let next_id = body.catalog.next_id;
+    let rivers_cleared = body.rivers_cleared;
     {
         let mut s = state.borrow_mut();
         s.lakes = body.catalog;
-        if body.rivers_cleared {
+        if rivers_cleared {
             s.rivers = RiverCatalog::default();
             s.active_river_id = None;
             sync_river_status(&s);
         }
         bump_content_rev(&mut s);
+        set_water_gen_trace(
+            &mut s,
+            WaterGenTrace {
+                action: "generate_lakes".into(),
+                request: req_line,
+                result: format!(
+                    "lakes={lake_n} cells={lake_cells} endorheic={endorheic} next_id={next_id} rivers_cleared={rivers_cleared}",
+                ),
+                error: String::new(),
+            },
+        );
     }
-    if body.rivers_cleared {
+    if rivers_cleared {
         set_text(status_id, "Rivers cleared — regenerate rivers.");
     } else {
         set_text(
             status_id,
-            &format!("Generated {lake_count} lake(s)."),
+            &format!("Generated {lake_n} lake(s)."),
         );
     }
     crate::canvas::schedule_redraw(state);
@@ -405,13 +469,26 @@ pub(crate) async fn post_river_generate(
     river_density: String,
 ) {
     set_text(status_id, "Generating rivers…");
-    let body = RiversGenerateInput { river_density: river_density.clone() };
+    let req_line = format!("river_density={river_density}");
+    let body = RiversGenerateInput {
+        river_density: river_density.clone(),
+    };
     let Ok(resp) = gloo_net::http::Request::post("/api/rivers/generate")
         .json(&body)
         .expect("serialize rivers generate")
         .send()
         .await
     else {
+        let mut s = state.borrow_mut();
+        set_water_gen_trace(
+            &mut s,
+            WaterGenTrace {
+                action: "generate_rivers".into(),
+                request: req_line,
+                result: String::new(),
+                error: "network failure".into(),
+            },
+        );
         set_text(status_id, "Generate failed (network)");
         return;
     };
@@ -420,19 +497,58 @@ pub(crate) async fn post_river_generate(
             .text()
             .await
             .unwrap_or_else(|_| "Generate rejected".into());
+        let mut s = state.borrow_mut();
+        set_water_gen_trace(
+            &mut s,
+            WaterGenTrace {
+                action: "generate_rivers".into(),
+                request: req_line,
+                result: String::new(),
+                error: msg.clone(),
+            },
+        );
         set_text(status_id, &msg);
         return;
     }
     let Ok(body) = resp.json::<RiversGenerateResponse>().await else {
+        let mut s = state.borrow_mut();
+        set_water_gen_trace(
+            &mut s,
+            WaterGenTrace {
+                action: "generate_rivers".into(),
+                request: req_line,
+                result: String::new(),
+                error: "response parse failure".into(),
+            },
+        );
         set_text(status_id, "Generate failed (parse)");
         return;
     };
+    let (river_n, path_cells) = river_catalog_stats(&body.catalog);
+    let lake_n = state.borrow().lakes.lakes.len();
     {
         let mut s = state.borrow_mut();
         s.rivers = body.catalog;
         s.active_river_id = None;
         bump_content_rev(&mut s);
         sync_river_status(&s);
+        let density_note = if body.river_density.is_empty() {
+            river_density.as_str()
+        } else {
+            body.river_density.as_str()
+        };
+        set_water_gen_trace(
+            &mut s,
+            WaterGenTrace {
+                action: "generate_rivers".into(),
+                request: req_line,
+                result: format!(
+                    "rivers={river_n} path_cells={path_cells} precip={} density={density_note} lakes_in_catalog={lake_n}",
+                    body.precip_source
+                ),
+                error: String::new(),
+            },
+        );
     }
     let source_note = if body.precip_source == "climate" {
         "from climate precipitation"
@@ -447,10 +563,7 @@ pub(crate) async fn post_river_generate(
     set_text(
         status_id,
         &format!(
-            "Generated {} river(s) — {} · density {}",
-            state.borrow().rivers.rivers.len(),
-            source_note,
-            density_note
+            "Generated {river_n} river(s) — {source_note} · density {density_note}",
         ),
     );
     crate::canvas::schedule_redraw(state);
