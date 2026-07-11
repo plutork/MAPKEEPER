@@ -42,7 +42,7 @@ pub(crate) const BRUSH_PREVIEW_GAP: f64 = 0.92;
 pub(crate) const CANVAS_PAD: f64 = 20.0;
 /// Default land elevation when a cell is unknown/none (hydro projection).
 pub(crate) const DEFAULT_LAND_ELEVATION: i32 = 1;
-// Home version label (D-80: in-app Check-for-updates CTA removed; /mk-update owns alpha updates).
+// Home version label (D-80: in-app Check-for-updates CTA removed; alpha updates via update.ps1).
 pub(crate) const APP_VERSION: &str = "0.2.1";
 
 // perf-100k--web-dense-client: index-addressed elevation buffer (no sparse mirror).
