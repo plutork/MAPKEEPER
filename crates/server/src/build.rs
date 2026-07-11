@@ -368,7 +368,7 @@ fn climate_seed(world_id: &str, style: PrecipitationStyle, regenerate_nonce: u64
         hash ^= b as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }
-    hash ^ 0xC1AA_7E ^ regenerate_nonce
+    hash ^ 0x00C1_AA7E ^ regenerate_nonce
 }
 
 fn elevation_seed(world_id: &str, intensity: ElevationIntensity, regenerate_nonce: u64) -> u64 {
@@ -381,7 +381,7 @@ fn elevation_seed(world_id: &str, intensity: ElevationIntensity, regenerate_nonc
         hash ^= b as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }
-    hash ^ 0xE1E8_01 ^ regenerate_nonce
+    hash ^ 0x00E1_E801 ^ regenerate_nonce
 }
 
 fn silhouette_seed(
@@ -416,7 +416,7 @@ fn silhouette_seed(
 fn mark_inland_for_unknown_pools(bounds: &MapBounds, mask: &mut DenseLayer) {
     let mut seen = vec![false; bounds.len()];
     let mut queue: VecDeque<usize> = VecDeque::new();
-    for index in 0..bounds.len() {
+    for (index, seen_cell) in seen.iter_mut().enumerate().take(bounds.len()) {
         let Some(cell) = bounds.from_index(index) else {
             continue;
         };
@@ -426,7 +426,7 @@ fn mark_inland_for_unknown_pools(bounds: &MapBounds, mask: &mut DenseLayer) {
         if !is_water_like(mask, index) {
             continue;
         }
-        seen[index] = true;
+        *seen_cell = true;
         queue.push_back(index);
     }
     while let Some(index) = queue.pop_front() {

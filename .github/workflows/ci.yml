@@ -32,15 +32,15 @@ jobs:
       # excluded here, covered instead by the windows-desktop-build job.
       - run: cargo test --workspace --exclude mapkeeper-desktop
 
-  clippy-core:
-    name: clippy mapkeeper-core (-D warnings)
+  clippy-workspace:
+    name: clippy workspace (-D warnings, excl. desktop)
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo clippy -p mapkeeper-core -- -D warnings
+      - run: cargo clippy -p mapkeeper-core -p mapkeeper-server -p mapkeeper-cli -p mapkeeper-web -- -D warnings
 
   codemap-drift:
     name: Codemap drift (CODEMAP.md + CODEMAP-LITE)

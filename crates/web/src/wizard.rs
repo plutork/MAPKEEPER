@@ -432,7 +432,7 @@ pub(crate) fn ensure_wizard_recipe(state: &mut AppState) {
         }
     }
     let class = LayoutClass::parse(&state.wizard_layout_class);
-    let seed = (state.wizard_regenerate_nonce as u64).wrapping_mul(0x9E37_79B9) ^ 0xC0FF_EE;
+    let seed = (state.wizard_regenerate_nonce as u64).wrapping_mul(0x9E37_79B9) ^ 0x00C0_FFEE;
     let recipe = pick_recipe(class, seed);
     state.wizard_layout_class = class.id().to_string();
     state.wizard_recipe_id = recipe.id.to_string();
@@ -440,7 +440,7 @@ pub(crate) fn ensure_wizard_recipe(state: &mut AppState) {
 
 fn pick_wizard_recipe_for_class(state: &mut AppState, class_id: &str) {
     let class = LayoutClass::parse(class_id);
-    let seed = (state.wizard_regenerate_nonce as u64).wrapping_mul(0x9E37_79B9) ^ 0xC0FF_EE;
+    let seed = (state.wizard_regenerate_nonce as u64).wrapping_mul(0x9E37_79B9) ^ 0x00C0_FFEE;
     let recipe = pick_recipe(class, seed);
     state.wizard_layout_class = class.id().to_string();
     state.wizard_recipe_id = recipe.id.to_string();
@@ -849,7 +849,7 @@ async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
             .map(|(((q, r), _), kind)| WizardLandMaskCellInput {
                 q: *q,
                 r: *r,
-                kind: *kind,
+                kind,
             })
             .collect();
         let sent = gloo_net::http::Request::put("/api/build/land-mask/cells")
@@ -943,7 +943,8 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 flush_pending_paints(state.clone()).await;
-                if persist_build_draft(state.borrow().wizard_step.max(2)).await {
+                let step = state.borrow().wizard_step.max(2);
+                if persist_build_draft(step).await {
                     set_wizard_status("Draft saved.");
                 } else {
                     set_wizard_status("Could not save draft.");
@@ -1248,7 +1249,8 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
     }
 
     // Continue: step 2 → draft step 3 (tectonics).
-    for id in ["wiz-continue"] {
+    {
+        let id = "wiz-continue";
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
             let accepted = state.borrow().wizard_accepted;
@@ -1623,7 +1625,8 @@ pub(crate) async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
         .get_element_by_id("editor")
         .is_some_and(|el| el.class_list().contains("wizard-active"))
     {
-        let _ = persist_build_draft(state.borrow().wizard_step.max(2)).await;
+        let step = state.borrow().wizard_step.max(2);
+        let _ = persist_build_draft(step).await;
     }
     close_build_wizard();
     let _ = gloo_net::http::Request::post("/api/projects/close")

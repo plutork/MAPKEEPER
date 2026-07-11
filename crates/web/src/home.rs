@@ -513,7 +513,7 @@ pub fn attach_post_finish_note_dismiss() {
     let Some(btn) = document().get_element_by_id("post-finish-dismiss") else {
         return;
     };
-    let closure = Closure::<dyn FnMut()>::new(move || hide_post_finish_note());
+    let closure = Closure::<dyn FnMut()>::new(hide_post_finish_note);
     let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
     closure.forget();
 }

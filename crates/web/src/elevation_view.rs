@@ -52,7 +52,7 @@ pub fn elevation_fill_rgb(elevation: i32) -> (u8, u8, u8) {
         let b = (160.0 + t * 60.0) as u8;
         return (r, g, b);
     }
-    let capped = elevation.min(ELEVATION_TINT_CAP).max(1);
+    let capped = elevation.clamp(1, ELEVATION_TINT_CAP);
     let t = (capped - 1) as f64 / (ELEVATION_TINT_CAP - 1) as f64;
     if t < 0.5 {
         let u = t * 2.0;

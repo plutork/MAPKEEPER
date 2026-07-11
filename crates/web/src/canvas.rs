@@ -234,9 +234,8 @@ fn hex_corners(cx: f64, cy: f64, size: f64) -> [(f64, f64); 6] {
 }
 
 /// Half-extent (in unit-size pixels) of the whole hex map, including the
-/// outer cells' corner reach. Pointy-top corners stick out `тИЪ3/2` sideways
+/// outer cells' corner reach. Pointy-top corners stick out `√3/2` sideways
 /// and `1.0` vertically. Used to fit the map into the current canvas.
-
 fn map_half_extent(bounds: MapBounds) -> (f64, f64) {
     let mut mx = 0.0_f64;
     let mut my = 0.0_f64;
