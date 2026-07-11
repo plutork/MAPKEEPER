@@ -841,12 +841,9 @@ fn persist_rivers(world: &Path, catalog: &RiverCatalog, bounds: &MapBounds) -> R
 fn persist_generated_rivers(
     world: &Path,
     catalog: &RiverCatalog,
-    owners: &[u32],
     bounds: &MapBounds,
 ) -> Result<()> {
-    write_river_catalog(world, catalog)?;
-    let layer = mapkeeper_core::river_flux::sync_river_id_from_owners(owners, bounds);
-    write_dense_layer(world, &layer)
+    persist_rivers(world, catalog, bounds)
 }
 
 fn cmd_rivers_list(world: &Path) -> Result<()> {
@@ -902,7 +899,7 @@ fn cmd_rivers_generate(world: &Path, density: &str) -> Result<()> {
     } else {
         Some(&lakes)
     };
-    let (catalog, owners, used_climate) = generate_with_owners(
+    let out = generate_with_owners(
         &elevation,
         &bounds,
         precipitation.as_ref(),
@@ -912,13 +909,16 @@ fn cmd_rivers_generate(world: &Path, density: &str) -> Result<()> {
             density,
         },
     );
-    persist_generated_rivers(world, &catalog, &owners, &bounds)?;
-    if used_climate {
+    persist_generated_rivers(world, &out.catalog, &bounds)?;
+    if out.used_climate {
         eprintln!("river flux: using climate precipitation layer");
     } else {
         eprintln!("river flux: uniform precipitation fallback (no precipitation layer)");
     }
-    println!("{}", catalog.to_json_pretty()?);
+    if out.rejected_rivers > 0 {
+        eprintln!("river flux: rejected {} invalid river trees", out.rejected_rivers);
+    }
+    println!("{}", out.catalog.to_json_pretty()?);
     Ok(())
 }
 

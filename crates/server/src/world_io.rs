@@ -15,7 +15,6 @@ use mapkeeper_core::layer::{
 use mapkeeper_core::lakes::{sync_lake_id_layer, LakeCatalog, LAKE_CATALOG_FILE};
 use mapkeeper_core::map_preset::{legacy_default_bounds, MapPreset};
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
-use mapkeeper_core::river_flux::sync_river_id_from_owners;
 use mapkeeper_core::rivers::{sync_river_id_layer, RiverCatalog, RIVER_CATALOG_FILE};
 use serde::Deserialize;
 
@@ -390,12 +389,9 @@ pub(crate) fn persist_rivers(
 pub(crate) fn persist_generated_rivers(
     world_path: &Path,
     catalog: &RiverCatalog,
-    owners: &[u32],
     bounds: &MapBounds,
 ) -> Result<(), String> {
-    write_river_catalog(world_path, catalog)?;
-    let layer = sync_river_id_from_owners(owners, bounds);
-    write_dense_layer(world_path, &layer)
+    persist_rivers(world_path, catalog, bounds)
 }
 
 pub(crate) fn lakes_file_path(world_path: &Path) -> PathBuf {

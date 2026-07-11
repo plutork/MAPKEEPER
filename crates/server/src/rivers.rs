@@ -145,6 +145,7 @@ struct RiversGenerateResponse {
     catalog: RiverCatalog,
     precip_source: &'static str,
     river_density: &'static str,
+    rejected_river_count: u32,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -182,7 +183,7 @@ async fn generate_rivers_handler(
     } else {
         Some(&lakes)
     };
-    let (catalog, owners, used_climate) = generate_with_owners(
+    let out = generate_with_owners(
         &elevation,
         &bounds,
         precipitation.as_ref(),
@@ -192,18 +193,19 @@ async fn generate_rivers_handler(
             density,
         },
     );
-    if let Err(err) = world_io::persist_generated_rivers(&active.path, &catalog, &owners, &bounds) {
+    if let Err(err) = world_io::persist_generated_rivers(&active.path, &out.catalog, &bounds) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
-    let precip_source = if used_climate {
+    let precip_source = if out.used_climate {
         "climate"
     } else {
         "uniform_fallback"
     };
     Json(RiversGenerateResponse {
-        catalog,
+        catalog: out.catalog,
         precip_source,
         river_density: density.id(),
+        rejected_river_count: out.rejected_rivers,
     })
     .into_response()
 }

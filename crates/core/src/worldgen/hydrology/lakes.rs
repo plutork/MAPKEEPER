@@ -243,6 +243,28 @@ fn mix_seed(seed: u64, bid: u32) -> u64 {
     seed ^ ((bid as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15))
 }
 
+pub fn lake_outflow_supply(
+    lake: &Lake,
+    analysis: &DepressionAnalysis,
+    precipitation: Option<&DenseLayer>,
+    elevation: &DenseLayer,
+    bounds: &MapBounds,
+    use_climate: bool,
+) -> u64 {
+    let catchment = compute_catchment_supply(analysis, precipitation, elevation, bounds, use_climate);
+    let mut basins = HashSet::new();
+    for &c in &lake.cells {
+        let bid = analysis.basin_id[c];
+        if bid > 0 {
+            basins.insert(bid);
+        }
+    }
+    basins
+        .iter()
+        .map(|b| catchment.get(b).copied().unwrap_or(0))
+        .sum()
+}
+
 pub fn lake_acceptance_stats(catalog: &LakeCatalog) -> (usize, usize) {
     let cells: usize = catalog.lakes.iter().map(|l| l.cells.len()).sum();
     (catalog.lakes.len(), cells)

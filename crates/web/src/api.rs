@@ -239,6 +239,8 @@ pub(crate) struct RiversGenerateResponse {
     pub(crate) precip_source: String,
     #[serde(default)]
     pub(crate) river_density: String,
+    #[serde(default)]
+    pub(crate) rejected_river_count: u32,
 }
 
 #[derive(Serialize)]
