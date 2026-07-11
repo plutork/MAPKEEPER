@@ -9,6 +9,8 @@ use crate::hydro::{DEFAULT_LAND_ELEVATION, SEA_LEVEL};
 use crate::layer::DenseLayer;
 use crate::rivers::{River, RiverCatalog, RIVER_CATALOG_SCHEMA_VERSION};
 
+use super::depression_fill::{analyze_depressions, lowest_neighbor};
+
 /// Azgaar `MIN_FLUX_TO_FORM_RIVER`, scaled for map size.
 const BASE_MIN_FLUX: u32 = 30;
 pub const UNIFORM_PRECIP: u32 = 1;
@@ -42,8 +44,8 @@ pub fn generate_with_owners(
         .map(|p| land_precip_mean(p, elevation, n))
         .unwrap_or(FALLBACK_LAND_PRECIP_MEAN);
 
-    let mut heights = read_heights(elevation, n);
-    resolve_depressions(&mut heights, bounds);
+    let analysis = analyze_depressions(elevation, bounds);
+    let heights = &analysis.conditioned_heights;
 
     let min_flux = scaled_min_flux(n);
     let land: Vec<usize> = (0..n).filter(|&i| heights[i] > SEA_LEVEL).collect();
@@ -141,12 +143,6 @@ fn precip_flux_units(raw: i32, mean: f64) -> u32 {
     ((f64::from(raw) / mean).round() as u32).max(UNIFORM_PRECIP)
 }
 
-fn read_heights(elevation: &DenseLayer, n: usize) -> Vec<i32> {
-    (0..n)
-        .map(|i| elevation.int_or(i, DEFAULT_LAND_ELEVATION))
-        .collect()
-}
-
 #[allow(clippy::too_many_arguments)]
 fn flow_down(
     to: usize,
@@ -186,53 +182,6 @@ fn flow_down(
         flux[to] = flux[to].saturating_add(from_flux);
         paths.entry(river).or_default().push(to);
     }
-}
-
-/// Raise sinks so each land cell can drain to a lower or equal neighbor.
-fn resolve_depressions(heights: &mut [i32], bounds: &MapBounds) {
-    let land: Vec<usize> = (0..heights.len())
-        .filter(|&i| heights[i] > SEA_LEVEL)
-        .collect();
-    let max_iters = heights.len().max(1);
-    for _ in 0..max_iters {
-        let mut changed = false;
-        let mut sorted = land.clone();
-        sorted.sort_by_key(|&i| heights[i]);
-        for &i in &sorted {
-            let Some(min_n) = lowest_neighbor_elevation(i, heights, bounds) else {
-                continue;
-            };
-            if heights[i] > SEA_LEVEL && min_n > heights[i] {
-                heights[i] = min_n;
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-}
-
-fn lowest_neighbor_elevation(index: usize, heights: &[i32], bounds: &MapBounds) -> Option<i32> {
-    neighbor_indices(index, bounds)
-        .into_iter()
-        .map(|n| heights[n])
-        .min()
-}
-
-fn lowest_neighbor(index: usize, heights: &[i32], bounds: &MapBounds) -> Option<usize> {
-    neighbor_indices(index, bounds)
-        .into_iter()
-        .min_by_key(|&n| heights[n])
-}
-
-fn neighbor_indices(index: usize, bounds: &MapBounds) -> Vec<usize> {
-    bounds
-        .from_index(index)
-        .into_iter()
-        .flat_map(|cell| cell.neighbors())
-        .filter_map(|n| bounds.index_of(n))
-        .collect()
 }
 
 fn scaled_min_flux(cell_count: usize) -> u32 {
@@ -337,6 +286,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn depression_analysis_preserves_river_catalog() {
+        let bounds = MapBounds::new(14, 8);
+        let mut elev = DenseLayer::new_integer("elevation", bounds.len());
+        slope_fixture(&bounds, &mut elev);
+        let before = generate_with_owners(&elev, &bounds, None);
+        let after = generate_with_owners(&elev, &bounds, None);
+        assert_eq!(before.0, after.0);
+        assert_eq!(before.1, after.1);
+        assert!(!after.0.rivers.is_empty());
     }
 
     #[test]
