@@ -23,10 +23,10 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Elevation/hydro threshold model (`elevation <= 0 => water`) + stamp falloff math -> `crates/core/src/hydro.rs` (`elevation-authoring-v2`: `filled_elevation_layer`, `stamp_delta`)
 - River catalog + `river_id` dense sync (`map/rivers.json`, neighbor chain validation) -> `crates/core/src/rivers.rs` (`river-overlay-layer-v1`, D-54)
 - Elevation-driven river auto-generation (flux, depression fill, confluence, `parent`/`basin`; **D-91** reads `precipitation` when present, uniform fallback) -> `crates/core/src/worldgen/hydrology/river_flux.rs` (`rivers-auto-from-elevation-v1`, D-55; `rivers-flux-v2--climate-precip`, D-91; legacy `mapkeeper_core::river_flux`)
-- HTTP API, world file I/O, launcher endpoints -> `crates/server/src/` (**D-96** S0 `state`/`world_io`; S1 `projects.rs`; S2 `build.rs`; S3 `layers.rs`; rivers still in `lib.rs` until S4)
+- HTTP API, world file I/O, launcher endpoints -> `crates/server/src/` (**D-96** complete: S0 `state`/`world_io`; S1 `projects.rs`; S2 `build.rs`; S3 `layers.rs`; S4 `rivers.rs`; `lib.rs` facade)
 - Map/profile/layer endpoints (`GET /api/map`, profile `GET/PUT`, generic `/api/layers/*`) -> `crates/server/src/layers.rs` (D-96 S3)
-- River catalog API (`GET/PUT /api/rivers`, `POST /api/rivers/append`, `POST /api/rivers/:id/pop`, `DELETE /api/rivers/:id`) + `river_id` sync -> `crates/server/src/lib.rs` (`river-overlay-layer-v1`)
-- River generate API (`POST /api/rivers/generate` — replace-all; `precip_source` in response) -> `crates/server/src/lib.rs` (`rivers-auto-from-elevation-v1`, D-55; D-91 climate precip)
+- River catalog API (`GET/PUT /api/rivers`, `POST /api/rivers/append`, `POST /api/rivers/:id/pop`, `DELETE /api/rivers/:id`) + `river_id` sync -> `crates/server/src/rivers.rs` (`river-overlay-layer-v1`, D-96 S4)
+- River generate API (`POST /api/rivers/generate` — replace-all; `precip_source` in response) -> `crates/server/src/rivers.rs` (`rivers-auto-from-elevation-v1`, D-55; D-91 climate precip)
 - New-world ocean fill (dense elevation all `0` after bounds) -> `crates/server/src/lib.rs` (`write_map_manifest`), `crates/cli/src/main.rs` (`write_initial_ocean_elevation`)
 - CLI commands and query flow (`profile`, `terrain`, `elevation`, generic `layer <id>`) -> `crates/cli/src/`
 - Dense-on-disk layer I/O (`read_or_empty` + `write_dense_layer`) -> `crates/core/src/layer.rs`, `crates/server/src/lib.rs`, `crates/cli/src/main.rs`
@@ -63,10 +63,11 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Codemap drift CI guard: `scripts/check_codemap_drift.py` (regen `CODEMAP.md` + validate `CODEMAP-LITE.md` paths)
 - Alpha Windows bootstrap/launch/update: `setup.ps1`, `run.ps1` (D-86 pull-in-run), `update.ps1`; troubleshooting: `.cursor/commands/doctor.md`
 - Core boundary entry: `crates/core/src/lib.rs` (facade; worldgen under `worldgen/`, legacy top-level re-exports for adapters)
-- Server boundary entry: `crates/server/src/lib.rs` (facade: `ServerConfig`, `build_router`, `bind`, `run`; rivers until S4 — **D-96**)
+- Server boundary entry: `crates/server/src/lib.rs` (facade: `ServerConfig`, `build_router`, `bind`, `run` — **D-96** complete)
 - Server launcher/projects API: `crates/server/src/projects.rs` (`/api/projects*`, `/api/fixture-worlds*` — D-96 S1)
 - Server build wizard API: `crates/server/src/build.rs` (`/api/build*`, pipeline generate — D-96 S2)
 - Server map/profile/layers API: `crates/server/src/layers.rs` (`/api/map`, profile, `/api/layers/*` — D-96 S3)
+- Server rivers API: `crates/server/src/rivers.rs` (`/api/rivers/*`, generate — D-96 S4)
 - Server shared state: `crates/server/src/state.rs` (`AppState`, `ActiveWorld` — D-96 S0)
 - Server world/layer I/O helpers: `crates/server/src/world_io.rs` (manifest, bounds, projects path, dense layer read/write — D-96 S0)
 - Web boundary entry: `crates/web/src/lib.rs` (`start()` + wiring only; D-94 complete)
