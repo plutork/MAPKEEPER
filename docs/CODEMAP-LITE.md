@@ -23,7 +23,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Elevation/hydro threshold model (`elevation <= 0 => water`) + stamp falloff math -> `crates/core/src/hydro.rs` (`elevation-authoring-v2`: `filled_elevation_layer`, `stamp_delta`)
 - River catalog + `river_id` dense sync (`map/rivers.json`, neighbor chain validation) -> `crates/core/src/rivers.rs` (`river-overlay-layer-v1`, D-54)
 - Elevation-driven river auto-generation (flux, depression fill, confluence, `parent`/`basin`; **D-91** reads `precipitation` when present, uniform fallback) -> `crates/core/src/worldgen/hydrology/river_flux.rs` (`rivers-auto-from-elevation-v1`, D-55; `rivers-flux-v2--climate-precip`, D-91; legacy `mapkeeper_core::river_flux`)
-- HTTP API, world file I/O, launcher endpoints -> `crates/server/src/` (**D-96** S0 `state`/`world_io`; **S1** `projects.rs` launcher + fixtures; build/layers/rivers handlers still in `lib.rs` until S2–S4)
+- HTTP API, world file I/O, launcher endpoints -> `crates/server/src/` (**D-96** S0 `state`/`world_io`; S1 `projects.rs`; S2 `build.rs`; layers/rivers still in `lib.rs` until S3–S4)
 - Generic layer endpoints (`GET /api/layers/:id`, `PUT /api/layers/:id/batch`, `PUT /api/layers/:id/cells/:q/:r`) -> `crates/server/src/lib.rs`
 - River catalog API (`GET/PUT /api/rivers`, `POST /api/rivers/append`, `POST /api/rivers/:id/pop`, `DELETE /api/rivers/:id`) + `river_id` sync -> `crates/server/src/lib.rs` (`river-overlay-layer-v1`)
 - River generate API (`POST /api/rivers/generate` — replace-all; `precip_source` in response) -> `crates/server/src/lib.rs` (`rivers-auto-from-elevation-v1`, D-55; D-91 climate precip)
@@ -41,8 +41,8 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
 - River dogfood fixture worlds (fixed 14×8 elevation presets; not author Small) -> `fixtures/worlds/` (`river-dogfood-fixture-worlds`; maintainer/CI — no Home UI per D-59)
 - Build wizard draft state (`[build]` in `mapkeeper.toml`, steps 1–4 + `scheme`, read/write/clear/normalize) -> `crates/core/src/build_state.rs` (`home-build-draft-v1`, D-59, D-69, D-71)
-- Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, `PUT /api/build/bounds`, list `build_draft`/`build_step`) -> `crates/server/src/lib.rs` (D-59, D-69, D-71)
-- Build wizard step-1–4 API (`PUT /api/build/bounds` preset rewrite + Geo reset; `POST /api/build/land-mask/generate` returns seed identity JSON; land-mask cells; geology/elevation generate) -> `crates/server/src/lib.rs` (`wizard-merge-size-grid`, `world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`, D-68/D-69/D-71)
+- Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, `PUT /api/build/bounds`, list `build_draft`/`build_step`) -> `crates/server/src/projects.rs`, `crates/server/src/build.rs` (D-59, D-69, D-71)
+- Build wizard step-1–4 API (`PUT /api/build/bounds` preset rewrite + Geo reset; `POST /api/build/land-mask/generate` returns seed identity JSON; land-mask cells; geology/elevation/climate generate) -> `crates/server/src/build.rs` (`wizard-merge-size-grid`, `world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`, D-68/D-69/D-71)
 - World Build Wizard shell (D-57 + D-59 draft resume + D-71 size+grid one screen): Home **Build World**, fullscreen overlay, Save Draft / wizard resume + Home footer version label -> `crates/web/index.html`, `crates/web/src/wizard.rs`, `crates/web/src/home.rs`
 - Home version label only (D-80 supersedes D-76 Check-for-updates CTA for alpha; updates via `update.ps1` / daily `run.ps1` pull when clean) -> `crates/web/index.html`, `crates/web/src/lib.rs`
 - Tester first-run flow (D-77): empty Home primary CTA `Create your first world` -> Build wizard defaults; blank Create demoted to advanced; post-Finish next-step note -> `crates/web/index.html`, `crates/web/src/home.rs`
@@ -63,8 +63,9 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Codemap drift CI guard: `scripts/check_codemap_drift.py` (regen `CODEMAP.md` + validate `CODEMAP-LITE.md` paths)
 - Alpha Windows bootstrap/launch/update: `setup.ps1`, `run.ps1` (D-86 pull-in-run), `update.ps1`; troubleshooting: `.cursor/commands/doctor.md`
 - Core boundary entry: `crates/core/src/lib.rs` (facade; worldgen under `worldgen/`, legacy top-level re-exports for adapters)
-- Server boundary entry: `crates/server/src/lib.rs` (facade: `ServerConfig`, `build_router`, `bind`, `run`; build/layers/rivers until S2–S4 — **D-96**)
+- Server boundary entry: `crates/server/src/lib.rs` (facade: `ServerConfig`, `build_router`, `bind`, `run`; layers/rivers until S3–S4 — **D-96**)
 - Server launcher/projects API: `crates/server/src/projects.rs` (`/api/projects*`, `/api/fixture-worlds*` — D-96 S1)
+- Server build wizard API: `crates/server/src/build.rs` (`/api/build*`, pipeline generate — D-96 S2)
 - Server shared state: `crates/server/src/state.rs` (`AppState`, `ActiveWorld` — D-96 S0)
 - Server world/layer I/O helpers: `crates/server/src/world_io.rs` (manifest, bounds, projects path, dense layer read/write — D-96 S0)
 - Web boundary entry: `crates/web/src/lib.rs` (`start()` + wiring only; D-94 complete)
