@@ -14,8 +14,7 @@ use crate::worldgen::hydrology::lakes::lake_outflow_supply;
 use crate::worldgen::hydrology::types::{DepressionAnalysis, RiverDensity};
 use crate::worldgen::hydrology::river_validate::{
     classify_terminal, enforce_strict_generated_catalog, mouth_touches_sea as validate_mouth_touches_sea,
-    validate_generated_catalog_strict, would_assign_parent_cycle, RiverTerminal,
-    RiverValidationContext,
+    would_assign_parent_cycle, RiverTerminal, RiverValidationContext,
 };
 
 use super::depression_fill::analyze_depressions;
@@ -408,7 +407,6 @@ enum TraceOutcome {
 
 fn adjacent_lake_id(
     mouth: usize,
-    lake_cells: &HashSet<usize>,
     lake_cell_to_id: &HashMap<usize, u32>,
     bounds: &MapBounds,
 ) -> Option<u32> {
@@ -537,7 +535,7 @@ fn extend_river_path(
         if validate_mouth_touches_sea(mouth, heights, bounds) {
             return TraceOutcome::Sea;
         }
-        if let Some(lid) = adjacent_lake_id(mouth, lake_cells, lake_cell_to_id, bounds) {
+        if let Some(lid) = adjacent_lake_id(mouth, lake_cell_to_id, bounds) {
             return TraceOutcome::Lake(lid);
         }
         if let Some(next) = next_trace_step(mouth, heights, bounds, lake_cells, cells) {
@@ -920,6 +918,9 @@ mod tests {
     use crate::layer::{DenseLayer, DenseState, LayerValue};
     use crate::lakes::{Lake, LakeCatalog};
     use crate::worldgen::hydrology::analyze_depressions;
+    use crate::worldgen::hydrology::river_validate::{
+        validate_generated_catalog_strict, RiverValidationContext,
+    };
 
     fn set_elev(layer: &mut DenseLayer, bounds: &MapBounds, q: i32, r: i32, v: i32) {
         let i = bounds.index_of(Axial::new(q, r)).unwrap();
@@ -1325,9 +1326,6 @@ mod tests {
         use crate::worldgen::climate::{generate_climate_layers, PrecipitationStyle};
         use crate::worldgen::elevation::{elevation_from_land_mask_and_geology, ElevationIntensity};
         use crate::worldgen::geology::{generate_geology, GeologyStyle};
-        use crate::worldgen::hydrology::river_validate::{
-            validate_generated_catalog_strict, RiverValidationContext,
-        };
         use crate::worldgen::land::{generate_land_mask, LayoutClass, ShoreCharacter};
 
         let bounds = MapPreset::Small.bounds();
