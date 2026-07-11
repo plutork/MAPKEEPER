@@ -23,7 +23,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Elevation/hydro threshold model (`elevation <= 0 => water`) + stamp falloff math -> `crates/core/src/hydro.rs` (`elevation-authoring-v2`: `filled_elevation_layer`, `stamp_delta`)
 - River catalog + `river_id` dense sync (`map/rivers.json`, neighbor chain validation) -> `crates/core/src/rivers.rs` (`river-overlay-layer-v1`, D-54)
 - Elevation-driven river auto-generation (flux, depression fill, confluence, `parent`/`basin`; **D-91** reads `precipitation` when present, uniform fallback) -> `crates/core/src/worldgen/hydrology/river_flux.rs` (`rivers-auto-from-elevation-v1`, D-55; `rivers-flux-v2--climate-precip`, D-91; legacy `mapkeeper_core::river_flux`)
-- HTTP API, world file I/O, launcher endpoints -> `crates/server/src/`
+- HTTP API, world file I/O, launcher endpoints -> `crates/server/src/` (**D-96** S0 split: `state.rs` shared state; `world_io.rs` manifest/bounds/path/layer FS helpers; route handlers still in `lib.rs` until S1–S4)
 - Generic layer endpoints (`GET /api/layers/:id`, `PUT /api/layers/:id/batch`, `PUT /api/layers/:id/cells/:q/:r`) -> `crates/server/src/lib.rs`
 - River catalog API (`GET/PUT /api/rivers`, `POST /api/rivers/append`, `POST /api/rivers/:id/pop`, `DELETE /api/rivers/:id`) + `river_id` sync -> `crates/server/src/lib.rs` (`river-overlay-layer-v1`)
 - River generate API (`POST /api/rivers/generate` — replace-all; `precip_source` in response) -> `crates/server/src/lib.rs` (`rivers-auto-from-elevation-v1`, D-55; D-91 climate precip)
@@ -63,7 +63,9 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Codemap drift CI guard: `scripts/check_codemap_drift.py` (regen `CODEMAP.md` + validate `CODEMAP-LITE.md` paths)
 - Alpha Windows bootstrap/launch/update: `setup.ps1`, `run.ps1` (D-86 pull-in-run), `update.ps1`; troubleshooting: `.cursor/commands/doctor.md`
 - Core boundary entry: `crates/core/src/lib.rs` (facade; worldgen under `worldgen/`, legacy top-level re-exports for adapters)
-- Server boundary entry: `crates/server/src/lib.rs`
+- Server boundary entry: `crates/server/src/lib.rs` (facade: `ServerConfig`, `build_router`, `bind`, `run`; route handlers until S1–S4 — **D-96** S0)
+- Server shared state: `crates/server/src/state.rs` (`AppState`, `ActiveWorld` — D-96 S0)
+- Server world/layer I/O helpers: `crates/server/src/world_io.rs` (manifest, bounds, projects path, dense layer read/write — D-96 S0)
 - Web boundary entry: `crates/web/src/lib.rs` (`start()` + wiring only; D-94 complete)
 - Web state/types/DTOs: `crates/web/src/state.rs` (D-94 B1)
 - Web DOM helpers: `crates/web/src/dom.rs` (D-94 B1)
