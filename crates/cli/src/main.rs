@@ -32,6 +32,7 @@ use mapkeeper_core::rivers::{
     RIVER_CATALOG_FILE,
 };
 use mapkeeper_core::world;
+use mapkeeper_core::worldgen::hydrology::{analyze_depressions, generate_lakes, LakeDensity};
 use serde::Deserialize;
 
 #[derive(Parser)]
@@ -262,6 +263,15 @@ enum LakesAction {
         #[arg(long, default_value = ".")]
         world: PathBuf,
     },
+    /// Generate lakes from elevation + climate (replace all; clears rivers).
+    Generate {
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+        #[arg(long, default_value = "balanced")]
+        density: String,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+    },
 }
 
 fn main() -> Result<()> {
@@ -333,6 +343,11 @@ fn main() -> Result<()> {
         },
         Command::Lakes { action } => match action {
             LakesAction::List { world } => cmd_lakes_list(&world),
+            LakesAction::Generate {
+                world,
+                density,
+                seed,
+            } => cmd_lakes_generate(&world, &density, seed),
         },
     }
 }
@@ -912,4 +927,41 @@ fn read_optional_precip_layer(world: &Path, bounds: &MapBounds) -> Option<DenseL
         return None;
     }
     Some(read_dense_layer(world, PRECIPITATION_LAYER_ID, bounds))
+}
+
+fn persist_lake_generation(world: &Path, catalog: &LakeCatalog, bounds: &MapBounds) -> Result<()> {
+    write_lake_catalog(world, catalog)?;
+    let layer = mapkeeper_core::lakes::sync_lake_id_layer(catalog, bounds);
+    write_dense_layer(world, &layer)?;
+    persist_rivers(world, &RiverCatalog::default(), bounds)?;
+    Ok(())
+}
+
+fn write_lake_catalog(world: &Path, catalog: &LakeCatalog) -> Result<()> {
+    let path = lakes_file_path(world);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, catalog.to_json_pretty()?)?;
+    Ok(())
+}
+
+fn cmd_lakes_generate(world: &Path, density: &str, seed: u64) -> Result<()> {
+    let bounds = read_bounds(world);
+    let elevation = read_elevation_dense(world, &bounds);
+    let precipitation = read_optional_precip_layer(world, &bounds);
+    let analysis = analyze_depressions(&elevation, &bounds);
+    let density = LakeDensity::parse(density);
+    let catalog = generate_lakes(
+        &analysis,
+        &elevation,
+        precipitation.as_ref(),
+        &bounds,
+        density,
+        seed,
+    );
+    persist_lake_generation(world, &catalog, &bounds)?;
+    eprintln!("lakes generate: cleared rivers (lake regen invalidation)");
+    println!("{}", catalog.to_json_pretty()?);
+    Ok(())
 }

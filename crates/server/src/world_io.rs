@@ -449,6 +449,21 @@ pub(crate) fn persist_lakes(
     Ok(())
 }
 
+/// Replace rivers with an empty catalog + zero `river_id` layer.
+pub(crate) fn clear_rivers(world_path: &Path, bounds: &MapBounds) -> Result<(), String> {
+    persist_rivers(world_path, &RiverCatalog::default(), bounds)
+}
+
+/// Persist lakes then clear rivers (lake regen invalidates river mouths).
+pub(crate) fn persist_lake_generation(
+    world_path: &Path,
+    catalog: &LakeCatalog,
+    bounds: &MapBounds,
+) -> Result<(), String> {
+    persist_lakes(world_path, catalog, bounds)?;
+    clear_rivers(world_path, bounds)
+}
+
 #[cfg(test)]
 pub(crate) static SIMULATE_LAYER_WRITE_FAILURE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);

@@ -2,6 +2,32 @@
 
 use std::collections::HashMap;
 
+/// Wizard / generate lake density presets (hydrology-lake-generation-v1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LakeDensity {
+    Sparse,
+    Balanced,
+    LakeRich,
+}
+
+impl LakeDensity {
+    pub fn parse(raw: &str) -> LakeDensity {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "sparse" | "few" => LakeDensity::Sparse,
+            "rich" | "lake_rich" | "lakerich" | "lake-rich" => LakeDensity::LakeRich,
+            _ => LakeDensity::Balanced,
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            LakeDensity::Sparse => "sparse",
+            LakeDensity::Balanced => "balanced",
+            LakeDensity::LakeRich => "lake_rich",
+        }
+    }
+}
+
 /// In-memory DEM conditioning + geometric depression metadata (H0).
 /// Does not copy elevation layer; does not persist to disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
