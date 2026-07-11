@@ -23,7 +23,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Elevation/hydro threshold model (`elevation <= 0 => water`) + stamp falloff math -> `crates/core/src/hydro.rs` (`elevation-authoring-v2`: `filled_elevation_layer`, `stamp_delta`)
 - River catalog + `river_id` dense sync (`map/rivers.json`, neighbor chain validation) -> `crates/core/src/rivers.rs` (`river-overlay-layer-v1`, D-54)
 - Elevation-driven river auto-generation (flux, depression fill, confluence, `parent`/`basin`; **D-91** reads `precipitation` when present, uniform fallback) -> `crates/core/src/worldgen/hydrology/river_flux.rs` (`rivers-auto-from-elevation-v1`, D-55; `rivers-flux-v2--climate-precip`, D-91; legacy `mapkeeper_core::river_flux`)
-- HTTP API, world file I/O, launcher endpoints -> `crates/server/src/` (**D-96** S0 split: `state.rs` shared state; `world_io.rs` manifest/bounds/path/layer FS helpers; route handlers still in `lib.rs` until S1–S4)
+- HTTP API, world file I/O, launcher endpoints -> `crates/server/src/` (**D-96** S0 `state`/`world_io`; **S1** `projects.rs` launcher + fixtures; build/layers/rivers handlers still in `lib.rs` until S2–S4)
 - Generic layer endpoints (`GET /api/layers/:id`, `PUT /api/layers/:id/batch`, `PUT /api/layers/:id/cells/:q/:r`) -> `crates/server/src/lib.rs`
 - River catalog API (`GET/PUT /api/rivers`, `POST /api/rivers/append`, `POST /api/rivers/:id/pop`, `DELETE /api/rivers/:id`) + `river_id` sync -> `crates/server/src/lib.rs` (`river-overlay-layer-v1`)
 - River generate API (`POST /api/rivers/generate` — replace-all; `precip_source` in response) -> `crates/server/src/lib.rs` (`rivers-auto-from-elevation-v1`, D-55; D-91 climate precip)
@@ -63,7 +63,8 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Codemap drift CI guard: `scripts/check_codemap_drift.py` (regen `CODEMAP.md` + validate `CODEMAP-LITE.md` paths)
 - Alpha Windows bootstrap/launch/update: `setup.ps1`, `run.ps1` (D-86 pull-in-run), `update.ps1`; troubleshooting: `.cursor/commands/doctor.md`
 - Core boundary entry: `crates/core/src/lib.rs` (facade; worldgen under `worldgen/`, legacy top-level re-exports for adapters)
-- Server boundary entry: `crates/server/src/lib.rs` (facade: `ServerConfig`, `build_router`, `bind`, `run`; route handlers until S1–S4 — **D-96** S0)
+- Server boundary entry: `crates/server/src/lib.rs` (facade: `ServerConfig`, `build_router`, `bind`, `run`; build/layers/rivers until S2–S4 — **D-96**)
+- Server launcher/projects API: `crates/server/src/projects.rs` (`/api/projects*`, `/api/fixture-worlds*` — D-96 S1)
 - Server shared state: `crates/server/src/state.rs` (`AppState`, `ActiveWorld` — D-96 S0)
 - Server world/layer I/O helpers: `crates/server/src/world_io.rs` (manifest, bounds, projects path, dense layer read/write — D-96 S0)
 - Web boundary entry: `crates/web/src/lib.rs` (`start()` + wiring only; D-94 complete)
@@ -80,8 +81,8 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Alpha tester notes (stub → CURSOR-ALPHA): `docs/TESTER-NOTES-0.2.1.md`
 - World Build Wizard overlay (D-57 shell + D-59 draft): `crates/web/index.html` (`#build-wizard`), `crates/web/src/wizard.rs`
 - Editor tool dock (rail + collapsible drawers: Inspect/profile, Terrain brushes Land/Water/Raise/Lower + step/falloff, View color mode + elevation overlays, World): `crates/web/index.html`, `crates/web/src/editor.rs`, `crates/web/src/elevation_view.rs` — **overlays** the map (D-39); canvas stable on drawer toggle
-- Project list actions (`open` / `remove` / `delete`, with secondary manage flow): `crates/web/src/home.rs`, `crates/server/src/lib.rs`
-- Default create path suggestion (`Documents/MAPKEEPER Worlds`): `crates/server/src/lib.rs`, `crates/web/src/home.rs`
+- Project list actions (`open` / `remove` / `delete`, with secondary manage flow): `crates/web/src/home.rs`, `crates/server/src/projects.rs`
+- Default create path suggestion (`Documents/MAPKEEPER Worlds`): `crates/server/src/projects.rs`, `crates/web/src/home.rs`
 - Map bounds at create (`map_preset`, `write_map_manifest`, `/api/map` bounds + `legacy_map`): `crates/server/src/lib.rs`, `crates/core/src/map_preset.rs`
 - Home Create/Generate preset selectors + Grand/World size warnings + bounds-driven redraw: `crates/web/index.html`, `crates/web/src/home.rs`
 - CLI `init --map-preset`: `crates/cli/src/main.rs`
