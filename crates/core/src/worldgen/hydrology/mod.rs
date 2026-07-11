@@ -2,6 +2,7 @@
 
 pub mod depression_fill;
 pub mod diagnostics;
+pub mod drainage_graph;
 pub mod lakes;
 pub mod river_flux;
 pub mod river_validate;
@@ -11,6 +12,9 @@ pub use depression_fill::{analyze_depressions, provisional_drainage};
 pub use diagnostics::{
     diagnose_legacy_hydrology, LegacyHydrologyDiagnostics, LegacyRiverTerminal,
     LegacyTerminalReason,
+};
+pub use drainage_graph::{
+    build_drainage_graph, DrainageGraph, DrainageGraphError, DrainageNode, DrainageNodeId,
 };
 pub use lakes::generate_lakes;
 pub use river_flux::*;
