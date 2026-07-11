@@ -27,6 +27,21 @@ STALE_TOP_LEVEL = (
     "crates/core/src/plates.rs",
 )
 
+# D-96: server lib.rs is facade-only — these must route to extracted modules, not lib.rs.
+STALE_SERVER_LIB_MARKERS = (
+    "write_map_manifest",
+    "write_dense_layer",
+    "read_or_empty",
+    "/api/build/",
+    "/api/layers/",
+    "/api/rivers",
+    "/api/map",
+    "/api/projects",
+    "generate_elevation",
+    "generate_climate",
+    "generate_rivers",
+)
+
 PATH_IN_BACKTICKS = re.compile(
     r"`((?:crates|docs|schemas|toolchain|fixtures|\.github)/[^`\s]+)`"
 )
@@ -73,6 +88,17 @@ def check_lite_paths() -> list[str]:
     for stale in STALE_TOP_LEVEL:
         if stale in text:
             errors.append(f"{rel(LITE)} references removed path `{stale}` (use worldgen/ or legacy note)")
+
+    for line in text.splitlines():
+        if "crates/server/src/lib.rs" not in line:
+            continue
+        for marker in STALE_SERVER_LIB_MARKERS:
+            if marker in line:
+                errors.append(
+                    f"{rel(LITE)} routes `{marker}` to `crates/server/src/lib.rs` "
+                    f"(D-96 facade — use build/world_io/layers/projects/rivers)"
+                )
+                break
 
     for match in PATH_IN_BACKTICKS.finditer(text):
         raw = match.group(1).rstrip("/")
