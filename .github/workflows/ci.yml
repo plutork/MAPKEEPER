@@ -22,6 +22,8 @@ jobs:
   rust-tests:
     name: cargo test (workspace, incl. CLI query path)
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -50,6 +52,8 @@ jobs:
   windows-desktop-build:
     name: cargo build mapkeeper-desktop (Windows only, roadmap 5.9, D-29)
     runs-on: windows-latest
+    env:
+      RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable

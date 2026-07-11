@@ -545,7 +545,8 @@ pub(crate) async fn post_river_generate(
                 action: "generate_rivers".into(),
                 request: req_line,
                 result: format!(
-                    "rivers={river_n} path_cells={path_cells} precip={} density={density_note} lakes_in_catalog={lake_n}",
+                    "rivers={river_n} path_cells={path_cells} rejected={} precip={} density={density_note} lakes_in_catalog={lake_n}",
+                    body.rejected_river_count,
                     body.precip_source
                 ),
                 error: String::new(),
