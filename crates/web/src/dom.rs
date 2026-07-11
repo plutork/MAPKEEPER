@@ -170,3 +170,44 @@ pub(crate) fn hide_post_finish_note() {
     };
     let _ = note.class_list().remove_1("visible");
 }
+
+pub(crate) fn show_post_finish_note() {
+    let Some(note) = document().get_element_by_id("post-finish-note") else {
+        return;
+    };
+    let _ = note.class_list().add_1("visible");
+}
+
+/// Clear inspect panel fields (editor + wizard return home).
+pub(crate) fn clear_inspect_panel() {
+    input("title").set_value("");
+    textarea("notes").set_value("");
+    input("title").set_disabled(true);
+    textarea("notes").set_disabled(true);
+    set_text("status", "");
+}
+
+/// Grand/World preset warnings on Home and wizard (D-49).
+pub(crate) fn sync_preset_size_warning(select_id: &str, warn_id: &str) {
+    let preset = select_value(select_id);
+    let Some(el) = document().get_element_by_id(warn_id) else {
+        return;
+    };
+    let (text, class) = match preset.as_str() {
+        "grand" => (
+            "Large map — performance may vary on your machine.",
+            "preset-warn-yellow",
+        ),
+        "world" => (
+            "Experimental map size (not stable) — expect slowdowns.",
+            "preset-warn-red",
+        ),
+        _ => ("", ""),
+    };
+    el.set_text_content(if text.is_empty() { None } else { Some(text) });
+    let _ = el.class_list().remove_1("preset-warn-yellow");
+    let _ = el.class_list().remove_1("preset-warn-red");
+    if !class.is_empty() {
+        let _ = el.class_list().add_1(class);
+    }
+}

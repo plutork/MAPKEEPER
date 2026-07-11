@@ -10,12 +10,15 @@ use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::rivers::{river_at_cell, RiverCatalog};
 use serde::{Deserialize, Serialize};
 
+use crate::brush::{reset_view_on_world_open, sync_river_status};
 use crate::dom::{input, perf_now, set_text, set_world_label, show_view, textarea};
+use crate::home::{refresh_suggested_path, render_project_list};
 use crate::state::{
     bump_content_rev, draw_snapshot, fresh_elevation_layer, AppState, BuildStateInput,
     LayerCellWrite, MapResponse, PerfMetrics, ProjectsResponse, PAINT_BATCH_MAX_CELLS,
     PAINT_SAVE_COOLDOWN_MS,
 };
+use crate::wizard::sync_wizard_actions;
 
 pub(crate) async fn persist_build_draft(step: u32) -> bool {
     let body = BuildStateInput {
@@ -65,8 +68,8 @@ pub(crate) async fn refresh_projects(state: Rc<RefCell<AppState>>) {
         let mut state_mut = state.borrow_mut();
         state_mut.default_worlds_root = Some(data.default_worlds_root.clone());
     }
-    crate::refresh_suggested_path(&state);
-    crate::render_project_list(&data.projects, &state);
+    refresh_suggested_path(&state);
+    render_project_list(&data.projects, &state);
 
     if let Some(active) = data.active {
         let _ = active;
@@ -100,8 +103,8 @@ pub(crate) async fn load_map(state: Rc<RefCell<AppState>>) {
             state_mut.paint_flush_scheduled = false;
             state_mut.paint_flush_in_flight = false;
             state_mut.legacy_map = map.legacy_map;
-            crate::reset_view_on_world_open(&mut state_mut);
-            crate::sync_wizard_actions(&state_mut);
+            reset_view_on_world_open(&mut state_mut);
+            sync_wizard_actions(&state_mut);
             set_world_label(&format!(
                 "{} · {} cells",
                 map.world_id, map.bounds.cell_count
@@ -177,7 +180,7 @@ pub(crate) async fn load_rivers(state: &Rc<RefCell<AppState>>) {
     let mut s = state.borrow_mut();
     s.rivers = catalog;
     s.active_river_id = None;
-    crate::sync_river_status(&s);
+    sync_river_status(&s);
 }
 #[derive(Deserialize)]
 pub(crate) struct RiversGenerateResponse {
@@ -227,7 +230,7 @@ pub(crate) async fn post_river_append(state: Rc<RefCell<AppState>>, q: i32, r: i
         s.rivers = catalog;
         s.active_river_id = new_active;
         bump_content_rev(&mut s);
-        crate::sync_river_status(&s);
+        sync_river_status(&s);
     }
     crate::canvas::schedule_redraw(state);
 }
@@ -271,7 +274,7 @@ pub(crate) async fn delete_river_at_cell(state: Rc<RefCell<AppState>>, q: i32, r
             s.active_river_id = None;
         }
         bump_content_rev(&mut s);
-        crate::sync_river_status(&s);
+        sync_river_status(&s);
     }
     crate::canvas::schedule_redraw(state);
 }
@@ -306,7 +309,7 @@ pub(crate) async fn post_river_pop(state: Rc<RefCell<AppState>>) {
             s.active_river_id = None;
         }
         bump_content_rev(&mut s);
-        crate::sync_river_status(&s);
+        sync_river_status(&s);
     }
     crate::canvas::schedule_redraw(state);
 }
@@ -337,7 +340,7 @@ pub(crate) async fn post_river_generate(state: Rc<RefCell<AppState>>, status_id:
         s.rivers = body.catalog;
         s.active_river_id = None;
         bump_content_rev(&mut s);
-        crate::sync_river_status(&s);
+        sync_river_status(&s);
     }
     let source_note = if body.precip_source == "climate" {
         "from climate precipitation"

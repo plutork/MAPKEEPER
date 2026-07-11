@@ -18,11 +18,12 @@ use crate::state::{
     BRUSH_PREVIEW_GAP, CANVAS_PAD, FILL_SCALE_GRID_OFF, FILL_SCALE_GRID_ON, GRID_LINE_WIDTH, MIN_ZOOM, ZOOM_CLOSEUP_HEX_PX,
     ZOOM_MAX_HARD,
 };
-use crate::{
+use crate::brush::{
     brush_preview_uses_circle, effective_paint_radius, paint_stamp_cells, river_brush,
     sync_brush_effective_label, sync_brush_radius_active, sync_brush_step_active,
-    sync_falloff_active, wizard_is_active,
+    sync_falloff_active,
 };
+use crate::wizard::wizard_is_active;
 use wasm_bindgen::prelude::*;
 use web_sys::CanvasRenderingContext2d;
 
