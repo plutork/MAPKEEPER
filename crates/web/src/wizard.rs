@@ -6,13 +6,15 @@ use std::rc::Rc;
 
 use crate::api::{
     flush_pending_paints, load_elevation, load_geology, load_map,
-    persist_build_draft, post_river_generate, refresh_projects,
+    persist_build_draft, post_lake_generate, post_river_generate, refresh_projects,
 };
 use crate::brush::{effective_brush_radius_from_hex_size, paint_stamp_cells};
 use crate::canvas::{current_hex_size_px, schedule_redraw};
 use crate::dom::{
-    click_target_element, document, hide_post_finish_note, hide_wiz_confirm, select_value,
-    set_drawer_open, set_select_value, set_text, set_world_label, show_post_finish_note, show_wiz_confirm, sync_preset_size_warning, clear_inspect_panel,
+    active_attr_in_group, click_target_element, document, hide_post_finish_note, hide_wiz_confirm,
+    select_value, set_drawer_open, set_select_value, set_text, set_world_label,
+    show_post_finish_note, show_wiz_confirm, sync_preset_size_warning, clear_inspect_panel,
+    toggle_active_in_group,
 };
 use crate::brush::reset_view_on_world_open;
 use crate::state::{
@@ -36,7 +38,7 @@ pub(crate) fn build_step_label(step: u32) -> &'static str {
         3 => "Step 3 ┬╖ Tectonics",
         4 => "Step 4 ┬╖ Elevation",
         5 => "Step 5 ┬╖ Climate",
-        6 => "Step 6 ┬╖ Rivers",
+        6 => "Step 6 · Water",
         _ => "Step 2 ┬╖ Land silhouette",
     }
 }
@@ -213,7 +215,7 @@ fn sync_wizard_nav(step: u32) {
             3 => "Geo тА║ Tectonics",
             4 => "Geo тА║ Elevation",
             5 => "Climate тА║ Precipitation",
-            6 => "Water тА║ Rivers",
+            6 => "Water › Lakes & rivers",
             _ => "Geo тА║ Land silhouette",
         };
         crumb.set_text_content(Some(text));
@@ -338,7 +340,7 @@ fn show_wizard_step(state: &AppState) {
         5 => {
             set_wizard_status("Step 5: pick precipitation style, generate climate, then continue.")
         }
-        6 => set_wizard_status("Step 6: generate rivers from climate rainfall, then Finish."),
+        6 => set_wizard_status("Step 6: generate lakes, then rivers from climate rainfall."),
         _ => set_wizard_status(
             "Step 2 flow: 1) parameters, 2) generate, 3) accept/edit, 4) continue.",
         ),
@@ -1468,7 +1470,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                     s.wizard_step = 6;
                     sync_wizard_actions(&s);
                 }
-                set_wizard_status("Step 6: generate rivers from climate rainfall.");
+                set_wizard_status("Step 6: generate lakes, then rivers.");
             });
         });
         if let Some(btn) = document().get_element_by_id("wiz-climate-continue") {
@@ -1477,10 +1479,56 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
     {
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else {
+                return;
+            };
+            let Some(el) = click_target_element(&mouse) else {
+                return;
+            };
+            if let Some(density) = el.get_attribute("data-wiz-lake-density") {
+                toggle_active_in_group("wiz-lake-densities", "data-wiz-lake-density", &el);
+                set_wizard_status("Lake density updated — Generate to apply.");
+                let _ = density;
+            } else if let Some(density) = el.get_attribute("data-wiz-river-density") {
+                toggle_active_in_group("wiz-river-densities", "data-wiz-river-density", &el);
+                set_wizard_status("River density updated — Generate to apply.");
+                let _ = density;
+            }
+        });
+        if let Ok(Some(root)) = document().query_selector("#wiz-panel-step6") {
+            let _ = root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
-            set_wizard_status("Generating riversтАж");
-            wasm_bindgen_futures::spawn_local(post_river_generate(state.clone(), "wizard-status"));
+            let density =
+                active_attr_in_group("wiz-lake-densities", "data-wiz-lake-density", "balanced");
+            set_wizard_status("Generating lakes…");
+            wasm_bindgen_futures::spawn_local(post_lake_generate(
+                state.clone(),
+                "wizard-status",
+                density,
+            ));
+        });
+        if let Some(btn) = document().get_element_by_id("wiz-lake-generate") {
+            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let density =
+                active_attr_in_group("wiz-river-densities", "data-wiz-river-density", "balanced");
+            set_wizard_status("Generating rivers…");
+            wasm_bindgen_futures::spawn_local(post_river_generate(
+                state.clone(),
+                "wizard-status",
+                density,
+            ));
         });
         if let Some(btn) = document().get_element_by_id("wiz-water-generate") {
             let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());

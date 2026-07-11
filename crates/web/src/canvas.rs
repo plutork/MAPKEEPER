@@ -137,6 +137,43 @@ pub(crate) fn draw_preview_boundary(
     }
 }
 
+/// Lake basin fill overlay (hydrology-water-generation-ui-v1).
+pub(crate) fn draw_lakes(
+    state: &AppState,
+    ctx: &CanvasRenderingContext2d,
+    size: f64,
+    ox: f64,
+    oy: f64,
+) {
+    if state.lakes.lakes.is_empty() {
+        return;
+    }
+    ctx.set_fill_style_str("rgba(58, 143, 217, 0.62)");
+    let bounds = state.map_bounds;
+    let fill_scale = if state.show_grid {
+        FILL_SCALE_GRID_ON
+    } else {
+        FILL_SCALE_GRID_OFF
+    };
+    for lake in &state.lakes.lakes {
+        for &idx in &lake.cells {
+            let Some(cell) = bounds.from_index(idx) else {
+                continue;
+            };
+            let (x, y) = cell.to_pixel(size);
+            let (cx, cy) = (ox + x, oy + y);
+            let corners = hex_corners(cx, cy, size * fill_scale);
+            ctx.begin_path();
+            ctx.move_to(corners[0].0, corners[0].1);
+            for corner in &corners[1..] {
+                ctx.line_to(corner.0, corner.1);
+            }
+            ctx.close_path();
+            ctx.fill();
+        }
+    }
+}
+
 /// river-overlay-layer-v1: straight center-to-center polyline strokes.
 pub(crate) fn draw_rivers(
     state: &AppState,
@@ -406,6 +443,7 @@ pub(crate) fn redraw(state: &AppState) -> usize {
         ),
     );
     draw_preview_boundary(state, &ctx, size, ox, oy);
+    draw_lakes(state, &ctx, size, ox, oy);
     draw_rivers(state, &ctx, size, ox, oy);
     set_text("toggle-grid", grid_lines_toggle_label(state.show_grid));
     set_text(

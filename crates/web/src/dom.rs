@@ -68,6 +68,33 @@ pub(crate) fn set_text(id: &str, text: &str) {
         el.set_text_content(Some(text));
     }
 }
+
+/// Active preset button value inside a container (`[attr].active`).
+pub(crate) fn active_attr_in_group(container_id: &str, attr: &str, default: &str) -> String {
+    let selector = format!("#{container_id} [{attr}].active");
+    document()
+        .query_selector(&selector)
+        .ok()
+        .flatten()
+        .and_then(|el| el.get_attribute(attr))
+        .unwrap_or_else(|| default.to_string())
+}
+
+pub(crate) fn toggle_active_in_group(container_id: &str, attr: &str, active: &Element) {
+    let Ok(Some(root)) = document().query_selector(&format!("#{container_id}")) else {
+        return;
+    };
+    if let Ok(list) = root.query_selector_all(&format!("[{attr}]")) {
+        for i in 0..list.length() {
+            if let Some(node) = list.item(i) {
+                if let Ok(el) = node.dyn_into::<Element>() {
+                    let _ = el.class_list().remove_1("active");
+                }
+            }
+        }
+    }
+    let _ = active.class_list().add_1("active");
+}
 pub(crate) fn set_drawer_open(open: bool) {
     if let Some(drawer) = document().get_element_by_id("dock-drawer") {
         if open {

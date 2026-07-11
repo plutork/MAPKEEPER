@@ -7,6 +7,7 @@ use gloo_timers::future::TimeoutFuture;
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::layer::DenseLayer;
 use mapkeeper_core::profile::CellProfile;
+use mapkeeper_core::lakes::LakeCatalog;
 use mapkeeper_core::rivers::{river_at_cell, RiverCatalog};
 use serde::{Deserialize, Serialize};
 
@@ -120,6 +121,7 @@ pub(crate) async fn load_map(state: Rc<RefCell<AppState>>) {
         }
     }
     load_elevation(&state).await;
+    load_lakes(&state).await;
     load_rivers(&state).await;
     let redraw_start = perf_now();
     let drawn = crate::canvas::redraw(&state.borrow());
@@ -169,6 +171,19 @@ pub(crate) async fn load_elevation(state: &Rc<RefCell<AppState>>) {
     state_mut.perf.client_mirror_ms = Some(mirror_ms);
 }
 
+/// Fetch lake catalog (hydrology-lake-domain-v1).
+pub(crate) async fn load_lakes(state: &Rc<RefCell<AppState>>) {
+    let Ok(resp) = gloo_net::http::Request::get("/api/lakes").send().await else {
+        return;
+    };
+    let Ok(catalog) = resp.json::<LakeCatalog>().await else {
+        return;
+    };
+    let mut s = state.borrow_mut();
+    s.lakes = catalog;
+    bump_content_rev(&mut s);
+}
+
 /// Fetch river catalog (river-overlay-layer-v1).
 pub(crate) async fn load_rivers(state: &Rc<RefCell<AppState>>) {
     let Ok(resp) = gloo_net::http::Request::get("/api/rivers").send().await else {
@@ -182,11 +197,31 @@ pub(crate) async fn load_rivers(state: &Rc<RefCell<AppState>>) {
     s.active_river_id = None;
     sync_river_status(&s);
 }
+#[derive(Serialize)]
+pub(crate) struct LakesGenerateInput {
+    pub(crate) density: String,
+    pub(crate) seed: u64,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct LakesGenerateResponse {
+    #[serde(flatten)]
+    pub(crate) catalog: LakeCatalog,
+    pub(crate) rivers_cleared: bool,
+}
+
+#[derive(Serialize)]
+pub(crate) struct RiversGenerateInput {
+    pub(crate) river_density: String,
+}
+
 #[derive(Deserialize)]
 pub(crate) struct RiversGenerateResponse {
     #[serde(flatten)]
     pub(crate) catalog: RiverCatalog,
     pub(crate) precip_source: String,
+    #[serde(default)]
+    pub(crate) river_density: String,
 }
 
 #[derive(Serialize)]
@@ -314,9 +349,66 @@ pub(crate) async fn post_river_pop(state: Rc<RefCell<AppState>>) {
     crate::canvas::schedule_redraw(state);
 }
 
-pub(crate) async fn post_river_generate(state: Rc<RefCell<AppState>>, status_id: &str) {
+pub(crate) async fn post_lake_generate(
+    state: Rc<RefCell<AppState>>,
+    status_id: &'static str,
+    density: String,
+) {
+    set_text(status_id, "Generating lakes…");
+    let body = LakesGenerateInput { density, seed: 1 };
+    let Ok(resp) = gloo_net::http::Request::post("/api/lakes/generate")
+        .json(&body)
+        .expect("serialize lakes generate")
+        .send()
+        .await
+    else {
+        set_text(status_id, "Generate failed (network)");
+        return;
+    };
+    if !resp.ok() {
+        let msg = resp
+            .text()
+            .await
+            .unwrap_or_else(|_| "Generate rejected".into());
+        set_text(status_id, &msg);
+        return;
+    }
+    let Ok(body) = resp.json::<LakesGenerateResponse>().await else {
+        set_text(status_id, "Generate failed (parse)");
+        return;
+    };
+    let lake_count = body.catalog.lakes.len();
+    {
+        let mut s = state.borrow_mut();
+        s.lakes = body.catalog;
+        if body.rivers_cleared {
+            s.rivers = RiverCatalog::default();
+            s.active_river_id = None;
+            sync_river_status(&s);
+        }
+        bump_content_rev(&mut s);
+    }
+    if body.rivers_cleared {
+        set_text(status_id, "Rivers cleared — regenerate rivers.");
+    } else {
+        set_text(
+            status_id,
+            &format!("Generated {lake_count} lake(s)."),
+        );
+    }
+    crate::canvas::schedule_redraw(state);
+}
+
+pub(crate) async fn post_river_generate(
+    state: Rc<RefCell<AppState>>,
+    status_id: &'static str,
+    river_density: String,
+) {
     set_text(status_id, "Generating rivers…");
+    let body = RiversGenerateInput { river_density: river_density.clone() };
     let Ok(resp) = gloo_net::http::Request::post("/api/rivers/generate")
+        .json(&body)
+        .expect("serialize rivers generate")
         .send()
         .await
     else {
@@ -347,12 +439,18 @@ pub(crate) async fn post_river_generate(state: Rc<RefCell<AppState>>, status_id:
     } else {
         "uniform fallback (no precipitation layer)"
     };
+    let density_note = if body.river_density.is_empty() {
+        river_density.as_str()
+    } else {
+        body.river_density.as_str()
+    };
     set_text(
         status_id,
         &format!(
-            "Generated {} river(s) — {}",
+            "Generated {} river(s) — {} · density {}",
             state.borrow().rivers.rivers.len(),
-            source_note
+            source_note,
+            density_note
         ),
     );
     crate::canvas::schedule_redraw(state);

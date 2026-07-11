@@ -35,6 +35,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Dense-on-disk layer I/O (`read_or_empty` + `write_dense_layer`) -> `crates/core/src/layer.rs`, `crates/server/src/world_io.rs`, `crates/cli/src/main.rs`
 - Web UI (WASM canvas, Home/Editor flow, tool dock + terrain brushes; elevation view palette/labels/peaks in `elevation_view.rs`) -> `crates/web/src/` (**D-94** split: `state.rs`, `dom.rs`, `api.rs`, `canvas.rs`, `brush.rs`, `wizard.rs`, `editor.rs`, `home.rs`; `lib.rs` = `start()` facade)
 - Rivers tool dock (chain-click brush, stroke overlay, erase whole river, Generate rivers + confirm) -> `crates/web/index.html`, `crates/web/src/editor.rs` (`river-overlay-layer-v1`, `rivers-auto-from-elevation-v1`)
+- Wizard/editor water generation UI (lake + river density presets, generate lakes/rivers, invalidation copy; lake overlay render) -> `crates/web/index.html`, `crates/web/src/wizard.rs`, `crates/web/src/editor.rs`, `crates/web/src/api.rs`, `crates/web/src/canvas.rs` (`hydrology-water-generation-ui-v1`; closes Phase 1)
 - Perf Step 0 measurement hooks (`open_ms`, layer fetch/parse/mirror, `redraw_ms`, `batch_flush_ms`; `#view-perf` + console) -> `crates/web/src/lib.rs` + `canvas.rs` (`perf-100k--measurement-hooks`)
 - Web dense elevation client (index-addressed `DenseLayer` render cache, no HashMap mirror) -> `crates/web/src/lib.rs` + `canvas.rs` (`perf-100k--web-dense-client`)
 - rAF redraw coalescing (`schedule_redraw`, one draw per animation frame) -> `crates/web/src/canvas.rs` (`perf-100k--raf-redraw-coalesce`)

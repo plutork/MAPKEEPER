@@ -4,8 +4,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::api::{
-    delete_river_at_cell, flush_pending_paints, load_profile_into_panel, post_river_append,
-    post_river_generate, post_river_pop, schedule_paint_flush,
+    delete_river_at_cell, flush_pending_paints, load_profile_into_panel, post_lake_generate,
+    post_river_append, post_river_generate, post_river_pop, schedule_paint_flush,
 };
 use crate::brush::{
     active_dock_tab, apply_elevation_brush_intent, apply_paint_brush, brush_absolute_elevation,
@@ -18,8 +18,8 @@ use crate::canvas::{
     clamp_zoom, current_hex_size_px, hex_layout, map_layout, schedule_redraw,
 };
 use crate::dom::{
-    canvas, click_target_element, document, drawer_is_open,
-    input, set_dock_tab, set_drawer_open, set_text, textarea, window,
+    active_attr_in_group, canvas, click_target_element, document, drawer_is_open,
+    input, set_dock_tab, set_drawer_open, set_text, textarea, toggle_active_in_group, window,
 };
 use crate::state::{
     bump_content_rev, elevation_at, grid_lines_toggle_label, set_elevation_cell, AppState, Brush, ProfileInput, MAX_BRUSH_TIER, MAX_EFFECTIVE_BRUSH_RADIUS, MIN_BRUSH_TIER,
@@ -607,10 +607,61 @@ pub fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
 }
 
 /// map-bounds--hex-rectangle-16x9: Grand/World preset warnings on Home (D-49).
+pub fn attach_generate_lakes_click(state: Rc<RefCell<AppState>>) {
+    {
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else {
+                return;
+            };
+            let Some(el) = click_target_element(&mouse) else {
+                return;
+            };
+            if el.get_attribute("data-editor-lake-density").is_some() {
+                toggle_active_in_group("editor-lake-densities", "data-editor-lake-density", &el);
+            } else if el.get_attribute("data-editor-river-density").is_some() {
+                toggle_active_in_group("editor-river-densities", "data-editor-river-density", &el);
+            }
+        });
+        if let Ok(Some(root)) = document().query_selector("[data-drawer=\"rivers\"]") {
+            let _ = root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        }
+        closure.forget();
+    }
+    {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let density = active_attr_in_group(
+                "editor-lake-densities",
+                "data-editor-lake-density",
+                "balanced",
+            );
+            wasm_bindgen_futures::spawn_local(post_lake_generate(
+                state.clone(),
+                "water-gen-status",
+                density,
+            ));
+        });
+        document()
+            .get_element_by_id("generate-lakes")
+            .expect("missing #generate-lakes")
+            .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
+            .expect("attaching generate-lakes handler");
+        closure.forget();
+    }
+}
+
 pub fn attach_generate_rivers_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
-        set_text("river-status", "Generating riversтАж");
-        wasm_bindgen_futures::spawn_local(post_river_generate(state.clone(), "river-status"));
+        let density = active_attr_in_group(
+            "editor-river-densities",
+            "data-editor-river-density",
+            "balanced",
+        );
+        wasm_bindgen_futures::spawn_local(post_river_generate(
+            state.clone(),
+            "water-gen-status",
+            density,
+        ));
     });
     document()
         .get_element_by_id("generate-rivers")

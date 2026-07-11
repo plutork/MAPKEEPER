@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::elevation_view::ColorMode;
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
+use mapkeeper_core::lakes::LakeCatalog;
 use mapkeeper_core::rivers::RiverCatalog;
 use serde::{Deserialize, Serialize};
 
@@ -402,6 +403,8 @@ pub(crate) struct AppState {
     pub(crate) active_river_id: Option<u32>,
     /// River catalog mirror (river-overlay-layer-v1).
     pub(crate) rivers: RiverCatalog,
+    /// Lake catalog mirror (hydrology-lake-domain-v1).
+    pub(crate) lakes: LakeCatalog,
     pub(crate) selected: Option<(i32, i32)>,
     /// Hex bounds from `map/manifest.json` (via `/api/map`).
     pub(crate) map_bounds: MapBounds,
