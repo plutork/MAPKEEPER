@@ -35,6 +35,7 @@ STALE_SERVER_LIB_MARKERS = (
     "/api/build/",
     "/api/layers/",
     "/api/rivers",
+    "/api/lakes",
     "/api/map",
     "/api/projects",
     "generate_elevation",

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "next_id": 2,
+  "lakes": [
+    {
+      "id": 1,
+      "cells": [10, 11, 12],
+      "outlet_cell": 10,
+      "endorheic": false,
+      "name": "Test basin"
+    }
+  ]
+}

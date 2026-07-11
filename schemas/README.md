@@ -35,6 +35,12 @@ River **catalog** at `map/rivers.json` — mirrors `crates/core/src/rivers.rs::R
 Ordered `cells[]` linear indices per river; derived dense `river_id` integer layer
 is defined by `map-layer-dense.schema.json`.
 
+## `map-lakes.schema.json` (hydrology-lake-domain-v1)
+
+Lake **catalog** at `map/lakes.json` — mirrors `crates/core/src/lakes.rs::LakeCatalog`.
+Unordered `cells[]` per lake; derived dense `lake_id` integer layer uses
+`map-layer-dense.schema.json`. Dry basins are absence from catalog (`lake_id=0`).
+
 (API / profiles / agent); the linear index is the internal storage key.
 
 | Field | Meaning |

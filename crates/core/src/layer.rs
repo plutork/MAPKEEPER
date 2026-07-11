@@ -31,6 +31,7 @@ pub const LAND_MASK_LAYER_ID: &str = "land_mask";
 pub const GEOLOGY_LAYER_ID: &str = "geology";
 /// Dense integer layer: 0 = no river, N = river id (river-overlay-layer-v1).
 pub const RIVER_ID_LAYER_ID: &str = "river_id";
+pub const LAKE_ID_LAYER_ID: &str = "lake_id";
 
 /// Kind of value a layer stores: `categorical` (palette-encoded strings) or
 /// `integer`. Future numeric/enum kinds are additive.

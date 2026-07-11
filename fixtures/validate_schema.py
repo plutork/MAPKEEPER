@@ -33,6 +33,7 @@ CONTRACTS = [
     ("profiles", "cell-profile.schema.json"),
     ("layers-dense", "map-layer-dense.schema.json"),
     ("manifests", "map-manifest.schema.json"),
+    ("lakes", "map-lakes.schema.json"),
 ]
 
 

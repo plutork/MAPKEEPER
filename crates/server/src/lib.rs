@@ -18,6 +18,7 @@
 
 mod build;
 mod layers;
+mod lakes;
 mod projects;
 mod rivers;
 mod state;
@@ -76,6 +77,7 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         .merge(build::routes())
         .merge(layers::routes())
         .merge(rivers::routes())
+        .merge(lakes::routes())
         .with_state(state)
         .fallback_service(ServeDir::new(&config.web_dist)))
 }

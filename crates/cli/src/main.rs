@@ -25,6 +25,7 @@ use mapkeeper_core::layer::{
 use mapkeeper_core::map_preset::{legacy_default_bounds, parse_map_preset, MapPreset};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
+use mapkeeper_core::lakes::{LakeCatalog, LAKE_CATALOG_FILE};
 use mapkeeper_core::river_flux::generate_with_owners;
 use mapkeeper_core::rivers::{
     append_cell, create_river, delete_river, pop_last_cell, sync_river_id_layer, RiverCatalog,
@@ -68,6 +69,11 @@ enum Command {
     Rivers {
         #[command(subcommand)]
         action: RiversAction,
+    },
+    /// Lake catalog (hydrology-lake-domain-v1).
+    Lakes {
+        #[command(subcommand)]
+        action: LakesAction,
     },
 }
 
@@ -249,6 +255,15 @@ enum RiversAction {
     },
 }
 
+#[derive(Subcommand)]
+enum LakesAction {
+    /// Print the lake catalog JSON.
+    List {
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -315,6 +330,9 @@ fn main() -> Result<()> {
             RiversAction::Pop { world, river_id } => cmd_rivers_pop(&world, river_id),
             RiversAction::Delete { world, river_id } => cmd_rivers_delete(&world, river_id),
             RiversAction::Generate { world } => cmd_rivers_generate(&world),
+        },
+        Command::Lakes { action } => match action {
+            LakesAction::List { world } => cmd_lakes_list(&world),
         },
     }
 }
@@ -867,6 +885,23 @@ fn cmd_rivers_generate(world: &Path) -> Result<()> {
     } else {
         eprintln!("river flux: uniform precipitation fallback (no precipitation layer)");
     }
+    println!("{}", catalog.to_json_pretty()?);
+    Ok(())
+}
+
+fn lakes_file_path(world: &Path) -> PathBuf {
+    world.join("map").join(LAKE_CATALOG_FILE)
+}
+
+fn read_lake_catalog(world: &Path) -> LakeCatalog {
+    fs::read_to_string(lakes_file_path(world))
+        .ok()
+        .and_then(|raw| LakeCatalog::from_json(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn cmd_lakes_list(world: &Path) -> Result<()> {
+    let catalog = read_lake_catalog(world);
     println!("{}", catalog.to_json_pretty()?);
     Ok(())
 }

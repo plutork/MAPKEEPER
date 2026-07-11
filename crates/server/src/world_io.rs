@@ -10,8 +10,9 @@ use mapkeeper_core::hex::MapBounds;
 use mapkeeper_core::land_mask::LAND_MASK_LAYER_ID;
 use mapkeeper_core::layer::Bounds;
 use mapkeeper_core::layer::{
-    DenseLayer, MapManifest, ValueType, ELEVATION_LAYER_ID, RIVER_ID_LAYER_ID,
+    DenseLayer, MapManifest, ValueType, ELEVATION_LAYER_ID, LAKE_ID_LAYER_ID, RIVER_ID_LAYER_ID,
 };
+use mapkeeper_core::lakes::{sync_lake_id_layer, LakeCatalog, LAKE_CATALOG_FILE};
 use mapkeeper_core::map_preset::{legacy_default_bounds, MapPreset};
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
 use mapkeeper_core::river_flux::sync_river_id_from_owners;
@@ -73,6 +74,7 @@ pub(crate) fn rewrite_world_bounds(
             GEOLOGY_LAYER_ID,
             "terrain",
             RIVER_ID_LAYER_ID,
+            LAKE_ID_LAYER_ID,
             TEMPERATURE_LAYER_ID,
             PRECIPITATION_LAYER_ID,
             ICE_LAYER_ID,
@@ -307,6 +309,7 @@ pub(crate) fn layer_file_path(world_path: &Path, layer_id: &str) -> PathBuf {
 pub(crate) fn default_value_type(layer_id: &str) -> ValueType {
     if layer_id == ELEVATION_LAYER_ID
         || layer_id == RIVER_ID_LAYER_ID
+        || layer_id == LAKE_ID_LAYER_ID
         || layer_id == TEMPERATURE_LAYER_ID
         || layer_id == PRECIPITATION_LAYER_ID
         || layer_id == ICE_LAYER_ID
@@ -343,6 +346,10 @@ pub(crate) fn read_dense_layer(
 }
 
 pub(crate) fn write_dense_layer(world_path: &Path, layer: &DenseLayer) -> Result<(), String> {
+    #[cfg(test)]
+    if SIMULATE_LAYER_WRITE_FAILURE.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("simulated layer write failure".to_string());
+    }
     let path = layer_file_path(world_path, &layer.layer_id);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -389,4 +396,135 @@ pub(crate) fn persist_generated_rivers(
     write_river_catalog(world_path, catalog)?;
     let layer = sync_river_id_from_owners(owners, bounds);
     write_dense_layer(world_path, &layer)
+}
+
+pub(crate) fn lakes_file_path(world_path: &Path) -> PathBuf {
+    world_path.join("map").join(LAKE_CATALOG_FILE)
+}
+
+pub(crate) fn read_lake_catalog(world_path: &Path) -> LakeCatalog {
+    std::fs::read_to_string(lakes_file_path(world_path))
+        .ok()
+        .and_then(|raw| LakeCatalog::from_json(&raw).ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn write_lake_catalog(world_path: &Path, catalog: &LakeCatalog) -> Result<(), String> {
+    let path = lakes_file_path(world_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let body = catalog.to_json_pretty().map_err(|e| e.to_string())?;
+    std::fs::write(&path, body).map_err(|e| e.to_string())
+}
+
+fn restore_file(path: &Path, backup: Option<String>) -> Result<(), String> {
+    match backup {
+        Some(bytes) => std::fs::write(path, bytes).map_err(|e| e.to_string()),
+        None => {
+            if path.exists() {
+                std::fs::remove_file(path).map_err(|e| e.to_string())
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Write `lakes.json` then derive `lake_id` layer. Rolls back catalog on layer failure.
+pub(crate) fn persist_lakes(
+    world_path: &Path,
+    catalog: &LakeCatalog,
+    bounds: &MapBounds,
+) -> Result<(), String> {
+    let catalog_path = lakes_file_path(world_path);
+    let backup_catalog = std::fs::read_to_string(&catalog_path).ok();
+
+    write_lake_catalog(world_path, catalog)?;
+    let layer = sync_lake_id_layer(catalog, bounds);
+    if let Err(err) = write_dense_layer(world_path, &layer) {
+        restore_file(&catalog_path, backup_catalog)?;
+        return Err(err);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) static SIMULATE_LAYER_WRITE_FAILURE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(test)]
+mod persist_lakes_tests {
+    use super::*;
+    use mapkeeper_core::lakes::Lake;
+    use mapkeeper_core::map_preset::MapPreset;
+    use std::sync::atomic::Ordering;
+    use tempfile::tempdir;
+
+    fn seed_world(path: &Path) -> MapBounds {
+        std::fs::create_dir_all(path.join("map/layers")).unwrap();
+        rewrite_world_bounds(path, MapPreset::Small, false).unwrap()
+    }
+
+    #[test]
+    fn persist_lakes_matches_sync_layer() {
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        let mut catalog = LakeCatalog::default();
+        catalog.lakes.push(Lake {
+            id: 1,
+            cells: vec![2, 3],
+            outlet_cell: Some(2),
+            endorheic: false,
+            name: None,
+        });
+        persist_lakes(world, &catalog, &bounds).unwrap();
+        let read = read_lake_catalog(world);
+        assert_eq!(read, catalog);
+        let on_disk = read_dense_layer(world, LAKE_ID_LAYER_ID, &bounds);
+        let expected = sync_lake_id_layer(&catalog, &bounds);
+        assert_eq!(on_disk, expected);
+    }
+
+    #[test]
+    fn empty_catalog_roundtrip() {
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        let catalog = LakeCatalog::default();
+        persist_lakes(world, &catalog, &bounds).unwrap();
+        assert_eq!(read_lake_catalog(world), catalog);
+        let layer = read_dense_layer(world, LAKE_ID_LAYER_ID, &bounds);
+        assert_eq!(layer.int_or(0, -1), 0);
+    }
+
+    #[test]
+    fn rollback_catalog_when_layer_write_fails() {
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        let initial = LakeCatalog::default();
+        persist_lakes(world, &initial, &bounds).unwrap();
+        let before_catalog = std::fs::read_to_string(lakes_file_path(world)).unwrap();
+
+        let mut next = LakeCatalog::default();
+        next.lakes.push(Lake {
+            id: 1,
+            cells: vec![5],
+            outlet_cell: None,
+            endorheic: false,
+            name: None,
+        });
+
+        SIMULATE_LAYER_WRITE_FAILURE.store(true, Ordering::SeqCst);
+        let err = persist_lakes(world, &next, &bounds).unwrap_err();
+        SIMULATE_LAYER_WRITE_FAILURE.store(false, Ordering::SeqCst);
+        assert!(err.contains("simulated"));
+
+        let after_catalog = std::fs::read_to_string(lakes_file_path(world)).unwrap();
+        assert_eq!(after_catalog, before_catalog);
+        let layer = read_dense_layer(world, LAKE_ID_LAYER_ID, &bounds);
+        assert_eq!(layer, sync_lake_id_layer(&initial, &bounds));
+    }
 }

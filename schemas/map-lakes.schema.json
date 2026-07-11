@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mapkeeper.dev/schemas/map-lakes.schema.json",
+  "title": "MAPKEEPER lake catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "lakes", "next_id"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "next_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "lakes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "cells"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "cells": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "minItems": 1
+          },
+          "outlet_cell": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "endorheic": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
