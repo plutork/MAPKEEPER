@@ -6,12 +6,18 @@
 //! Flow: Home screen lists/creates worlds (roadmap D-12/5.7 launcher) ->
 //! open a world -> render a blank hex grid -> click a cell -> edit a
 //! placeholder profile (title + notes) -> save -> cell is "painted". No
-//! real cell schema (roadmap 3.2) yet — that is the point of this pass.
+//! real cell schema (roadmap 3.2) yet тАФ that is the point of this pass.
 
 mod api;
+mod canvas;
 mod dom;
 mod elevation_view;
 mod state;
+
+use canvas::{
+    clamp_zoom, current_hex_size_px, hex_layout, map_layout, redraw,
+    schedule_redraw,
+};
 
 use api::{
     delete_river_at_cell, flush_pending_paints, load_elevation, load_geology, load_map,
@@ -19,22 +25,20 @@ use api::{
     post_river_generate, post_river_pop, refresh_projects, schedule_paint_flush,
 };
 use dom::{
-    canvas, click_target_element, context, document, drawer_is_open, hide_post_finish_note,
+    canvas, click_target_element, document, drawer_is_open, hide_post_finish_note,
     hide_wiz_confirm, input, perf_now, select_value, set_dock_tab, set_drawer_open,
     set_select_value, set_text, set_world_label, show_view, show_wiz_confirm, textarea, window,
 };
 use state::{
-    bump_content_rev, count_visible_in_bounds, draw_snapshot, elevation_at, fresh_elevation_layer,
-    geology_tint, grid_lines_stats_label, grid_lines_toggle_label,
-    set_elevation_cell, show_profile_markers, stroke_grid_enabled, AppState, Brush,
-    BuildBoundsInput, BuildBoundsResponse, BuildStateInput, CreateProjectInput, DeleteProjectInput, ForgetProjectInput, OpenProjectInput, PerfMetrics,
-    PerfTimers, ProfileInput, ProjectStatus, WizConfirmKind,
-    WizardClimateGenerateInput, WizardElevationGenerateInput, WizardGeologyGenerateInput,
-    WizardLandMaskCellInput, WizardLandMaskGenerateInput, WizardLandMaskGenerateResponse,
-    APP_VERSION, BRUSH_PREVIEW_GAP, BRUSH_PREVIEW_HEX_DETAIL_MAX, BRUSH_SCREEN_DIAMETERS_PX,
-    CANVAS_PAD, FILL_SCALE_GRID_OFF, FILL_SCALE_GRID_ON, GRID_LINE_WIDTH, MAX_BRUSH_RADIUS, MAX_BRUSH_TIER, MAX_EFFECTIVE_BRUSH_RADIUS,
-    MIN_BRUSH_RADIUS, MIN_BRUSH_TIER, MIN_ZOOM, PAINT_BATCH_MAX_CELLS, PAINT_SAVE_COOLDOWN_MS,
-    PAN_DRAG_THRESHOLD, ZOOM_CLOSEUP_HEX_PX, ZOOM_MAX_HARD,
+    bump_content_rev, elevation_at, fresh_elevation_layer, grid_lines_toggle_label, set_elevation_cell, AppState, Brush, BuildBoundsInput,
+    BuildBoundsResponse, BuildStateInput, CreateProjectInput, DeleteProjectInput,
+    ForgetProjectInput, OpenProjectInput, PerfMetrics, PerfTimers, ProfileInput, ProjectStatus,
+    WizConfirmKind, WizardClimateGenerateInput, WizardElevationGenerateInput,
+    WizardGeologyGenerateInput, WizardLandMaskCellInput, WizardLandMaskGenerateInput,
+    WizardLandMaskGenerateResponse, APP_VERSION, BRUSH_PREVIEW_HEX_DETAIL_MAX,
+    BRUSH_SCREEN_DIAMETERS_PX, MAX_BRUSH_RADIUS, MAX_BRUSH_TIER, MAX_EFFECTIVE_BRUSH_RADIUS,
+    MIN_BRUSH_RADIUS, MIN_BRUSH_TIER, PAINT_BATCH_MAX_CELLS, PAINT_SAVE_COOLDOWN_MS,
+    PAN_DRAG_THRESHOLD,
 };
 
 use std::cell::RefCell;
@@ -42,81 +46,20 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use elevation_view::{
-    draw_elevation_label, draw_mountain_glyph, labels_status_label, overlays_lod_ok,
-    peaks_status_label, set_fill_rgb, ColorMode, MOUNTAIN_THRESHOLD,
-};
+use elevation_view::ColorMode;
 use gloo_timers::future::TimeoutFuture;
 use mapkeeper_core::hex::{Axial, MapBounds};
-use mapkeeper_core::hydro::{hydro_from_elevation, stamp_delta, HydroKind};
+use mapkeeper_core::hydro::stamp_delta;
 use mapkeeper_core::land_mask::{find_recipe, next_recipe, pick_recipe, LayoutClass};
 use mapkeeper_core::map_preset::MapPreset;
 use mapkeeper_core::rivers::RiverCatalog;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{
-    CanvasRenderingContext2d, Element, HtmlElement,
-};
-
-fn redraw_and_sample(state: &Rc<RefCell<AppState>>) {
-    let t0 = perf_now();
-    let drawn = redraw(&state.borrow());
-    let ms = perf_now() - t0;
-    let mut s = state.borrow_mut();
-    s.perf.redraw_ms = Some(ms);
-    s.perf.drawn_cells = Some(drawn);
-    s.last_draw_snapshot = Some(draw_snapshot(&s));
-    set_text("view-perf", &s.perf.view_line());
-}
+use web_sys::{Element, HtmlElement};
 
 pub(crate) fn perf_emit(metrics: &PerfMetrics) {
     set_text("view-perf", &metrics.view_line());
     web_sys::console::log_1(&format!("[perf] {}", metrics.console_line()).into());
-}
-
-fn schedule_redraw(state: Rc<RefCell<AppState>>) {
-    {
-        let mut s = state.borrow_mut();
-        s.redraw_dirty = true;
-        if s.redraw_raf_pending {
-            return;
-        }
-        s.redraw_raf_pending = true;
-    }
-
-    let state_cb = state.clone();
-    let closure = Closure::once(move || {
-        flush_scheduled_redraw(state_cb);
-    });
-    let _ = window()
-        .request_animation_frame(closure.as_ref().unchecked_ref())
-        .expect("request_animation_frame");
-    closure.forget();
-}
-
-fn flush_scheduled_redraw(state: Rc<RefCell<AppState>>) {
-    let should_draw = {
-        let mut s = state.borrow_mut();
-        s.redraw_raf_pending = false;
-        if !s.redraw_dirty {
-            false
-        } else {
-            let snap = draw_snapshot(&s);
-            if s.last_draw_snapshot == Some(snap) {
-                s.redraw_dirty = false;
-                false
-            } else {
-                s.redraw_dirty = false;
-                true
-            }
-        }
-    };
-    if should_draw {
-        redraw_and_sample(&state);
-    }
-    if state.borrow().redraw_dirty {
-        schedule_redraw(state);
-    }
 }
 
 #[wasm_bindgen(start)]
@@ -248,7 +191,7 @@ fn terrain_brush(brush: &Brush) -> bool {
     )
 }
 
-fn river_brush(brush: &Brush) -> bool {
+pub(crate) fn river_brush(brush: &Brush) -> bool {
     matches!(brush, Brush::River | Brush::RiverErase)
 }
 
@@ -261,7 +204,7 @@ fn active_dock_tab() -> Option<String> {
     })
 }
 
-/// tool-dock-brush-deselect-v1: leave paint mode — pan / inspect on canvas.
+/// tool-dock-brush-deselect-v1: leave paint mode тАФ pan / inspect on canvas.
 fn deactivate_paint_brush(s: &mut AppState) {
     s.brush = Brush::Inspect;
     s.hover_cell = None;
@@ -325,7 +268,7 @@ fn sync_brush_swatch_active(brush: &Brush) {
     }
 }
 
-fn sync_brush_radius_active(radius: i32) {
+pub(crate) fn sync_brush_radius_active(radius: i32) {
     let tier = radius.clamp(MIN_BRUSH_TIER, MAX_BRUSH_TIER);
     set_text("brush-size-value", brush_tier_label(tier));
     if let Some(drawer) = document().get_element_by_id("dock-drawer") {
@@ -350,116 +293,13 @@ fn sync_brush_radius_active(radius: i32) {
     }
 }
 
-fn sync_brush_effective_label(state: &AppState) {
+pub(crate) fn sync_brush_effective_label(state: &AppState) {
     let eff = effective_paint_radius(state).max(1);
     set_text("brush-effective-radius", &eff.to_string());
 }
 
-fn brush_preview_uses_circle(radius: i32) -> bool {
+pub(crate) fn brush_preview_uses_circle(radius: i32) -> bool {
     radius > BRUSH_PREVIEW_HEX_DETAIL_MAX
-}
-
-fn draw_preview_boundary(
-    state: &AppState,
-    ctx: &CanvasRenderingContext2d,
-    size: f64,
-    ox: f64,
-    oy: f64,
-) {
-    let wizard_edit = wizard_is_active() && state.wizard_edit_mode;
-    if !wizard_edit && (matches!(state.brush, Brush::Inspect) || river_brush(&state.brush)) {
-        return;
-    }
-    let Some(center) = state.hover_cell else {
-        return;
-    };
-    let radius = effective_paint_radius(state);
-    let (cx, cy) = {
-        let (x, y) = Axial::new(center.0, center.1).to_pixel(size);
-        (ox + x, oy + y)
-    };
-    ctx.set_line_width(2.0);
-    ctx.set_stroke_style_str("#9fe3c4");
-    // Large M/L/XL: per-hex boundary walk freezes the app (esp. with labels on).
-    if brush_preview_uses_circle(radius) {
-        let hex_w = (3f64.sqrt() * size).max(1.0);
-        let r_px = hex_w * (radius as f64 + 0.55);
-        ctx.begin_path();
-        let _ = ctx.arc(cx, cy, r_px, 0.0, std::f64::consts::PI * 2.0);
-        ctx.stroke();
-        return;
-    }
-    let cells = paint_stamp_cells(center, radius, state.map_bounds);
-    if cells.is_empty() {
-        return;
-    }
-    let cell_set: HashSet<(i32, i32)> = cells.iter().copied().collect();
-    for (q, r) in cells {
-        let axial = Axial::new(q, r);
-        let is_boundary = axial
-            .neighbors()
-            .iter()
-            .any(|n| !cell_set.contains(&(n.q, n.r)));
-        if !is_boundary {
-            continue;
-        }
-        let (x, y) = axial.to_pixel(size);
-        let corners = hex_corners(ox + x, oy + y, size * BRUSH_PREVIEW_GAP * 0.98);
-        ctx.begin_path();
-        ctx.move_to(corners[0].0, corners[0].1);
-        for corner in &corners[1..] {
-            ctx.line_to(corner.0, corner.1);
-        }
-        ctx.close_path();
-        ctx.stroke();
-    }
-}
-
-/// river-overlay-layer-v1: straight center-to-center polyline strokes.
-fn draw_rivers(state: &AppState, ctx: &CanvasRenderingContext2d, size: f64, ox: f64, oy: f64) {
-    if state.rivers.rivers.is_empty() {
-        return;
-    }
-    ctx.set_stroke_style_str("#4da6ff");
-    ctx.set_fill_style_str("#4da6ff");
-    ctx.set_line_width(2.0);
-    ctx.set_line_cap("round");
-    ctx.set_line_join("round");
-    let bounds = state.map_bounds;
-    let dot_r = (size * 0.12).clamp(2.0, 6.0);
-    for river in &state.rivers.rivers {
-        if river.cells.is_empty() {
-            continue;
-        }
-        if river.cells.len() == 1 {
-            let Some(cell) = bounds.from_index(river.cells[0]) else {
-                continue;
-            };
-            let (x, y) = cell.to_pixel(size);
-            ctx.begin_path();
-            let _ = ctx.arc(ox + x, oy + y, dot_r, 0.0, std::f64::consts::TAU);
-            ctx.fill();
-            continue;
-        }
-        ctx.begin_path();
-        let mut started = false;
-        for &idx in &river.cells {
-            let Some(cell) = bounds.from_index(idx) else {
-                continue;
-            };
-            let (x, y) = cell.to_pixel(size);
-            let (cx, cy) = (ox + x, oy + y);
-            if started {
-                ctx.line_to(cx, cy);
-            } else {
-                ctx.move_to(cx, cy);
-                started = true;
-            }
-        }
-        if started {
-            ctx.stroke();
-        }
-    }
 }
 
 fn sync_river_status(state: &AppState) {
@@ -470,7 +310,7 @@ fn sync_river_status(state: &AppState) {
     let count = state.rivers.rivers.len();
     set_text(
         "river-status",
-        &format!("{active} · {count} river(s) on map"),
+        &format!("{active} ┬╖ {count} river(s) on map"),
     );
 }
 
@@ -496,7 +336,7 @@ fn toggle_dock_tab(tab: &str) {
 }
 
 fn clear_inspect_selection() {
-    set_text("panel-cell", "—");
+    set_text("panel-cell", "тАФ");
     input("title").set_value("");
     textarea("notes").set_value("");
     input("title").set_disabled(true);
@@ -506,12 +346,12 @@ fn clear_inspect_selection() {
 
 fn build_step_label(step: u32) -> &'static str {
     match step {
-        1 => "Step 1 · Size & grid",
-        3 => "Step 3 · Tectonics",
-        4 => "Step 4 · Elevation",
-        5 => "Step 5 · Climate",
-        6 => "Step 6 · Rivers",
-        _ => "Step 2 · Land silhouette",
+        1 => "Step 1 ┬╖ Size & grid",
+        3 => "Step 3 ┬╖ Tectonics",
+        4 => "Step 4 ┬╖ Elevation",
+        5 => "Step 5 ┬╖ Climate",
+        6 => "Step 6 ┬╖ Rivers",
+        _ => "Step 2 ┬╖ Land silhouette",
     }
 }
 
@@ -596,7 +436,7 @@ async fn apply_wizard_preset_now(state: Rc<RefCell<AppState>>, preset: &str) -> 
     true
 }
 
-/// D-71: navigate back one Geo step (4→3→2→1).
+/// D-71: navigate back one Geo step (4тЖТ3тЖТ2тЖТ1).
 async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
     let from = state.borrow().wizard_step;
     let to = match from {
@@ -627,12 +467,12 @@ async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
     schedule_redraw(state.clone());
     match to {
         1 => set_wizard_status(
-            "Map size — change preset to resize (resets Geo if you already generated land).",
+            "Map size тАФ change preset to resize (resets Geo if you already generated land).",
         ),
-        2 => set_wizard_status("Land silhouette — Back to size if the map is too large/small."),
-        3 => set_wizard_status("Tectonics — Back returns to silhouette."),
-        4 => set_wizard_status("Elevation — Back returns to tectonics."),
-        5 => set_wizard_status("Climate — Back returns to elevation."),
+        2 => set_wizard_status("Land silhouette тАФ Back to size if the map is too large/small."),
+        3 => set_wizard_status("Tectonics тАФ Back returns to silhouette."),
+        4 => set_wizard_status("Elevation тАФ Back returns to tectonics."),
+        5 => set_wizard_status("Climate тАФ Back returns to elevation."),
         _ => {}
     }
 }
@@ -663,7 +503,7 @@ fn set_wizard_status(msg: &str) {
     set_text("wizard-status", msg);
 }
 
-fn wizard_is_active() -> bool {
+pub(crate) fn wizard_is_active() -> bool {
     document()
         .get_element_by_id("editor")
         .is_some_and(|el| el.class_list().contains("wizard-active"))
@@ -683,12 +523,12 @@ fn set_panel_hidden(id: &str, hidden: bool) {
 fn sync_wizard_nav(step: u32) {
     if let Some(crumb) = document().query_selector(".wiz-crumb").ok().flatten() {
         let text = match step {
-            1 => "Geo › Size & grid",
-            3 => "Geo › Tectonics",
-            4 => "Geo › Elevation",
-            5 => "Climate › Precipitation",
-            6 => "Water › Rivers",
-            _ => "Geo › Land silhouette",
+            1 => "Geo тА║ Size & grid",
+            3 => "Geo тА║ Tectonics",
+            4 => "Geo тА║ Elevation",
+            5 => "Climate тА║ Precipitation",
+            6 => "Water тА║ Rivers",
+            _ => "Geo тА║ Land silhouette",
         };
         crumb.set_text_content(Some(text));
     }
@@ -723,7 +563,7 @@ fn sync_wizard_nav(step: u32) {
             let _ = climate_group.class_list().add_1("expanded");
             if let Ok(Some(head)) = climate_group.query_selector(".wiz-group-head") {
                 let _ = head.remove_attribute("disabled");
-                head.set_text_content(Some("▼ Climate"));
+                head.set_text_content(Some("тЦ╝ Climate"));
             }
             if let Ok(Some(list)) = climate_group.query_selector(".wiz-steps") {
                 if let Ok(items) = list.query_selector_all(".wiz-step") {
@@ -750,7 +590,7 @@ fn sync_wizard_nav(step: u32) {
             let _ = climate_group.class_list().remove_1("expanded");
             if let Ok(Some(head)) = climate_group.query_selector(".wiz-group-head") {
                 let _ = head.set_attribute("disabled", "");
-                head.set_text_content(Some("▶ Climate"));
+                head.set_text_content(Some("тЦ╢ Climate"));
             }
         }
     }
@@ -760,7 +600,7 @@ fn sync_wizard_nav(step: u32) {
             let _ = water_group.class_list().add_1("expanded");
             if let Ok(Some(head)) = water_group.query_selector(".wiz-group-head") {
                 let _ = head.remove_attribute("disabled");
-                head.set_text_content(Some("▼ Water"));
+                head.set_text_content(Some("тЦ╝ Water"));
             }
             if let Ok(Some(list)) = water_group.query_selector(".wiz-steps") {
                 if let Ok(items) = list.query_selector_all(".wiz-step") {
@@ -787,7 +627,7 @@ fn sync_wizard_nav(step: u32) {
             let _ = water_group.class_list().remove_1("expanded");
             if let Ok(Some(head)) = water_group.query_selector(".wiz-group-head") {
                 let _ = head.set_attribute("disabled", "");
-                head.set_text_content(Some("▶ Water"));
+                head.set_text_content(Some("тЦ╢ Water"));
             }
         }
     }
@@ -822,7 +662,7 @@ fn show_wizard_step(state: &AppState) {
 fn sync_wizard_size_meta(state: &AppState) {
     let (w, h) = (state.map_bounds.width, state.map_bounds.height);
     let n = state.map_bounds.len();
-    let line = format!("{w}×{h} hex-rectangle · {n} cells");
+    let line = format!("{w}├Ч{h} hex-rectangle ┬╖ {n} cells");
     set_text("wiz-size-meta", &line);
 }
 
@@ -925,18 +765,18 @@ fn rotate_wizard_recipe(state: &mut AppState) {
 /// D-68: quiet identity line under Regenerate (dogfood chrome).
 fn sync_wizard_gen_identity(state: &AppState) {
     let recipe = if state.wizard_recipe_id.is_empty() {
-        "—"
+        "тАФ"
     } else {
         state.wizard_recipe_id.as_str()
     };
     let seed = state
         .wizard_gen_seed
         .map(|s| format!("0x{s:016x}"))
-        .unwrap_or_else(|| "—".to_string());
+        .unwrap_or_else(|| "тАФ".to_string());
     set_text(
         "wiz-gen-identity",
         &format!(
-            "class: {} · recipe: {} · shore: {} · nonce: {} · seed: {}",
+            "class: {} ┬╖ recipe: {} ┬╖ shore: {} ┬╖ nonce: {} ┬╖ seed: {}",
             state.wizard_layout_class,
             recipe,
             state.wizard_character,
@@ -1012,7 +852,7 @@ fn sync_wizard_actions(state: &AppState) {
 
 async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
     set_wizard_generating(true);
-    set_wizard_status("Generating silhouette… (can take a moment on large maps)");
+    set_wizard_status("Generating silhouetteтАж (can take a moment on large maps)");
     let (recipe_id, character, layout_class, nonce) = {
         let mut s = state.borrow_mut();
         clear_wizard_stamp_pending(&mut s);
@@ -1135,7 +975,7 @@ async fn generate_wizard_geology(state: Rc<RefCell<AppState>>) {
         sync_wizard_actions(&s);
     }
     schedule_redraw(state.clone());
-    set_wizard_status("Geology generated — classes shown on the map (see legend).");
+    set_wizard_status("Geology generated тАФ classes shown on the map (see legend).");
 }
 
 async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
@@ -1196,10 +1036,10 @@ async fn generate_wizard_climate(state: Rc<RefCell<AppState>>) {
         return;
     }
     schedule_redraw(state.clone());
-    set_wizard_status("Climate generated — temperature and precipitation layers saved.");
+    set_wizard_status("Climate generated тАФ temperature and precipitation layers saved.");
 }
 
-/// Merge stamp cells into pending wizard edits (no I/O — optimistic path guard).
+/// Merge stamp cells into pending wizard edits (no I/O тАФ optimistic path guard).
 fn merge_wizard_stamp_pending(
     pending: &mut HashMap<(i32, i32), bool>,
     cells: &[(i32, i32)],
@@ -1218,7 +1058,7 @@ fn clear_wizard_stamp_pending(s: &mut AppState) {
 }
 
 /// Optimistic local stamp; persist only on mouseup / leave-edit (no mid-drag HTTP).
-/// One stamp per new center cell (`paint_last_cell` already dedupes) — do not
+/// One stamp per new center cell (`paint_last_cell` already dedupes) тАФ do not
 /// skip centers by brush radius (that broke M/L/XL short strokes).
 fn queue_wizard_land_mask_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32)) {
     let painted = {
@@ -1245,10 +1085,10 @@ fn queue_wizard_land_mask_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32)
         return;
     }
     schedule_redraw(state.clone());
-    // Status once — avoid DOM thrash every mousemove.
+    // Status once тАФ avoid DOM thrash every mousemove.
     let pending_n = state.borrow().pending_wizard_stamps.len();
     if pending_n == painted {
-        set_wizard_status("Edit pending — release mouse to save.");
+        set_wizard_status("Edit pending тАФ release mouse to save.");
     }
 }
 
@@ -1304,7 +1144,7 @@ async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
         return;
     };
 
-    set_wizard_status("Saving edit…");
+    set_wizard_status("Saving editтАж");
     let mut failed: Vec<((i32, i32), bool)> = Vec::new();
     for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
         let kinds: Vec<&'static str> = chunk
@@ -1340,7 +1180,7 @@ async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
     if state.borrow().pending_wizard_stamps.is_empty() {
         set_wizard_status("Edit saved.");
     } else {
-        set_wizard_status("Edit save failed — retrying…");
+        set_wizard_status("Edit save failed тАФ retryingтАж");
         schedule_wizard_stamp_flush(state);
     }
 }
@@ -1403,11 +1243,11 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         on_cancel.forget();
     }
 
-    // Save Draft — flush pending paints; world already on disk from create.
+    // Save Draft тАФ flush pending paints; world already on disk from create.
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
-            set_wizard_status("Saving…");
+            set_wizard_status("SavingтАж");
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 flush_pending_paints(state.clone()).await;
@@ -1426,7 +1266,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // ← Worlds — close wizard and return Home (same as tool-dock switch-world).
+    // тЖР Worlds тАФ close wizard and return Home (same as tool-dock switch-world).
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
@@ -1442,7 +1282,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // wizard-merge-size-grid (D-71): size+blank grid → silhouette.
+    // wizard-merge-size-grid (D-71): size+blank grid тЖТ silhouette.
     {
         let state = state.clone();
         let pending = pending_confirm.clone();
@@ -1545,7 +1385,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Layout class cards (D-65): pick class → recipe for that class → generate.
+    // Layout class cards (D-65): pick class тЖТ recipe for that class тЖТ generate.
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
@@ -1568,7 +1408,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 s.wizard_edit_mode = false;
                 sync_wizard_actions(&s);
             }
-            set_wizard_status("Generating selected class…");
+            set_wizard_status("Generating selected classтАж");
             wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-layout-classes") {
@@ -1590,7 +1430,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 s.wizard_edit_mode = false;
                 sync_wizard_actions(&s);
             }
-            set_wizard_status("New shape for selected class…");
+            set_wizard_status("New shape for selected classтАж");
             wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
         });
         document()
@@ -1641,7 +1481,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
             if edit_now {
                 set_wizard_status(
-                    "Edit mode: paint land/ocean — S–XL follows zoom (zoom out = larger stamp).",
+                    "Edit mode: paint land/ocean тАФ SтАУXL follows zoom (zoom out = larger stamp).",
                 );
             } else {
                 set_wizard_status("Edit mode off.");
@@ -1682,7 +1522,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Brush size 1x–4x (D-43) for wizard land edit on large maps.
+    // Brush size 1xтАУ4x (D-43) for wizard land edit on large maps.
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
@@ -1703,7 +1543,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             };
             let mut s = state.borrow_mut();
             s.wizard_brush_radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
-            // Panel sits over the map: keep last hover → huge preview redraw freeze.
+            // Panel sits over the map: keep last hover тЖТ huge preview redraw freeze.
             s.hover_cell = None;
             sync_wizard_actions(&s);
             // No map redraw required to flip S/M/L/XL active state.
@@ -1715,7 +1555,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Continue: step 2 → draft step 3 (tectonics).
+    // Continue: step 2 тЖТ draft step 3 (tectonics).
     for id in ["wiz-continue"] {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
@@ -1738,7 +1578,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                     s.wizard_geo_nonce = 0;
                     sync_wizard_actions(&s);
                 }
-                set_wizard_status("Step 3 · Tectonics — generate geology.");
+                set_wizard_status("Step 3 ┬╖ Tectonics тАФ generate geology.");
                 wasm_bindgen_futures::spawn_local(generate_wizard_geology(state.clone()));
             });
         });
@@ -1763,7 +1603,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             if let Some(style) = el.get_attribute("data-wiz-geo-style") {
                 wiz_toggle_style_group("wiz-geo-styles", "data-wiz-geo-style", &el);
                 state.borrow_mut().wizard_geo_style = style;
-                set_wizard_status("Geology style updated — Generate to apply.");
+                set_wizard_status("Geology style updated тАФ Generate to apply.");
             }
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-geo-styles") {
@@ -1781,7 +1621,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 s.wizard_geo_accepted = false;
                 sync_wizard_actions(&s);
             }
-            set_wizard_status("Generating geology…");
+            set_wizard_status("Generating geologyтАж");
             wasm_bindgen_futures::spawn_local(generate_wizard_geology(state.clone()));
         });
         if let Some(btn) = document().get_element_by_id("wiz-geo-generate") {
@@ -1845,7 +1685,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             if let Some(style) = el.get_attribute("data-wiz-elev-style") {
                 wiz_toggle_style_group("wiz-elev-styles", "data-wiz-elev-style", &el);
                 state.borrow_mut().wizard_elev_style = style;
-                set_wizard_status("Relief style updated — Generate to apply.");
+                set_wizard_status("Relief style updated тАФ Generate to apply.");
             }
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-elev-styles") {
@@ -1861,7 +1701,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 let mut s = state.borrow_mut();
                 s.wizard_elev_nonce = s.wizard_elev_nonce.saturating_add(1);
             }
-            set_wizard_status("Generating elevation…");
+            set_wizard_status("Generating elevationтАж");
             wasm_bindgen_futures::spawn_local(generate_wizard_elevation(state.clone()));
         });
         if let Some(btn) = document().get_element_by_id("wiz-elev-generate") {
@@ -1904,7 +1744,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             if let Some(style) = el.get_attribute("data-wiz-climate-style") {
                 wiz_toggle_style_group("wiz-climate-styles", "data-wiz-climate-style", &el);
                 state.borrow_mut().wizard_climate_style = style;
-                set_wizard_status("Precipitation style updated — Generate to apply.");
+                set_wizard_status("Precipitation style updated тАФ Generate to apply.");
             }
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-climate-styles") {
@@ -1920,7 +1760,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 let mut s = state.borrow_mut();
                 s.wizard_climate_nonce = s.wizard_climate_nonce.saturating_add(1);
             }
-            set_wizard_status("Generating climate…");
+            set_wizard_status("Generating climateтАж");
             wasm_bindgen_futures::spawn_local(generate_wizard_climate(state.clone()));
         });
         if let Some(btn) = document().get_element_by_id("wiz-climate-generate") {
@@ -1953,7 +1793,7 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
-            set_wizard_status("Generating rivers…");
+            set_wizard_status("Generating riversтАж");
             wasm_bindgen_futures::spawn_local(post_river_generate(state.clone(), "wizard-status"));
         });
         if let Some(btn) = document().get_element_by_id("wiz-water-generate") {
@@ -2020,10 +1860,10 @@ fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             let expanded = group.class_list().contains("expanded");
             if expanded {
                 let _ = group.class_list().remove_1("expanded");
-                head.set_text_content(Some("▶ Geo"));
+                head.set_text_content(Some("тЦ╢ Geo"));
             } else {
                 let _ = group.class_list().add_1("expanded");
-                head.set_text_content(Some("▼ Geo"));
+                head.set_text_content(Some("тЦ╝ Geo"));
             }
         });
         if let Ok(Some(left)) = document().query_selector(".wiz-left") {
@@ -2082,70 +1922,19 @@ async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.geology = None;
     set_drawer_open(false);
     clear_inspect_selection();
-    set_world_label("—");
+    set_world_label("тАФ");
     set_text("legacy-map-note", "");
     sync_wizard_actions(&state_mut);
     drop(state_mut);
     wasm_bindgen_futures::spawn_local(refresh_projects(state));
 }
 
-/// Cell-id label shown to the author — placeholder UI, real schema is 3.2.
+/// Cell-id label shown to the author тАФ placeholder UI, real schema is 3.2.
 fn cell_label(q: i32, r: i32) -> String {
     format!("hex q{q} r{r}")
 }
 
-fn hex_corners(cx: f64, cy: f64, size: f64) -> [(f64, f64); 6] {
-    std::array::from_fn(|i| {
-        let angle = (60.0 * i as f64 - 30.0).to_radians();
-        (cx + size * angle.cos(), cy + size * angle.sin())
-    })
-}
-
-/// Half-extent (in unit-size pixels) of the whole hex map, including the
-/// outer cells' corner reach. Pointy-top corners stick out `√3/2` sideways
-/// and `1.0` vertically. Used to fit the map into the current canvas.
-
-fn map_half_extent(bounds: MapBounds) -> (f64, f64) {
-    let mut mx = 0.0_f64;
-    let mut my = 0.0_f64;
-    for cell in bounds.cells() {
-        let (x, y) = cell.to_pixel(1.0);
-        mx = mx.max(x.abs());
-        my = my.max(y.abs());
-    }
-    (mx + 3f64.sqrt() / 2.0, my + 1.0)
-}
-
-/// Fit-to-window layout: hex `size` and origin so the rectangle map fills the
-/// canvas with padding. Centered on the axial origin.
-fn hex_layout(width: f64, height: f64, bounds: MapBounds) -> (f64, f64, f64) {
-    let (hx, hy) = map_half_extent(bounds);
-    let avail_w = (width - 2.0 * CANVAS_PAD).max(1.0);
-    let avail_h = (height - 2.0 * CANVAS_PAD).max(1.0);
-    let size = (avail_w / (2.0 * hx)).min(avail_h / (2.0 * hy)).max(1.0);
-    (size, width / 2.0, height / 2.0)
-}
-
-/// Full layout with camera applied on top of the fit-to-window base.
-fn map_layout(state: &AppState, width: f64, height: f64) -> (f64, f64, f64) {
-    let (base_size, base_ox, base_oy) = hex_layout(width, height, state.map_bounds);
-    let size = base_size * state.zoom;
-    let ox = base_ox + state.pan_x;
-    let oy = base_oy + state.pan_y;
-    (size, ox, oy)
-}
-
-fn max_zoom_for_base_hex(base_size_px: f64) -> f64 {
-    // Fit (1.0) always allowed; zoom-in only until hex reaches ZOOM_CLOSEUP_HEX_PX.
-    let from_target = ZOOM_CLOSEUP_HEX_PX / base_size_px.max(1.0);
-    from_target.clamp(1.0, ZOOM_MAX_HARD)
-}
-
-fn clamp_zoom(base_size_px: f64, value: f64) -> f64 {
-    value.clamp(MIN_ZOOM, max_zoom_for_base_hex(base_size_px))
-}
-
-/// brush-size--zoom-adaptive (D-70): tier → screen diameter → hex radius from layout size.
+/// brush-size--zoom-adaptive (D-70): tier тЖТ screen diameter тЖТ hex radius from layout size.
 fn brush_tier_screen_diameter(tier: i32) -> f64 {
     let i = tier.clamp(MIN_BRUSH_TIER, MAX_BRUSH_TIER) as usize;
     BRUSH_SCREEN_DIAMETERS_PX[i]
@@ -2160,14 +1949,7 @@ fn effective_brush_radius_from_hex_size(tier: i32, hex_size_px: f64) -> i32 {
     from_zoom.max(tier).clamp(0, MAX_EFFECTIVE_BRUSH_RADIUS)
 }
 
-fn current_hex_size_px(state: &AppState) -> f64 {
-    let canvas = canvas();
-    let rect = canvas.get_bounding_client_rect();
-    let (size, _, _) = map_layout(state, rect.width(), rect.height());
-    size
-}
-
-fn effective_paint_radius(state: &AppState) -> i32 {
+pub(crate) fn effective_paint_radius(state: &AppState) -> i32 {
     let tier = if wizard_is_active() && state.wizard_edit_mode {
         state.wizard_brush_radius
     } else {
@@ -2182,212 +1964,6 @@ fn brush_tier_label(tier: i32) -> &'static str {
         1 => "M",
         2 => "L",
         _ => "XL",
-    }
-}
-
-fn visible_scan_bounds(
-    width: f64,
-    height: f64,
-    size: f64,
-    ox: f64,
-    oy: f64,
-    bounds: MapBounds,
-) -> (i32, i32, i32, i32) {
-    let (bmin_q, bmax_q, bmin_r, bmax_r) = bounds.axial_limits();
-    let mut min_q = i32::MAX;
-    let mut max_q = i32::MIN;
-    let mut min_r = i32::MAX;
-    let mut max_r = i32::MIN;
-    for (sx, sy) in [(0.0, 0.0), (width, 0.0), (0.0, height), (width, height)] {
-        let cell = Axial::from_pixel(sx - ox, sy - oy, size);
-        min_q = min_q.min(cell.q);
-        max_q = max_q.max(cell.q);
-        min_r = min_r.min(cell.r);
-        max_r = max_r.max(cell.r);
-    }
-    let pad = ((2.0 / size).ceil() as i32).max(2);
-    (
-        min_q.saturating_sub(pad).max(bmin_q),
-        max_q.saturating_add(pad).min(bmax_q),
-        min_r.saturating_sub(pad).max(bmin_r),
-        max_r.saturating_add(pad).min(bmax_r),
-    )
-}
-
-/// Match the canvas backing store to its CSS box so the map scales with the
-/// window (no browser upscaling blur). Returns the current pixel dimensions.
-fn sync_canvas_size() -> (f64, f64) {
-    let canvas = canvas();
-    let rect = canvas.get_bounding_client_rect();
-    let w = rect.width().max(1.0);
-    let h = rect.height().max(1.0);
-    if (canvas.width() as f64 - w).abs() >= 1.0 {
-        canvas.set_width(w as u32);
-    }
-    if (canvas.height() as f64 - h).abs() >= 1.0 {
-        canvas.set_height(h as u32);
-    }
-    (canvas.width() as f64, canvas.height() as f64)
-}
-
-fn redraw(state: &AppState) -> usize {
-    let (width, height) = sync_canvas_size();
-    let ctx = context();
-    let bounds = state.map_bounds;
-    let (size, ox, oy) = map_layout(state, width, height);
-
-    ctx.clear_rect(0.0, 0.0, width, height);
-    ctx.set_fill_style_str("#0e1113");
-    ctx.fill_rect(0.0, 0.0, width, height);
-
-    let (q_min, q_max, r_min, r_max) = visible_scan_bounds(width, height, size, ox, oy, bounds);
-    let visible_cells = count_visible_in_bounds(q_min, q_max, r_min, r_max, bounds);
-    let stroke_grid = stroke_grid_enabled(state.show_grid, visible_cells);
-    let fill_scale = if state.show_grid {
-        FILL_SCALE_GRID_ON
-    } else {
-        FILL_SCALE_GRID_OFF
-    };
-    let draw_profile_dots = show_profile_markers(state.zoom);
-    let overlay_lod = overlays_lod_ok(visible_cells, state.zoom);
-    let draw_labels = state.show_elevation_labels && overlay_lod;
-    let draw_peaks = state.show_peaks && state.color_mode == ColorMode::Elevation && overlay_lod;
-    let mut color_buf = String::with_capacity(20);
-    let mut drawn_cells = 0usize;
-    for q in q_min..=q_max {
-        for r in r_min..=r_max {
-            let cell = Axial::new(q, r);
-            if !bounds.contains(cell) {
-                continue;
-            }
-            let (x, y) = cell.to_pixel(size);
-            let (cx, cy) = (ox + x, oy + y);
-            let corners = hex_corners(cx, cy, size * fill_scale);
-
-            ctx.begin_path();
-            ctx.move_to(corners[0].0, corners[0].1);
-            for corner in &corners[1..] {
-                ctx.line_to(corner.0, corner.1);
-            }
-            ctx.close_path();
-
-            let selected = state.selected == Some((q, r));
-            let elevation = elevation_at(&state.elevation, bounds, q, r);
-            match state.color_mode {
-                ColorMode::Hydro => {
-                    ctx.set_fill_style_str(hydro_fill(elevation));
-                }
-                ColorMode::Elevation => {
-                    set_fill_rgb(
-                        &ctx,
-                        elevation_view::elevation_fill_rgb(elevation),
-                        &mut color_buf,
-                    );
-                }
-            }
-            ctx.fill();
-            // geology-readable--preview-contrast: class fill on Tectonics step
-            if wizard_is_active() && state.wizard_step == 3 {
-                if let Some(geo) = state.geology.as_ref() {
-                    if let Some(tint) = geology_tint(geo, bounds, q, r) {
-                        ctx.set_fill_style_str(tint);
-                        ctx.fill();
-                    }
-                }
-            }
-            if selected {
-                ctx.set_line_width(3.0);
-                ctx.set_stroke_style_str("#9fe3c4");
-                ctx.stroke();
-            } else if stroke_grid {
-                ctx.set_line_width(GRID_LINE_WIDTH);
-                ctx.set_stroke_style_str("#3a424b");
-                ctx.stroke();
-            }
-
-            if draw_peaks && elevation > MOUNTAIN_THRESHOLD {
-                draw_mountain_glyph(&ctx, cx, cy, size);
-            }
-            if draw_labels {
-                let label_below = draw_peaks && elevation > MOUNTAIN_THRESHOLD;
-                draw_elevation_label(&ctx, cx, cy, size, elevation, label_below);
-            }
-
-            // Profile-presence marker — a separate layer from terrain, so both
-            // are visible at once (a cell can have terrain, a profile, or both).
-            if draw_profile_dots && state.cells.contains_key(&(q, r)) {
-                ctx.begin_path();
-                let dot = (size * 0.13).clamp(2.5, 5.0);
-                let _ = ctx.arc(cx, cy, dot, 0.0, std::f64::consts::PI * 2.0);
-                ctx.set_fill_style_str("#e8d27a");
-                ctx.fill();
-            }
-            drawn_cells += 1;
-        }
-    }
-    let hover_elev = state
-        .hover_cell
-        .map(|(q, r)| elevation_at(&state.elevation, bounds, q, r));
-    let hover_note = hover_elev
-        .map(|e| format!(" · Hover elev {e}"))
-        .unwrap_or_default();
-    set_text(
-        "view-stats",
-        &format!(
-            "Zoom {:.2}x · Draw {} / {} cells · Grid {} · {} · {}{}",
-            state.zoom,
-            drawn_cells,
-            bounds.len(),
-            grid_lines_stats_label(state.show_grid, visible_cells),
-            labels_status_label(state.show_elevation_labels, visible_cells, state.zoom),
-            peaks_status_label(
-                state.show_peaks,
-                state.color_mode,
-                visible_cells,
-                state.zoom,
-            ),
-            hover_note,
-        ),
-    );
-    draw_preview_boundary(state, &ctx, size, ox, oy);
-    draw_rivers(state, &ctx, size, ox, oy);
-    set_text("toggle-grid", grid_lines_toggle_label(state.show_grid));
-    set_text(
-        "toggle-color-mode",
-        if state.color_mode == ColorMode::Elevation {
-            "Color: Elevation"
-        } else {
-            "Color: Hydro"
-        },
-    );
-    set_text(
-        "toggle-elevation-labels",
-        if state.show_elevation_labels {
-            "Show elevation: On"
-        } else {
-            "Show elevation: Off"
-        },
-    );
-    set_text(
-        "toggle-peaks",
-        if state.show_peaks {
-            "Peaks: On"
-        } else {
-            "Peaks: Off"
-        },
-    );
-    sync_brush_radius_active(state.brush_radius);
-    sync_brush_effective_label(state);
-    let eff = effective_paint_radius(state);
-    sync_falloff_active(state.falloff_even, eff);
-    sync_brush_step_active(state.brush_step);
-    drawn_cells
-}
-
-fn hydro_fill(elevation: i32) -> &'static str {
-    match hydro_from_elevation(elevation) {
-        HydroKind::Land => "#6a7b43",
-        HydroKind::Water => "#2e5f8a",
     }
 }
 
@@ -2432,7 +2008,7 @@ fn render_project_list(projects: &[ProjectStatus], state: &Rc<RefCell<AppState>>
         let missing = if !p.valid {
             "<div class=\"missing\">folder not found</div>"
         } else if p.legacy_map {
-            "<div class=\"missing\">legacy map — no map/manifest.json</div>"
+            "<div class=\"missing\">legacy map тАФ no map/manifest.json</div>"
         } else {
             ""
         };
@@ -2452,7 +2028,7 @@ fn render_project_list(projects: &[ProjectStatus], state: &Rc<RefCell<AppState>>
         };
         let manage_row = if p.valid {
             format!(
-                "<div class=\"manage-row\"><button class=\"remove-btn\" data-path=\"{path}\" type=\"button\">Remove</button><button class=\"delete-btn\" data-path=\"{path}\" type=\"button\">Delete…</button></div>",
+                "<div class=\"manage-row\"><button class=\"remove-btn\" data-path=\"{path}\" type=\"button\">Remove</button><button class=\"delete-btn\" data-path=\"{path}\" type=\"button\">DeleteтАж</button></div>",
                 path = html_escape(&p.path)
             )
         } else {
@@ -2587,7 +2163,7 @@ fn sync_first_world_defaults(state: &Rc<RefCell<AppState>>, projects: &[ProjectS
     }
     set_text(
         "first-world-hint",
-        &format!("Start Build World with defaults ({id} in Documents, Small map) — then adjust if needed."),
+        &format!("Start Build World with defaults ({id} in Documents, Small map) тАФ then adjust if needed."),
     );
 }
 
@@ -2609,7 +2185,7 @@ fn cell_from_mouse_event(
     }
 }
 
-fn paint_stamp_cells(
+pub(crate) fn paint_stamp_cells(
     center: (i32, i32),
     brush_radius: i32,
     map_bounds: MapBounds,
@@ -2638,7 +2214,7 @@ fn queue_paint_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), new_eleva
     };
     schedule_redraw(state.clone());
     if !painted_cells.is_empty() {
-        set_text("status", "Autosave pending…");
+        set_text("status", "Autosave pendingтАж");
         schedule_paint_flush(state);
     }
 }
@@ -2674,7 +2250,7 @@ fn queue_paint_delta_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), ste
     };
     schedule_redraw(state.clone());
     if painted_cells > 0 {
-        set_text("status", "Autosave pending…");
+        set_text("status", "Autosave pendingтАж");
         schedule_paint_flush(state);
     }
 }
@@ -2724,12 +2300,12 @@ fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
             set_text("panel-cell", &cell_label(q, r));
             input("title").set_value("");
             textarea("notes").set_value("");
-            // Disabled while loading — otherwise a fast typist can fill the
+            // Disabled while loading тАФ otherwise a fast typist can fill the
             // fields before the fetch below resolves, and the (still pending)
             // response then silently overwrites what they just typed.
             input("title").set_disabled(true);
             textarea("notes").set_disabled(true);
-            set_text("status", "Loading…");
+            set_text("status", "LoadingтАж");
 
             wasm_bindgen_futures::spawn_local(load_profile_into_panel(state.clone(), q, r));
         });
@@ -3074,7 +2650,7 @@ fn attach_save_click(state: Rc<RefCell<AppState>>) {
             return;
         }
         let state = state.clone();
-        set_text("status", "Saving…");
+        set_text("status", "SavingтАж");
         wasm_bindgen_futures::spawn_local(async move {
             let body = ProfileInput {
                 display_name: display_name.clone(),
@@ -3146,11 +2722,11 @@ fn sync_preset_size_warning(select_id: &str, warn_id: &str) {
     };
     let (text, class) = match preset.as_str() {
         "grand" => (
-            "Large map — performance may vary on your machine.",
+            "Large map тАФ performance may vary on your machine.",
             "preset-warn-yellow",
         ),
         "world" => (
-            "Experimental map size (not stable) — expect slowdowns.",
+            "Experimental map size (not stable) тАФ expect slowdowns.",
             "preset-warn-red",
         ),
         _ => ("", ""),
@@ -3197,7 +2773,7 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
         }
         let preset = select_value("new-preset");
         let state = state.clone();
-        set_text("home-status", "Creating…");
+        set_text("home-status", "CreatingтАж");
         wasm_bindgen_futures::spawn_local(async move {
             let body = CreateProjectInput {
                 id: &id,
@@ -3241,10 +2817,10 @@ fn attach_create_click(state: Rc<RefCell<AppState>>) {
     closure.forget();
 }
 
-/// "Generate" on Home — same scaffold API as Create; blank hex at chosen preset (D-40).
+/// "Generate" on Home тАФ same scaffold API as Create; blank hex at chosen preset (D-40).
 fn attach_generate_rivers_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
-        set_text("river-status", "Generating rivers…");
+        set_text("river-status", "Generating riversтАж");
         wasm_bindgen_futures::spawn_local(post_river_generate(state.clone(), "river-status"));
     });
     document()
@@ -3255,7 +2831,7 @@ fn attach_generate_rivers_click(state: Rc<RefCell<AppState>>) {
     closure.forget();
 }
 
-/// **Start build** on Home — create world and open build wizard shell (D-57).
+/// **Start build** on Home тАФ create world and open build wizard shell (D-57).
 fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
         let id = input("generate-id").value();
@@ -3269,7 +2845,7 @@ fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
         }
         let preset = select_value("generate-preset");
         let state = state.clone();
-        set_text("generate-status", "Creating…");
+        set_text("generate-status", "CreatingтАж");
         wasm_bindgen_futures::spawn_local(async move {
             let body = CreateProjectInput {
                 id: &id,
@@ -3388,7 +2964,7 @@ fn attach_generate_path_input(state: Rc<RefCell<AppState>>) {
     closure.forget();
 }
 
-fn sync_brush_step_active(step: i32) {
+pub(crate) fn sync_brush_step_active(step: i32) {
     if let Some(drawer) = document().get_element_by_id("dock-drawer") {
         if let Ok(items) = drawer.query_selector_all("[data-brush-step]") {
             for i in 0..items.length() {
@@ -3411,7 +2987,7 @@ fn sync_brush_step_active(step: i32) {
     }
 }
 
-fn sync_falloff_active(falloff_even: bool, brush_radius: i32) {
+pub(crate) fn sync_falloff_active(falloff_even: bool, brush_radius: i32) {
     let hill_enabled = brush_radius > 0;
     if let Some(drawer) = document().get_element_by_id("dock-drawer") {
         if let Ok(items) = drawer.query_selector_all("[data-falloff]") {
@@ -3444,10 +3020,10 @@ fn sync_falloff_active(falloff_even: bool, brush_radius: i32) {
 fn apply_elevation_brush_intent(s: &mut AppState) {
     s.color_mode = ColorMode::Elevation;
     s.show_elevation_labels = true;
-    // Peaks stay author-controlled — Raise/Lower does not force them on.
+    // Peaks stay author-controlled тАФ Raise/Lower does not force them on.
 }
 
-/// View defaults on world open (D-53) — elevation-first; grid on small maps only.
+/// View defaults on world open (D-53) тАФ elevation-first; grid on small maps only.
 fn reset_view_on_world_open(s: &mut AppState) {
     s.color_mode = ColorMode::Elevation;
     s.show_elevation_labels = true;
@@ -3730,7 +3306,7 @@ fn attach_escape_key() {
     closure.forget();
 }
 
-/// "Browse…" button, desktop shell only (roadmap 5.9, D-29) — the button is
+/// "BrowseтАж" button, desktop shell only (roadmap 5.9, D-29) тАФ the button is
 /// `display:none` in a plain browser tab (see `index.html`), so attaching a
 /// listener here is harmless either way; it just never fires without Tauri.
 fn attach_browse_folder_click(state: Rc<RefCell<AppState>>) {
@@ -3766,7 +3342,7 @@ fn attach_browse_folder_click(state: Rc<RefCell<AppState>>) {
 
 /// Calls the `window.mapkeeperPickFolder()` bridge defined in `index.html`
 /// (only present inside the Tauri shell) via `js_sys`, so this crate has no
-/// direct Tauri dependency — it stays a plain WASM/web-sys build either way.
+/// direct Tauri dependency тАФ it stays a plain WASM/web-sys build either way.
 async fn pick_folder_via_tauri() -> Option<String> {
     let bridge = js_sys::Reflect::get(&window(), &JsValue::from_str("mapkeeperPickFolder")).ok()?;
     let bridge: js_sys::Function = bridge.dyn_into().ok()?;
@@ -3818,7 +3394,7 @@ fn attach_first_world_handlers(state: Rc<RefCell<AppState>>) {
                 let _ = wrap.class_list().add_1("demoted");
                 set_text(
                     "first-world-hint",
-                    "Start Build World with defaults (Small map in Documents) — then adjust if needed.",
+                    "Start Build World with defaults (Small map in Documents) тАФ then adjust if needed.",
                 );
                 if let Some(btn) = document().get_element_by_id("first-world-advanced") {
                     btn.set_text_content(Some("Advanced options"));
@@ -3878,7 +3454,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                     return;
                 }
                 let state = state.clone();
-                set_text("home-status", "Deleting…");
+                set_text("home-status", "DeletingтАж");
                 wasm_bindgen_futures::spawn_local(async move {
                     let body = DeleteProjectInput { path: &path };
                     let sent = gloo_net::http::Request::post("/api/projects/delete").json(&body);
@@ -3911,7 +3487,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                     return;
                 };
                 let state = state.clone();
-                set_text("home-status", "Removing from launcher…");
+                set_text("home-status", "Removing from launcherтАж");
                 wasm_bindgen_futures::spawn_local(async move {
                     let body = ForgetProjectInput { path: &path };
                     let sent = gloo_net::http::Request::post("/api/projects/forget").json(&body);
@@ -3954,7 +3530,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                 .clamp(1, 4);
 
             let state = state.clone();
-            set_text("home-status", "Opening…");
+            set_text("home-status", "OpeningтАж");
             wasm_bindgen_futures::spawn_local(async move {
                 let body = OpenProjectInput { path: &path };
                 let sent = gloo_net::http::Request::post("/api/projects/open").json(&body);
@@ -3991,13 +3567,13 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                             match resume_step {
                                 1 => {
                                     set_wizard_status(
-                                        "Resumed at size — confirm scale on the blank grid, then continue.",
+                                        "Resumed at size тАФ confirm scale on the blank grid, then continue.",
                                     );
                                     schedule_redraw(state.clone());
                                 }
                                 3 => {
                                     set_wizard_status(
-                                        "Resumed at tectonics — generate or accept geology.",
+                                        "Resumed at tectonics тАФ generate or accept geology.",
                                     );
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
@@ -4006,7 +3582,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                 }
                                 4 => {
                                     set_wizard_status(
-                                        "Resumed at elevation — generate or continue to climate.",
+                                        "Resumed at elevation тАФ generate or continue to climate.",
                                     );
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
@@ -4016,7 +3592,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                 }
                                 5 => {
                                     set_wizard_status(
-                                        "Resumed at climate — generate or continue to water.",
+                                        "Resumed at climate тАФ generate or continue to water.",
                                     );
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
@@ -4026,7 +3602,7 @@ fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                 }
                                 6 => {
                                     set_wizard_status(
-                                        "Resumed at water — generate rivers or Finish.",
+                                        "Resumed at water тАФ generate rivers or Finish.",
                                     );
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
@@ -4101,7 +3677,7 @@ mod wizard_stamp_pending_tests {
     #[test]
     fn brush_tiers_stay_distinct_when_zoomed_in() {
         use super::effective_brush_radius_from_hex_size;
-        // Large hex px → zoom-derived radius floors to 0; tier floor keeps S<M<L<XL.
+        // Large hex px тЖТ zoom-derived radius floors to 0; tier floor keeps S<M<L<XL.
         let hex_px = 80.0;
         let s = effective_brush_radius_from_hex_size(0, hex_px);
         let m = effective_brush_radius_from_hex_size(1, hex_px);
@@ -4112,8 +3688,8 @@ mod wizard_stamp_pending_tests {
 
     #[test]
     fn zoom_max_grows_when_base_hex_is_small() {
-        use super::max_zoom_for_base_hex;
-        // World-like tiny base → high max; Small-like large base → max ≈ 1.
+        use crate::canvas::max_zoom_for_base_hex;
+        // World-like tiny base тЖТ high max; Small-like large base тЖТ max тЙИ 1.
         assert!(max_zoom_for_base_hex(5.0) > 5.0);
         assert_eq!(max_zoom_for_base_hex(40.0), 1.0);
         assert_eq!(max_zoom_for_base_hex(80.0), 1.0);

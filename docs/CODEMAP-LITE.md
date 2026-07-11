@@ -30,12 +30,12 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - New-world ocean fill (dense elevation all `0` after bounds) -> `crates/server/src/lib.rs` (`write_map_manifest`), `crates/cli/src/main.rs` (`write_initial_ocean_elevation`)
 - CLI commands and query flow (`profile`, `terrain`, `elevation`, generic `layer <id>`) -> `crates/cli/src/`
 - Dense-on-disk layer I/O (`read_or_empty` + `write_dense_layer`) -> `crates/core/src/layer.rs`, `crates/server/src/lib.rs`, `crates/cli/src/main.rs`
-- Web UI (WASM canvas, Home/Editor flow, tool dock + terrain brushes; elevation view palette/labels/peaks in `elevation_view.rs`) -> `crates/web/src/` (**D-94** incremental split: `state.rs`, `dom.rs`, `api.rs`; canvas/wizard/editor still in `lib.rs` until B2–B4)
+- Web UI (WASM canvas, Home/Editor flow, tool dock + terrain brushes; elevation view palette/labels/peaks in `elevation_view.rs`) -> `crates/web/src/` (**D-94** incremental split: `state.rs`, `dom.rs`, `api.rs`, `canvas.rs`; wizard/editor still in `lib.rs` until B3–B4)
 - Rivers tool dock (chain-click brush, stroke overlay, erase whole river, Generate rivers + confirm) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`river-overlay-layer-v1`, `rivers-auto-from-elevation-v1`)
-- Perf Step 0 measurement hooks (`open_ms`, layer fetch/parse/mirror, `redraw_ms`, `batch_flush_ms`; `#view-perf` + console) -> `crates/web/src/lib.rs` (`perf-100k--measurement-hooks`)
-- Web dense elevation client (index-addressed `DenseLayer` render cache, no HashMap mirror) -> `crates/web/src/lib.rs` (`perf-100k--web-dense-client`)
-- rAF redraw coalescing (`schedule_redraw`, one draw per animation frame) -> `crates/web/src/lib.rs` (`perf-100k--raf-redraw-coalesce`)
-- Canvas LOD: adaptive grid stroke + profile marker zoom cutoff -> `crates/web/src/lib.rs` (`perf-100k--canvas-lod-grid-markers`, **D-51** grid lines seamless: `FILL_SCALE_GRID_ON/OFF`, rename toggle)
+- Perf Step 0 measurement hooks (`open_ms`, layer fetch/parse/mirror, `redraw_ms`, `batch_flush_ms`; `#view-perf` + console) -> `crates/web/src/lib.rs` + `canvas.rs` (`perf-100k--measurement-hooks`)
+- Web dense elevation client (index-addressed `DenseLayer` render cache, no HashMap mirror) -> `crates/web/src/lib.rs` + `canvas.rs` (`perf-100k--web-dense-client`)
+- rAF redraw coalescing (`schedule_redraw`, one draw per animation frame) -> `crates/web/src/canvas.rs` (`perf-100k--raf-redraw-coalesce`)
+- Canvas LOD: adaptive grid stroke + profile marker zoom cutoff -> `crates/web/src/canvas.rs` (`perf-100k--canvas-lod-grid-markers`, **D-51** grid lines seamless: `FILL_SCALE_GRID_ON/OFF`, rename toggle)
 - Desktop shell (Tauri wrapper, native dialog + opener bridges) -> `crates/desktop/src/`, `crates/desktop/capabilities/default.json`
 - Desktop launch defaults (maximized on startup) -> `crates/desktop/src/lib.rs` (`desktop-maximized-default-launch`)
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
@@ -44,7 +44,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, `PUT /api/build/bounds`, list `build_draft`/`build_step`) -> `crates/server/src/lib.rs` (D-59, D-69, D-71)
 - Build wizard step-1–4 API (`PUT /api/build/bounds` preset rewrite + Geo reset; `POST /api/build/land-mask/generate` returns seed identity JSON; land-mask cells; geology/elevation generate) -> `crates/server/src/lib.rs` (`wizard-merge-size-grid`, `world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`, D-68/D-69/D-71)
 - World Build Wizard shell (D-57 + D-59 draft resume + D-71 size+grid one screen): Home **Build World**, fullscreen overlay, Save Draft / wizard resume + Home footer version label -> `crates/web/index.html`, `crates/web/src/lib.rs`
-- Home version label only (D-80 supersedes D-76 Check-for-updates CTA for alpha; updates via `/mk-update`) -> `crates/web/index.html`, `crates/web/src/lib.rs`
+- Home version label only (D-80 supersedes D-76 Check-for-updates CTA for alpha; updates via `update.ps1` / daily `run.ps1` pull when clean) -> `crates/web/index.html`, `crates/web/src/lib.rs`
 - Tester first-run flow (D-77): empty Home primary CTA `Create your first world` -> Build wizard defaults; blank Create demoted to advanced; post-Finish next-step note -> `crates/web/index.html`, `crates/web/src/lib.rs`
 - Agent-managed alpha (D-80…D-86): root `setup.ps1` / daily `run.ps1` (pull when clean) / optional `update.ps1` + Cursor `/doctor`
 - World Build Wizard steps 1–4 (size+blank grid → silhouette → tectonics → elevation → Finish; Back on steps 2–4 via in-app confirm; step 2 gen identity + Edit brush S–XL zoom-adaptive with pan blocked during edit drag and in-flight stamp queue guard for larger brush tiers; step 3 geology contrast+legend) -> `crates/web/index.html`, `crates/web/src/lib.rs` (`wizard-merge-size-grid`, `brush-size--zoom-adaptive`, `geology-readable--preview-contrast`, D-43/D-70/D-65/D-66/D-68/D-69/D-71/D-72, `world-pipeline--tectonics-v1`)
@@ -64,10 +64,11 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Alpha Windows bootstrap/launch/update: `setup.ps1`, `run.ps1` (D-86 pull-in-run), `update.ps1`; troubleshooting: `.cursor/commands/doctor.md`
 - Core boundary entry: `crates/core/src/lib.rs` (facade; worldgen under `worldgen/`, legacy top-level re-exports for adapters)
 - Server boundary entry: `crates/server/src/lib.rs`
-- Web boundary entry: `crates/web/src/lib.rs` (`start()` + wiring; legacy blocks until D-94 B2–B4)
+- Web boundary entry: `crates/web/src/lib.rs` (`start()` + wiring; wizard/editor/home until D-94 B3–B4)
 - Web state/types/DTOs: `crates/web/src/state.rs` (D-94 B1)
 - Web DOM helpers: `crates/web/src/dom.rs` (D-94 B1)
 - Web HTTP fetch/load/post: `crates/web/src/api.rs` (D-94 B1)
+- Web canvas layout/redraw/rAF: `crates/web/src/canvas.rs` (D-94 B2)
 - Web elevation view overlays: `crates/web/src/elevation_view.rs`
 - Home screen layout entry: `crates/web/index.html`
 - Alpha tester notes (stub → CURSOR-ALPHA): `docs/TESTER-NOTES-0.2.1.md`

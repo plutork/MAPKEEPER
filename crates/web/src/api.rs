@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use crate::dom::{input, perf_now, set_text, set_world_label, show_view, textarea};
 use crate::state::{
     bump_content_rev, draw_snapshot, fresh_elevation_layer, AppState, BuildStateInput,
-    LayerCellWrite, MapResponse, PerfMetrics, ProjectsResponse,
-    PAINT_BATCH_MAX_CELLS, PAINT_SAVE_COOLDOWN_MS,
+    LayerCellWrite, MapResponse, PerfMetrics, ProjectsResponse, PAINT_BATCH_MAX_CELLS,
+    PAINT_SAVE_COOLDOWN_MS,
 };
 
 pub(crate) async fn persist_build_draft(step: u32) -> bool {
@@ -119,7 +119,7 @@ pub(crate) async fn load_map(state: Rc<RefCell<AppState>>) {
     load_elevation(&state).await;
     load_rivers(&state).await;
     let redraw_start = perf_now();
-    let drawn = crate::redraw(&state.borrow());
+    let drawn = crate::canvas::redraw(&state.borrow());
     let first_redraw_ms = perf_now() - redraw_start;
     {
         let mut s = state.borrow_mut();
@@ -229,7 +229,7 @@ pub(crate) async fn post_river_append(state: Rc<RefCell<AppState>>, q: i32, r: i
         bump_content_rev(&mut s);
         crate::sync_river_status(&s);
     }
-    crate::schedule_redraw(state);
+    crate::canvas::schedule_redraw(state);
 }
 
 pub(crate) async fn delete_river_at_cell(state: Rc<RefCell<AppState>>, q: i32, r: i32) {
@@ -273,7 +273,7 @@ pub(crate) async fn delete_river_at_cell(state: Rc<RefCell<AppState>>, q: i32, r
         bump_content_rev(&mut s);
         crate::sync_river_status(&s);
     }
-    crate::schedule_redraw(state);
+    crate::canvas::schedule_redraw(state);
 }
 
 pub(crate) async fn post_river_pop(state: Rc<RefCell<AppState>>) {
@@ -308,7 +308,7 @@ pub(crate) async fn post_river_pop(state: Rc<RefCell<AppState>>) {
         bump_content_rev(&mut s);
         crate::sync_river_status(&s);
     }
-    crate::schedule_redraw(state);
+    crate::canvas::schedule_redraw(state);
 }
 
 pub(crate) async fn post_river_generate(state: Rc<RefCell<AppState>>, status_id: &str) {
@@ -352,7 +352,7 @@ pub(crate) async fn post_river_generate(state: Rc<RefCell<AppState>>, status_id:
             source_note
         ),
     );
-    crate::schedule_redraw(state);
+    crate::canvas::schedule_redraw(state);
 }
 pub(crate) fn schedule_paint_flush(state: Rc<RefCell<AppState>>) {
     let should_schedule = {
