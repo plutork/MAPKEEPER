@@ -21,3 +21,7 @@ crates/desktop/gen/
 
 # e2e/dev tooling (tests/) — Node dev-only, not product runtime
 tests/node_modules/
+
+# Python bytecode (scripts/, CI helpers)
+**/__pycache__/
+*.py[cod]
