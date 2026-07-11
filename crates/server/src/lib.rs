@@ -17,8 +17,9 @@
 //! vs. `open http://localhost` instructions).
 
 mod build;
-mod layers;
+mod hydrology_diagnostics;
 mod lakes;
+mod layers;
 mod projects;
 mod rivers;
 mod state;
@@ -75,6 +76,7 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
 
     Ok(projects::routes()
         .merge(build::routes())
+        .merge(hydrology_diagnostics::routes())
         .merge(layers::routes())
         .merge(rivers::routes())
         .merge(lakes::routes())
