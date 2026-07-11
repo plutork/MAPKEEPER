@@ -1,5 +1,5 @@
-# alpha-root-scripts-simplify (D-81): explicit update — dirty stop, pull, rebuild (no launch)
-# Daily path: .\run.ps1 (D-86 — pull when clean + launch)
+# alpha-root-scripts-simplify (D-81): explicit update - dirty stop, pull, rebuild (no launch)
+# Daily path: .\run.ps1 (D-86 - pull when clean + launch)
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
 Set-Location $Root
@@ -23,7 +23,7 @@ if (-not [string]::IsNullOrWhiteSpace($status)) {
 
 $before = (& git rev-parse --short HEAD).Trim()
 Write-Host "Before: $before"
-Write-Host "Pulling (ff-only)…"
+Write-Host "Pulling (ff-only)..."
 git pull --ff-only
 if ($LASTEXITCODE -ne 0) {
     Write-Host "git pull --ff-only failed."
@@ -33,7 +33,7 @@ if ($LASTEXITCODE -ne 0) {
 $after = (& git rev-parse --short HEAD).Trim()
 Write-Host "After:  $after"
 
-Write-Host "Rebuilding web UI…"
+Write-Host "Rebuilding web UI..."
 powershell -File (Join-Path $Root "crates\web\build.ps1")
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Web build failed."

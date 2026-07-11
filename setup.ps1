@@ -1,4 +1,4 @@
-# alpha-root-scripts-simplify (D-83): first-time workspace bootstrap — not system-wide install
+# alpha-root-scripts-simplify (D-83): first-time workspace bootstrap - not system-wide install
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
 Set-Location $Root
@@ -34,7 +34,7 @@ function Get-WasmBindgenPin {
     return "0.2.100"
 }
 
-Write-Host "mapkeeper setup (Windows) — first-time workspace bootstrap"
+Write-Host "mapkeeper setup (Windows) - first-time workspace bootstrap"
 Write-Host "repo: $Root"
 Write-Host "Not a system-wide app install. No git pull. Asks before heavy changes."
 Write-Host ""
@@ -125,14 +125,14 @@ if (-not (Test-Cmd "wasm-bindgen")) {
 }
 
 Write-Host ""
-Write-Host "Building web UI…"
+Write-Host "Building web UI..."
 powershell -File (Join-Path $Root "crates\web\build.ps1")
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Web build failed. Run /doctor in Cursor."
     exit $LASTEXITCODE
 }
 
-Write-Host "Checking desktop crate…"
+Write-Host "Checking desktop crate..."
 cargo check -p mapkeeper-desktop
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Desktop check failed. Run /doctor in Cursor."

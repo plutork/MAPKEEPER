@@ -1,5 +1,5 @@
 # Builds mapkeeper-web to WASM and stages it as static files for mapkeeper-server.
-# No trunk / wasm-pack dependency — plain cargo + wasm-bindgen-cli (must match
+# No trunk / wasm-pack dependency - plain cargo + wasm-bindgen-cli (must match
 # the `wasm-bindgen` crate version pinned in Cargo.toml).
 #
 # Usage (from repo root or this folder): powershell -File crates/web/build.ps1

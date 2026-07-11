@@ -1,4 +1,4 @@
-# alpha-scripts--run-with-pull (D-86): daily — best-effort pull + rebuild + launch
+# alpha-scripts--run-with-pull (D-86): daily - best-effort pull + rebuild + launch
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
 Set-Location $Root
@@ -18,23 +18,23 @@ function Fail-Pull($Msg) {
 
 function Try-PullIfClean {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        Write-Host "git not found — skipping pull."
+        Write-Host "git not found - skipping pull."
         return
     }
 
     $status = & git status --porcelain
     if (-not [string]::IsNullOrWhiteSpace($status)) {
-        Write-Host "Local changes — skipping pull."
+        Write-Host "Local changes - skipping pull."
         return
     }
 
     $upstream = (& git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null)
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($upstream)) {
-        Write-Host "No upstream branch — skipping pull."
+        Write-Host "No upstream branch - skipping pull."
         return
     }
 
-    Write-Host "Fetching…"
+    Write-Host "Fetching..."
     & git fetch
     if ($LASTEXITCODE -ne 0) {
         Fail-Pull "git fetch failed."
@@ -43,12 +43,12 @@ function Try-PullIfClean {
     $local = (& git rev-parse HEAD).Trim()
     $remote = (& git rev-parse '@{u}').Trim()
     if ($local -eq $remote) {
-        Write-Host "Already up to date — skipping pull."
+        Write-Host "Already up to date - skipping pull."
         return
     }
 
     $before = (& git rev-parse --short HEAD).Trim()
-    Write-Host "Pulling (ff-only)…"
+    Write-Host "Pulling (ff-only)..."
     & git pull --ff-only
     if ($LASTEXITCODE -ne 0) {
         Fail-Pull "git pull --ff-only failed."
@@ -75,7 +75,7 @@ if (-not (Get-Command rustc -ErrorAction SilentlyContinue)) {
 
 Try-PullIfClean
 
-Write-Host "Building web UI…"
+Write-Host "Building web UI..."
 powershell -File (Join-Path $Root "crates\web\build.ps1")
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Web build failed."
@@ -84,7 +84,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "Launching mapkeeper-desktop…"
+Write-Host "Launching mapkeeper-desktop..."
 Write-Host "After Home opens: use Create your first world if the list is empty."
 Write-Host "If this fails: .\setup.ps1 or /doctor in Cursor."
 cargo run -p mapkeeper-desktop

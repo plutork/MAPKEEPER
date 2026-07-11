@@ -44,6 +44,8 @@ jobs:
         run: git diff --exit-code docs/CODEMAP.md
       - name: Check CODEMAP-LITE stale paths
         run: python scripts/check_codemap_drift.py
+      - name: Check text encoding (mojibake + alpha ps1 ASCII)
+        run: python scripts/check_text_encoding.py
 
   windows-desktop-build:
     name: cargo build mapkeeper-desktop (Windows only, roadmap 5.9, D-29)
