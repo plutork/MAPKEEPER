@@ -368,6 +368,74 @@ pub fn validate_generated_catalog_strict(
     report
 }
 
+/// True if assigning `parent_id` to `river_id` would close a parent loop.
+pub fn would_assign_parent_cycle(river_id: u32, parent_id: u32, catalog: &RiverCatalog) -> bool {
+    if parent_id == river_id {
+        return true;
+    }
+    let mut cur = parent_id;
+    for _ in 0..=catalog.rivers.len() {
+        if cur == river_id {
+            return true;
+        }
+        let Some(r) = catalog.rivers.iter().find(|r| r.id == cur) else {
+            return false;
+        };
+        if is_root(r) {
+            return false;
+        }
+        cur = r.parent;
+    }
+    false
+}
+
+fn expand_reject_trees(catalog: &RiverCatalog, seed: &HashSet<u32>) -> HashSet<u32> {
+    let mut reject = seed.clone();
+    loop {
+        let before = reject.len();
+        for r in &catalog.rivers {
+            if detect_parent_cycle(r.id, catalog) {
+                reject.insert(r.id);
+            }
+            if find_root_id(r.id, catalog).is_none() {
+                reject.insert(r.id);
+            }
+            if r.parent != r.id && reject.contains(&r.parent) {
+                reject.insert(r.id);
+            }
+        }
+        if reject.len() == before {
+            break;
+        }
+    }
+    reject
+}
+
+/// D-100 auto gate: prune until strict validate passes or progress stops.
+pub fn enforce_strict_generated_catalog(
+    catalog: &mut RiverCatalog,
+    ctx: &RiverValidationContext,
+) -> u32 {
+    let mut rejected = 0u32;
+    let cap = catalog.rivers.len().saturating_add(8);
+    for _ in 0..cap {
+        rejected += prune_invalid_river_trees(catalog, ctx);
+        let report = validate_generated_catalog_strict(catalog, ctx);
+        if report.is_ok() {
+            return rejected;
+        }
+        let seed: HashSet<u32> = report.diagnostics.iter().map(|d| d.river_id).collect();
+        let reject = expand_reject_trees(catalog, &seed);
+        let before = catalog.rivers.len();
+        catalog.rivers.retain(|r| !reject.contains(&r.id));
+        rejected += (before - catalog.rivers.len()) as u32;
+        if before == catalog.rivers.len() {
+            break;
+        }
+    }
+    rejected
+}
+
 /// Remove rivers whose root tree lacks a valid sea/lake terminal.
 pub fn prune_invalid_river_trees(
     catalog: &mut RiverCatalog,
@@ -514,5 +582,41 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == RiverValidationCode::InvalidConfluenceGeometry));
+    }
+
+    #[test]
+    fn enforce_strict_prunes_parent_cycle() {
+        let bounds = grid_bounds();
+        let heights = vec![10i32; bounds.len()];
+        let a = idx(&bounds, 2, 2);
+        let b = idx(&bounds, 5, 2);
+        let mut catalog = RiverCatalog {
+            schema_version: 1,
+            next_id: 3,
+            rivers: vec![
+                River {
+                    id: 1,
+                    cells: vec![a],
+                    source: a,
+                    mouth: a,
+                    parent: 2,
+                    basin: 1,
+                    name: None,
+                },
+                River {
+                    id: 2,
+                    cells: vec![b],
+                    source: b,
+                    mouth: b,
+                    parent: 1,
+                    basin: 1,
+                    name: None,
+                },
+            ],
+        };
+        let ctx = RiverValidationContext::new(&heights, &bounds, None);
+        let rejected = enforce_strict_generated_catalog(&mut catalog, &ctx);
+        assert!(rejected >= 2);
+        assert!(validate_generated_catalog_strict(&catalog, &ctx).is_ok());
     }
 }

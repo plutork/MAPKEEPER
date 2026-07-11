@@ -13,8 +13,8 @@ use crate::rivers::{River, RiverCatalog, RIVER_CATALOG_SCHEMA_VERSION};
 use crate::worldgen::hydrology::lakes::lake_outflow_supply;
 use crate::worldgen::hydrology::types::{DepressionAnalysis, RiverDensity};
 use crate::worldgen::hydrology::river_validate::{
-    classify_terminal, mouth_touches_sea as validate_mouth_touches_sea,
-    prune_invalid_river_trees, validate_generated_catalog_strict, RiverTerminal,
+    classify_terminal, enforce_strict_generated_catalog, mouth_touches_sea as validate_mouth_touches_sea,
+    validate_generated_catalog_strict, would_assign_parent_cycle, RiverTerminal,
     RiverValidationContext,
 };
 
@@ -159,10 +159,8 @@ pub fn generate_with_owners(
     );
     let rejected_prune = {
         let ctx = RiverValidationContext::new(heights, bounds, params.lakes);
-        prune_invalid_river_trees(&mut catalog, &ctx)
+        enforce_strict_generated_catalog(&mut catalog, &ctx)
     };
-    let ctx = RiverValidationContext::new(heights, bounds, params.lakes);
-    debug_assert!(validate_generated_catalog_strict(&catalog, &ctx).is_ok());
     let owners = owners_from_catalog(&catalog, n);
     let rejected_rivers = pre_count
         .saturating_sub(catalog.rivers.len() as u32)
@@ -710,9 +708,12 @@ fn finalize_traced_catalog(
             let id = catalog.rivers[u.idx].id;
             let (parent, basin) = match u.outcome {
                 TraceOutcome::Sea | TraceOutcome::Lake(_) => (id, id),
-                TraceOutcome::Parent { parent_id } => {
+                TraceOutcome::Parent { parent_id }
+                    if !would_assign_parent_cycle(id, parent_id, catalog) =>
+                {
                     (parent_id, find_root_in_catalog(parent_id, &catalog.rivers))
                 }
+                TraceOutcome::Parent { .. } => (id, id),
                 TraceOutcome::Stuck => {
                     let p = catalog.rivers[u.idx].parent;
                     if p == 0 || p == id {
@@ -1319,7 +1320,7 @@ mod tests {
     }
 
     #[test]
-    fn small_continents_auto_catalog_passes_strict_validate() {
+    fn small_preset_seed_sweep_passes_strict_validate() {
         use crate::map_preset::MapPreset;
         use crate::worldgen::climate::{generate_climate_layers, PrecipitationStyle};
         use crate::worldgen::elevation::{elevation_from_land_mask_and_geology, ElevationIntensity};
@@ -1329,38 +1330,40 @@ mod tests {
         };
         use crate::worldgen::land::{generate_land_mask, LayoutClass, ShoreCharacter};
 
-        let seed = 26;
         let bounds = MapPreset::Small.bounds();
-        let mask = generate_land_mask(&bounds, LayoutClass::Continents, ShoreCharacter::Smooth, seed);
-        let geo = generate_geology(&bounds, &mask, GeologyStyle::Random, seed ^ 0xAB);
-        let elev = elevation_from_land_mask_and_geology(
-            &bounds,
-            &mask,
-            &geo,
-            seed,
-            ElevationIntensity::Standard,
-        );
-        let climate =
-            generate_climate_layers(&bounds, &mask, &elev, PrecipitationStyle::Balanced, seed);
-        let analysis = analyze_depressions(&elev, &bounds);
-        let out = generate_with_owners(
-            &elev,
-            &bounds,
-            Some(&climate.precipitation),
-            RiverFluxParams {
-                analysis: Some(&analysis),
-                lakes: None,
-                density: RiverDensity::Balanced,
-            },
-        );
-        assert!(out.used_climate);
-        let ctx = RiverValidationContext::new(&analysis.conditioned_heights, &bounds, None);
-        let report = validate_generated_catalog_strict(&out.catalog, &ctx);
-        assert!(
-            report.is_ok(),
-            "dogfood seed {seed}: strict validate failed: {:?}",
-            report.diagnostics
-        );
+        for layout in [LayoutClass::Continents, LayoutClass::Archipelago] {
+            for seed in 20..=30u64 {
+                let mask = generate_land_mask(&bounds, layout, ShoreCharacter::Smooth, seed);
+                let geo = generate_geology(&bounds, &mask, GeologyStyle::Random, seed ^ 0xAB);
+                let elev = elevation_from_land_mask_and_geology(
+                    &bounds,
+                    &mask,
+                    &geo,
+                    seed,
+                    ElevationIntensity::Standard,
+                );
+                let climate =
+                    generate_climate_layers(&bounds, &mask, &elev, PrecipitationStyle::Balanced, seed);
+                let analysis = analyze_depressions(&elev, &bounds);
+                let out = generate_with_owners(
+                    &elev,
+                    &bounds,
+                    Some(&climate.precipitation),
+                    RiverFluxParams {
+                        analysis: Some(&analysis),
+                        lakes: None,
+                        density: RiverDensity::Balanced,
+                    },
+                );
+                let ctx = RiverValidationContext::new(&analysis.conditioned_heights, &bounds, None);
+                let report = validate_generated_catalog_strict(&out.catalog, &ctx);
+                assert!(
+                    report.is_ok(),
+                    "{layout:?} seed {seed}: strict failed: {:?}",
+                    report.diagnostics
+                );
+            }
+        }
     }
 
     #[test]
