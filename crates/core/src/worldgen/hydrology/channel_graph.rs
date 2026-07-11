@@ -491,5 +491,15 @@ mod tests {
 
         assert!(channels.flow.accumulated_flow[lake] > 0);
         assert!(channels.flow.accumulated_flow[receiver.0] >= channels.flow.accumulated_flow[lake]);
+        assert!(channels
+            .river_graph
+            .nodes
+            .iter()
+            .any(|node| node.kind == RiverGraphNodeKind::LakeInlet));
+        assert!(channels
+            .river_graph
+            .nodes
+            .iter()
+            .any(|node| node.kind == RiverGraphNodeKind::LakeOutlet));
     }
 }
