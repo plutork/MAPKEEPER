@@ -19,17 +19,27 @@ Your lore lives in your world folder, not in this product repository.
 
 ## Alpha (Windows) — workspace-first
 
-Primary path (no installer download):
+Primary path (no installer download). **Full beginner guide:** [docs/CURSOR-ALPHA.md](docs/CURSOR-ALPHA.md).
 
-1. Clone this repository.
-2. Open the folder in **Cursor**.
-3. First time: run **`.\setup.ps1`**.
-4. Run **`.\run.ps1`** (daily — pull when clean, then build + launch).
-5. On empty Home, click **Create your first world**.
-6. Optional: **`.\update.ps1`** — update-only without launch.
-7. If something fails, run **`/doctor`** in Cursor.
+### First time (never used Cursor or Git)
 
-Details: [docs/CURSOR-ALPHA.md](docs/CURSOR-ALPHA.md).
+0. **Windows 10/11**, internet, ~2–5 GB free disk.
+1. **Git** — [git-scm.com/download/win](https://git-scm.com/download/win) → install → reopen terminal → `git --version`.
+2. **Cursor** — [cursor.com/download](https://cursor.com/download) → install → sign in.
+3. **Get MAPKEEPER** (pick one):
+   - **Cursor:** **Git: Clone** → `https://github.com/plutork/MAPKEEPER.git` → open folder, or
+   - **PowerShell:** `cd $HOME\Documents` → `git clone https://github.com/plutork/MAPKEEPER.git` → in Cursor **File → Open Folder** → that folder.
+4. In Cursor terminal (**Ctrl+`**), from repo root: **`.\setup.ps1`** (once; follow prompts; MSVC is manual if asked).
+5. **`.\run.ps1`** → desktop app opens → **Create your first world** on empty Home.
+
+### Every day after setup
+
+1. Open the **MAPKEEPER** folder in Cursor.
+2. Terminal: **`.\run.ps1`** (pull when git tree is clean, then build + launch).
+3. Optional: **`.\update.ps1`** — update-only, no launch.
+4. Stuck: **`/doctor`** in Cursor chat.
+
+Details, GitHub Desktop method, safety: [docs/CURSOR-ALPHA.md](docs/CURSOR-ALPHA.md).
 
 ## Create your first world
 
