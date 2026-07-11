@@ -28,6 +28,33 @@ impl LakeDensity {
     }
 }
 
+/// Wizard / generate river density presets (hydrology-river-lake-integration-v1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RiverDensity {
+    Few,
+    #[default]
+    Balanced,
+    Many,
+}
+
+impl RiverDensity {
+    pub fn parse(raw: &str) -> RiverDensity {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "few" | "sparse" => RiverDensity::Few,
+            "many" | "rich" => RiverDensity::Many,
+            _ => RiverDensity::Balanced,
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            RiverDensity::Few => "few",
+            RiverDensity::Balanced => "balanced",
+            RiverDensity::Many => "many",
+        }
+    }
+}
+
 /// In-memory DEM conditioning + geometric depression metadata (H0).
 /// Does not copy elevation layer; does not persist to disk.
 #[derive(Debug, Clone, PartialEq, Eq)]

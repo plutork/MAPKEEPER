@@ -8,10 +8,11 @@ use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use mapkeeper_core::layer::ELEVATION_LAYER_ID;
-use mapkeeper_core::river_flux::generate_with_owners;
+use mapkeeper_core::river_flux::{generate_with_owners, RiverFluxParams};
 use mapkeeper_core::rivers::{
     append_cell, cell_index, create_river, delete_river, pop_last_cell, RiverCatalog, RiverError,
 };
+use mapkeeper_core::worldgen::hydrology::{analyze_depressions, RiverDensity};
 use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
@@ -143,9 +144,20 @@ struct RiversGenerateResponse {
     #[serde(flatten)]
     catalog: RiverCatalog,
     precip_source: &'static str,
+    river_density: &'static str,
 }
 
-async fn generate_rivers_handler(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
+#[derive(Debug, Deserialize, Default)]
+struct RiversGenerateInput {
+    river_density: Option<String>,
+    regenerate_nonce: Option<u32>,
+}
+
+async fn generate_rivers_handler(
+    State(state): State<Arc<Mutex<AppState>>>,
+    body: Option<Json<RiversGenerateInput>>,
+) -> impl IntoResponse {
+    let input = body.map(|Json(b)| b).unwrap_or_default();
     let guard = state.lock().unwrap();
     let Some(active) = guard.active.as_ref() else {
         return (
@@ -157,8 +169,29 @@ async fn generate_rivers_handler(State(state): State<Arc<Mutex<AppState>>>) -> i
     let bounds = world_io::map_bounds(&active.path);
     let elevation = world_io::read_dense_layer(&active.path, ELEVATION_LAYER_ID, &bounds);
     let precipitation = world_io::read_optional_precip_layer(&active.path, &bounds);
-    let (catalog, owners, used_climate) =
-        generate_with_owners(&elevation, &bounds, precipitation.as_ref());
+    let lakes = world_io::read_lake_catalog(&active.path);
+    let analysis = analyze_depressions(&elevation, &bounds);
+    let density = input
+        .river_density
+        .as_deref()
+        .map(RiverDensity::parse)
+        .unwrap_or(RiverDensity::Balanced);
+    let _nonce = input.regenerate_nonce.unwrap_or(0);
+    let lakes_ref = if lakes.lakes.is_empty() {
+        None
+    } else {
+        Some(&lakes)
+    };
+    let (catalog, owners, used_climate) = generate_with_owners(
+        &elevation,
+        &bounds,
+        precipitation.as_ref(),
+        RiverFluxParams {
+            analysis: Some(&analysis),
+            lakes: lakes_ref,
+            density,
+        },
+    );
     if let Err(err) = world_io::persist_generated_rivers(&active.path, &catalog, &owners, &bounds) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
@@ -170,6 +203,7 @@ async fn generate_rivers_handler(State(state): State<Arc<Mutex<AppState>>>) -> i
     Json(RiversGenerateResponse {
         catalog,
         precip_source,
+        river_density: density.id(),
     })
     .into_response()
 }

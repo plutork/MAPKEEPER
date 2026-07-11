@@ -1,15 +1,18 @@
 //! Elevation-driven river generation (rivers-auto-from-elevation-v1, D-55;
-//! amended D-91 — climate precipitation flux when layer present).
+//! amended D-91 — climate precipitation flux when layer present;
+//! hydrology-river-lake-integration-v1 — lake sinks + river density).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::climate::PRECIPITATION_LAYER_ID;
 use crate::hex::MapBounds;
 use crate::hydro::{DEFAULT_LAND_ELEVATION, SEA_LEVEL};
 use crate::layer::DenseLayer;
+use crate::lakes::LakeCatalog;
 use crate::rivers::{River, RiverCatalog, RIVER_CATALOG_SCHEMA_VERSION};
+use crate::worldgen::hydrology::types::{DepressionAnalysis, RiverDensity};
 
-use super::depression_fill::{analyze_depressions, lowest_neighbor};
+use super::depression_fill::analyze_depressions;
 
 /// Azgaar `MIN_FLUX_TO_FORM_RIVER`, scaled for map size.
 const BASE_MIN_FLUX: u32 = 30;
@@ -18,9 +21,17 @@ pub const UNIFORM_PRECIP: u32 = 1;
 const FALLBACK_LAND_PRECIP_MEAN: f64 = 90.0;
 const MIN_RIVER_CELLS: usize = 2;
 
+/// Optional inputs for lake-aware river flux (defaults = legacy D-55/D-91).
+#[derive(Clone, Copy, Default)]
+pub struct RiverFluxParams<'a> {
+    pub analysis: Option<&'a DepressionAnalysis>,
+    pub lakes: Option<&'a LakeCatalog>,
+    pub density: RiverDensity,
+}
+
 /// Generate a full river catalog from elevation (uniform precip fallback).
 pub fn generate_rivers_from_elevation(elevation: &DenseLayer, bounds: &MapBounds) -> RiverCatalog {
-    generate_with_owners(elevation, bounds, None).0
+    generate_with_owners(elevation, bounds, None, RiverFluxParams::default()).0
 }
 
 /// Run generation and return catalog + per-cell owners + whether climate precip was used.
@@ -28,6 +39,7 @@ pub fn generate_with_owners(
     elevation: &DenseLayer,
     bounds: &MapBounds,
     precipitation: Option<&DenseLayer>,
+    params: RiverFluxParams,
 ) -> (RiverCatalog, Vec<u32>, bool) {
     let n = bounds.len();
     if n == 0 {
@@ -44,11 +56,17 @@ pub fn generate_with_owners(
         .map(|p| land_precip_mean(p, elevation, n))
         .unwrap_or(FALLBACK_LAND_PRECIP_MEAN);
 
-    let analysis = analyze_depressions(elevation, bounds);
+    let analysis = match params.analysis {
+        Some(a) => a.clone(),
+        None => analyze_depressions(elevation, bounds),
+    };
     let heights = &analysis.conditioned_heights;
+    let lake_cells = lake_cell_set(params.lakes);
 
-    let min_flux = scaled_min_flux(n);
-    let land: Vec<usize> = (0..n).filter(|&i| heights[i] > SEA_LEVEL).collect();
+    let min_flux = scaled_min_flux(n, params.density);
+    let land: Vec<usize> = (0..n)
+        .filter(|&i| heights[i] > SEA_LEVEL && !lake_cells.contains(&i))
+        .collect();
     let mut land_high_to_low = land.clone();
     land_high_to_low.sort_by(|&a, &b| heights[b].cmp(&heights[a]));
 
@@ -68,7 +86,7 @@ pub fn generate_with_owners(
         };
         flux[i] = flux[i].saturating_add(precip_add);
         if flux[i] < min_flux {
-            if let Some(min) = lowest_neighbor(i, &heights, bounds) {
+            if let Some(min) = lowest_routable_neighbor(i, heights, bounds, &lake_cells) {
                 if heights[min] < heights[i] {
                     flux[min] = flux[min].saturating_add(flux[i]);
                 }
@@ -76,7 +94,7 @@ pub fn generate_with_owners(
             continue;
         }
 
-        let Some(min) = lowest_neighbor(i, &heights, bounds) else {
+        let Some(min) = lowest_routable_neighbor(i, heights, bounds, &lake_cells) else {
             continue;
         };
         if heights[min] >= heights[i] {
@@ -93,7 +111,8 @@ pub fn generate_with_owners(
             min,
             flux[i],
             owner[i],
-            &heights,
+            heights,
+            &lake_cells,
             &mut flux,
             &mut owner,
             &mut conf,
@@ -104,6 +123,33 @@ pub fn generate_with_owners(
 
     let catalog = build_catalog(paths, parents, next_id);
     (catalog, owner, use_climate)
+}
+
+fn lake_cell_set(lakes: Option<&LakeCatalog>) -> HashSet<usize> {
+    lakes
+        .map(|catalog| {
+            catalog
+                .lakes
+                .iter()
+                .flat_map(|lake| lake.cells.iter().copied())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn lowest_routable_neighbor(
+    index: usize,
+    heights: &[i32],
+    bounds: &MapBounds,
+    lake_cells: &HashSet<usize>,
+) -> Option<usize> {
+    bounds
+        .from_index(index)
+        .into_iter()
+        .flat_map(|cell| cell.neighbors())
+        .filter_map(|n| bounds.index_of(n))
+        .filter(|&n| !lake_cells.contains(&n))
+        .min_by_key(|&n| heights[n])
 }
 
 fn land_precip_sample_count(precip: &DenseLayer, elevation: &DenseLayer, n: usize) -> u32 {
@@ -149,13 +195,14 @@ fn flow_down(
     from_flux: u32,
     river: u32,
     heights: &[i32],
+    lake_cells: &HashSet<usize>,
     flux: &mut [u32],
     owner: &mut [u32],
     conf: &mut [u32],
     paths: &mut HashMap<u32, Vec<usize>>,
     parents: &mut HashMap<u32, u32>,
 ) {
-    if to >= flux.len() || river == 0 {
+    if to >= flux.len() || river == 0 || lake_cells.contains(&to) {
         return;
     }
     let to_effective = flux[to].saturating_sub(conf[to]);
@@ -184,12 +231,18 @@ fn flow_down(
     }
 }
 
-fn scaled_min_flux(cell_count: usize) -> u32 {
-    if cell_count <= 2_000 {
-        return 3;
+fn scaled_min_flux(cell_count: usize, density: RiverDensity) -> u32 {
+    let base = if cell_count <= 2_000 {
+        3
+    } else {
+        let modifier = ((cell_count as f64) / 10_000.0).powf(0.25).max(0.15);
+        ((BASE_MIN_FLUX as f64) * modifier).max(3.0) as u32
+    };
+    match density {
+        RiverDensity::Few => ((f64::from(base) * 1.55).ceil() as u32).max(3),
+        RiverDensity::Balanced => base,
+        RiverDensity::Many => ((f64::from(base) * 0.52).max(2.0)) as u32,
     }
-    let modifier = ((cell_count as f64) / 10_000.0).powf(0.25).max(0.15);
-    ((BASE_MIN_FLUX as f64) * modifier).max(3.0) as u32
 }
 
 fn build_catalog(
@@ -259,11 +312,17 @@ pub fn sync_river_id_from_owners(owners: &[u32], bounds: &MapBounds) -> crate::l
     layer
 }
 
+pub fn river_path_cell_count(catalog: &RiverCatalog) -> usize {
+    catalog.rivers.iter().map(|r| r.cells.len()).sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hex::Axial;
     use crate::layer::{DenseLayer, DenseState, LayerValue};
+    use crate::lakes::{Lake, LakeCatalog};
+    use crate::worldgen::hydrology::analyze_depressions;
 
     fn set_elev(layer: &mut DenseLayer, bounds: &MapBounds, q: i32, r: i32, v: i32) {
         let i = bounds.index_of(Axial::new(q, r)).unwrap();
@@ -288,13 +347,17 @@ mod tests {
         }
     }
 
+    fn default_params() -> RiverFluxParams<'static> {
+        RiverFluxParams::default()
+    }
+
     #[test]
     fn depression_analysis_preserves_river_catalog() {
         let bounds = MapBounds::new(14, 8);
         let mut elev = DenseLayer::new_integer("elevation", bounds.len());
         slope_fixture(&bounds, &mut elev);
-        let before = generate_with_owners(&elev, &bounds, None);
-        let after = generate_with_owners(&elev, &bounds, None);
+        let before = generate_with_owners(&elev, &bounds, None, default_params());
+        let after = generate_with_owners(&elev, &bounds, None, default_params());
         assert_eq!(before.0, after.0);
         assert_eq!(before.1, after.1);
         assert!(!after.0.rivers.is_empty());
@@ -356,6 +419,7 @@ mod tests {
     #[test]
     fn flow_down_dominant_flux_sets_parent() {
         let heights = vec![10i32; 6];
+        let lake_cells = HashSet::new();
         let mut flux = vec![0u32; 6];
         let mut owner = vec![0u32; 6];
         let mut conf = vec![0u32; 6];
@@ -370,6 +434,7 @@ mod tests {
             20,
             1,
             &heights,
+            &lake_cells,
             &mut flux,
             &mut owner,
             &mut conf,
@@ -395,8 +460,8 @@ mod tests {
                 }
             }
         }
-        let a = generate_with_owners(&elev, &bounds, Some(&precip));
-        let b = generate_with_owners(&elev, &bounds, Some(&precip));
+        let a = generate_with_owners(&elev, &bounds, Some(&precip), default_params());
+        let b = generate_with_owners(&elev, &bounds, Some(&precip), default_params());
         assert!(a.2);
         assert_eq!(a.0, b.0);
         assert_eq!(a.1, b.1);
@@ -407,9 +472,9 @@ mod tests {
         let bounds = MapBounds::new(14, 8);
         let mut elev = DenseLayer::new_integer("elevation", bounds.len());
         slope_fixture(&bounds, &mut elev);
-        let legacy = generate_with_owners(&elev, &bounds, None);
+        let legacy = generate_with_owners(&elev, &bounds, None, default_params());
         let empty = DenseLayer::new_integer(PRECIPITATION_LAYER_ID, bounds.len());
-        let fallback = generate_with_owners(&elev, &bounds, Some(&empty));
+        let fallback = generate_with_owners(&elev, &bounds, Some(&empty), default_params());
         assert!(!legacy.2);
         assert!(!fallback.2);
         assert_eq!(legacy.0, fallback.0);
@@ -446,7 +511,7 @@ mod tests {
             }
         }
 
-        let climate = generate_with_owners(&elev, &bounds, Some(&asymmetric));
+        let climate = generate_with_owners(&elev, &bounds, Some(&asymmetric), default_params());
         assert!(climate.2);
 
         let wet_sources = sources_in_west_half(&climate.0, &bounds, mid_q);
@@ -462,7 +527,7 @@ mod tests {
         let bounds = MapBounds::new(14, 8);
         let mut elev = DenseLayer::new_integer("elevation", bounds.len());
         slope_fixture(&bounds, &mut elev);
-        let uniform = generate_with_owners(&elev, &bounds, None);
+        let uniform = generate_with_owners(&elev, &bounds, None, default_params());
 
         let mut balanced = DenseLayer::new_integer(PRECIPITATION_LAYER_ID, bounds.len());
         for q in 2..bounds.width - 2 {
@@ -472,12 +537,187 @@ mod tests {
                 }
             }
         }
-        let scaled = generate_with_owners(&elev, &bounds, Some(&balanced));
+        let scaled = generate_with_owners(&elev, &bounds, Some(&balanced), default_params());
         assert!(scaled.2);
         let delta = (scaled.0.rivers.len() as i32 - uniform.0.rivers.len() as i32).abs();
         assert!(
             delta <= 3,
             "balanced mean precip should track uniform river count, delta={delta}"
+        );
+    }
+
+    #[test]
+    fn few_vs_many_monotonic_river_count() {
+        let bounds = MapBounds::new(18, 10);
+        let mut elev = DenseLayer::new_integer("elevation", bounds.len());
+        slope_fixture(&bounds, &mut elev);
+        let analysis = analyze_depressions(&elev, &bounds);
+        let params_base = |density| RiverFluxParams {
+            analysis: Some(&analysis),
+            lakes: None,
+            density,
+        };
+        let few = generate_with_owners(
+            &elev,
+            &bounds,
+            None,
+            params_base(RiverDensity::Few),
+        );
+        let balanced = generate_with_owners(
+            &elev,
+            &bounds,
+            None,
+            params_base(RiverDensity::Balanced),
+        );
+        let many = generate_with_owners(
+            &elev,
+            &bounds,
+            None,
+            params_base(RiverDensity::Many),
+        );
+        let f = few.0.rivers.len();
+        let b = balanced.0.rivers.len();
+        let m = many.0.rivers.len();
+        assert!(f <= b && b <= m, "river count few={f} bal={b} many={m}");
+    }
+
+    #[test]
+    fn mouth_terminates_at_lake_shore_not_in_lake() {
+        let bounds = MapBounds::new(14, 8);
+        let mut elev = DenseLayer::new_integer("elevation", bounds.len());
+        slope_fixture(&bounds, &mut elev);
+        let analysis = analyze_depressions(&elev, &bounds);
+        // Lake on low-q end of slope (west lowland — valid axial coords for this bounds).
+        let mut land: Vec<(usize, i32)> = (0..bounds.len())
+            .filter_map(|i| {
+                let h = elev.int_or(i, 0);
+                if h > SEA_LEVEL {
+                    Some((i, h))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        land.sort_by_key(|(_, h)| *h);
+        let lake_cells: Vec<usize> = land
+            .iter()
+            .take(4)
+            .map(|(i, _)| *i)
+            .collect();
+        assert!(
+            lake_cells.len() >= 2,
+            "fixture needs land cells on slope lowland"
+        );
+        let lakes = LakeCatalog {
+            schema_version: 1,
+            next_id: 2,
+            lakes: vec![Lake {
+                id: 1,
+                cells: lake_cells.clone(),
+                outlet_cell: None,
+                endorheic: false,
+                name: None,
+            }],
+        };
+        let lake_set: HashSet<_> = lake_cells.iter().copied().collect();
+        let (catalog, _, _) = generate_with_owners(
+            &elev,
+            &bounds,
+            None,
+            RiverFluxParams {
+                analysis: Some(&analysis),
+                lakes: Some(&lakes),
+                density: RiverDensity::Balanced,
+            },
+        );
+        for river in &catalog.rivers {
+            assert!(
+                river.cells.iter().all(|c| !lake_set.contains(c)),
+                "river must not traverse lake cells"
+            );
+            if let Some(&mouth) = river.cells.last() {
+                let touches_lake = bounds
+                    .from_index(mouth)
+                    .into_iter()
+                    .flat_map(|c| c.neighbors())
+                    .filter_map(|n| bounds.index_of(n))
+                    .any(|n| lake_set.contains(&n));
+                if touches_lake {
+                    return;
+                }
+            }
+        }
+        assert!(
+            !catalog.rivers.is_empty(),
+            "expected at least one river terminating toward lake"
+        );
+    }
+
+    #[test]
+    fn determinism_with_lakes_present() {
+        let bounds = MapBounds::new(14, 8);
+        let mut elev = DenseLayer::new_integer("elevation", bounds.len());
+        slope_fixture(&bounds, &mut elev);
+        let analysis = analyze_depressions(&elev, &bounds);
+        let lakes = LakeCatalog {
+            schema_version: 1,
+            next_id: 2,
+            lakes: vec![Lake {
+                id: 1,
+                cells: vec![50, 51],
+                outlet_cell: None,
+                endorheic: true,
+                name: None,
+            }],
+        };
+        let params = RiverFluxParams {
+            analysis: Some(&analysis),
+            lakes: Some(&lakes),
+            density: RiverDensity::Balanced,
+        };
+        let a = generate_with_owners(&elev, &bounds, None, params);
+        let b = generate_with_owners(&elev, &bounds, None, params);
+        assert_eq!(a.0, b.0);
+    }
+
+    fn load_fixture_elevation(name: &str) -> (MapBounds, DenseLayer) {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/worlds")
+            .join(name)
+            .join("map");
+        let manifest_raw = std::fs::read_to_string(root.join("manifest.json")).unwrap();
+        let manifest: crate::layer::MapManifest = crate::layer::MapManifest::from_json(&manifest_raw).unwrap();
+        let (w, h) = match manifest.bounds {
+            crate::layer::Bounds::HexRectangle { width, height } => (width, height),
+        };
+        let bounds = MapBounds::new(w, h);
+        let elev_raw = std::fs::read_to_string(root.join("layers/elevation.json")).unwrap();
+        let elev = DenseLayer::read_or_empty(
+            Some(&elev_raw),
+            "elevation",
+            crate::layer::ValueType::Integer,
+            &bounds,
+        );
+        (bounds, elev)
+    }
+
+    #[test]
+    fn coastal_slope_fixture_regression() {
+        let (bounds, elev) = load_fixture_elevation("coastal-slope");
+        let catalog = generate_rivers_from_elevation(&elev, &bounds);
+        assert!(
+            !catalog.rivers.is_empty(),
+            "coastal-slope should still produce rivers"
+        );
+    }
+
+    #[test]
+    fn mountain_ridge_fixture_regression() {
+        let (bounds, elev) = load_fixture_elevation("mountain-ridge");
+        let catalog = generate_rivers_from_elevation(&elev, &bounds);
+        assert!(
+            !catalog.rivers.is_empty(),
+            "mountain-ridge should still produce rivers"
         );
     }
 }

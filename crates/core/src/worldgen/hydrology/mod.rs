@@ -8,4 +8,4 @@ pub mod types;
 pub use depression_fill::analyze_depressions;
 pub use lakes::generate_lakes;
 pub use river_flux::*;
-pub use types::{DepressionAnalysis, LakeDensity};
+pub use types::{DepressionAnalysis, LakeDensity, RiverDensity};

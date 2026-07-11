@@ -26,13 +26,13 @@ use mapkeeper_core::map_preset::{legacy_default_bounds, parse_map_preset, MapPre
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
 use mapkeeper_core::lakes::{LakeCatalog, LAKE_CATALOG_FILE};
-use mapkeeper_core::river_flux::generate_with_owners;
+use mapkeeper_core::river_flux::{generate_with_owners, RiverFluxParams};
 use mapkeeper_core::rivers::{
     append_cell, create_river, delete_river, pop_last_cell, sync_river_id_layer, RiverCatalog,
     RIVER_CATALOG_FILE,
 };
 use mapkeeper_core::world;
-use mapkeeper_core::worldgen::hydrology::{analyze_depressions, generate_lakes, LakeDensity};
+use mapkeeper_core::worldgen::hydrology::{analyze_depressions, generate_lakes, LakeDensity, RiverDensity};
 use serde::Deserialize;
 
 #[derive(Parser)]
@@ -253,6 +253,8 @@ enum RiversAction {
     Generate {
         #[arg(long, default_value = ".")]
         world: PathBuf,
+        #[arg(long, default_value = "balanced")]
+        density: String,
     },
 }
 
@@ -339,7 +341,7 @@ fn main() -> Result<()> {
             } => cmd_rivers_append(&world, &cell_id, river_id),
             RiversAction::Pop { world, river_id } => cmd_rivers_pop(&world, river_id),
             RiversAction::Delete { world, river_id } => cmd_rivers_delete(&world, river_id),
-            RiversAction::Generate { world } => cmd_rivers_generate(&world),
+            RiversAction::Generate { world, density } => cmd_rivers_generate(&world, &density),
         },
         Command::Lakes { action } => match action {
             LakesAction::List { world } => cmd_lakes_list(&world),
@@ -888,12 +890,28 @@ fn cmd_rivers_delete(world: &Path, river_id: u32) -> Result<()> {
     Ok(())
 }
 
-fn cmd_rivers_generate(world: &Path) -> Result<()> {
+fn cmd_rivers_generate(world: &Path, density: &str) -> Result<()> {
     let bounds = read_bounds(world);
     let elevation = read_elevation_dense(world, &bounds);
     let precipitation = read_optional_precip_layer(world, &bounds);
-    let (catalog, owners, used_climate) =
-        generate_with_owners(&elevation, &bounds, precipitation.as_ref());
+    let lakes = read_lake_catalog(world);
+    let analysis = analyze_depressions(&elevation, &bounds);
+    let density = RiverDensity::parse(density);
+    let lakes_ref = if lakes.lakes.is_empty() {
+        None
+    } else {
+        Some(&lakes)
+    };
+    let (catalog, owners, used_climate) = generate_with_owners(
+        &elevation,
+        &bounds,
+        precipitation.as_ref(),
+        RiverFluxParams {
+            analysis: Some(&analysis),
+            lakes: lakes_ref,
+            density,
+        },
+    );
     persist_generated_rivers(world, &catalog, &owners, &bounds)?;
     if used_climate {
         eprintln!("river flux: using climate precipitation layer");
