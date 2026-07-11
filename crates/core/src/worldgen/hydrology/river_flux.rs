@@ -121,7 +121,14 @@ pub fn generate_with_owners(
         );
     }
 
-    let catalog = build_catalog(paths, parents, next_id);
+    let catalog = build_catalog(
+        &owner,
+        heights,
+        bounds,
+        &lake_cells,
+        parents,
+        next_id,
+    );
     (catalog, owner, use_climate)
 }
 
@@ -246,17 +253,21 @@ fn scaled_min_flux(cell_count: usize, density: RiverDensity) -> u32 {
 }
 
 fn build_catalog(
-    paths: HashMap<u32, Vec<usize>>,
+    owners: &[u32],
+    heights: &[i32],
+    bounds: &MapBounds,
+    lake_cells: &HashSet<usize>,
     parents: HashMap<u32, u32>,
     next_id: u32,
 ) -> RiverCatalog {
     let mut rivers = Vec::new();
 
-    for (id, mut cells) in paths {
+    for id in 1..next_id {
+        let mut cells = trace_owned_stem(id, owners, heights, bounds);
         if cells.len() < MIN_RIVER_CELLS {
             continue;
         }
-        cells.dedup();
+        extend_mouth_to_sink(&mut cells, heights, bounds, lake_cells);
         if cells.len() < MIN_RIVER_CELLS {
             continue;
         }
@@ -286,6 +297,93 @@ fn build_catalog(
         schema_version: RIVER_CATALOG_SCHEMA_VERSION,
         rivers,
         next_id,
+    }
+}
+
+fn trace_owned_stem(
+    id: u32,
+    owners: &[u32],
+    heights: &[i32],
+    bounds: &MapBounds,
+) -> Vec<usize> {
+    let owned: HashSet<usize> = owners
+        .iter()
+        .enumerate()
+        .filter(|(_, &owner)| owner == id)
+        .map(|(i, _)| i)
+        .collect();
+    if owned.is_empty() {
+        return Vec::new();
+    }
+    let source = owned
+        .iter()
+        .copied()
+        .max_by_key(|&i| heights[i])
+        .unwrap_or(0);
+    let mut chain = vec![source];
+    let mut cur = source;
+    loop {
+        let Some(next) = bounds
+            .from_index(cur)
+            .into_iter()
+            .flat_map(|cell| cell.neighbors())
+            .filter_map(|n| bounds.index_of(n))
+            .filter(|&n| owned.contains(&n) && heights[n] < heights[cur])
+            .min_by_key(|&n| heights[n])
+        else {
+            break;
+        };
+        if chain.contains(&next) {
+            break;
+        }
+        chain.push(next);
+        cur = next;
+    }
+    chain
+}
+
+fn mouth_touches_sea(index: usize, heights: &[i32], bounds: &MapBounds) -> bool {
+    bounds
+        .from_index(index)
+        .into_iter()
+        .flat_map(|cell| cell.neighbors())
+        .filter_map(|n| bounds.index_of(n))
+        .any(|n| heights[n] <= SEA_LEVEL)
+}
+
+fn mouth_touches_lake(index: usize, lake_cells: &HashSet<usize>, bounds: &MapBounds) -> bool {
+    bounds
+        .from_index(index)
+        .into_iter()
+        .flat_map(|cell| cell.neighbors())
+        .filter_map(|n| bounds.index_of(n))
+        .any(|n| lake_cells.contains(&n))
+}
+
+fn extend_mouth_to_sink(
+    cells: &mut Vec<usize>,
+    heights: &[i32],
+    bounds: &MapBounds,
+    lake_cells: &HashSet<usize>,
+) {
+    loop {
+        let Some(&mouth) = cells.last() else {
+            break;
+        };
+        if mouth_touches_sea(mouth, heights, bounds) || mouth_touches_lake(mouth, lake_cells, bounds)
+        {
+            break;
+        }
+        let Some(next) = lowest_routable_neighbor(mouth, heights, bounds, lake_cells) else {
+            break;
+        };
+        if heights[next] >= heights[mouth] || heights[next] <= SEA_LEVEL {
+            break;
+        }
+        if cells.contains(&next) {
+            break;
+        }
+        cells.push(next);
     }
 }
 
@@ -718,6 +816,57 @@ mod tests {
         assert!(
             !catalog.rivers.is_empty(),
             "mountain-ridge should still produce rivers"
+        );
+    }
+
+    #[test]
+    fn small_continents_catalog_traces_owner_stems() {
+        use crate::map_preset::MapPreset;
+        use crate::worldgen::climate::{generate_climate_layers, PrecipitationStyle};
+        use crate::worldgen::elevation::{elevation_from_land_mask_and_geology, ElevationIntensity};
+        use crate::worldgen::geology::{generate_geology, GeologyStyle};
+        use crate::worldgen::land::{generate_land_mask, LayoutClass, ShoreCharacter};
+
+        let seed = 26;
+        let bounds = MapPreset::Small.bounds();
+        let mask = generate_land_mask(&bounds, LayoutClass::Continents, ShoreCharacter::Smooth, seed);
+        let geo = generate_geology(&bounds, &mask, GeologyStyle::Random, seed ^ 0xAB);
+        let elev = elevation_from_land_mask_and_geology(
+            &bounds,
+            &mask,
+            &geo,
+            seed,
+            ElevationIntensity::Standard,
+        );
+        let climate =
+            generate_climate_layers(&bounds, &mask, &elev, PrecipitationStyle::Balanced, seed);
+        let analysis = analyze_depressions(&elev, &bounds);
+        let (catalog, owners, used_climate) = generate_with_owners(
+            &elev,
+            &bounds,
+            Some(&climate.precipitation),
+            RiverFluxParams {
+                analysis: Some(&analysis),
+                lakes: None,
+                density: RiverDensity::Balanced,
+            },
+        );
+        assert!(used_climate);
+        let owned = owners.iter().filter(|&&o| o > 0).count();
+        let path_cells = river_path_cell_count(&catalog);
+        let max_len = catalog
+            .rivers
+            .iter()
+            .map(|r| r.cells.len())
+            .max()
+            .unwrap_or(0);
+        assert!(
+            max_len >= 3,
+            "dogfood seed {seed}: expected stem > 2 cells, max={max_len}"
+        );
+        assert!(
+            path_cells * 2 >= owned,
+            "catalog path cells should cover most owner cells, path={path_cells} owned={owned}"
         );
     }
 }
