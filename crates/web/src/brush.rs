@@ -61,7 +61,7 @@ pub(crate) fn active_dock_tab() -> Option<String> {
     })
 }
 
-/// tool-dock-brush-deselect-v1: leave paint mode тАФ pan / inspect on canvas.
+/// tool-dock-brush-deselect-v1: leave paint mode — pan / inspect on canvas.
 pub(crate) fn deactivate_paint_brush(s: &mut AppState) {
     s.brush = Brush::Inspect;
     s.hover_cell = None;
@@ -167,7 +167,7 @@ pub(crate) fn sync_river_status(state: &AppState) {
     let count = state.rivers.rivers.len();
     set_text(
         "river-status",
-        &format!("{active} ┬╖ {count} river(s) on map"),
+        &format!("{active} · {count} river(s) on map"),
     );
 }
 pub(crate) fn brush_tier_screen_diameter(tier: i32) -> f64 {
@@ -269,10 +269,10 @@ pub(crate) fn sync_falloff_active(falloff_even: bool, brush_radius: i32) {
 pub(crate) fn apply_elevation_brush_intent(s: &mut AppState) {
     s.color_mode = ColorMode::Elevation;
     s.show_elevation_labels = true;
-    // Peaks stay author-controlled тАФ Raise/Lower does not force them on.
+    // Peaks stay author-controlled — Raise/Lower does not force them on.
 }
 
-/// View defaults on world open (D-53) тАФ elevation-first; grid on small maps only.
+/// View defaults on world open (D-53) — elevation-first; grid on small maps only.
 pub(crate) fn reset_view_on_world_open(s: &mut AppState) {
     s.color_mode = ColorMode::Elevation;
     s.show_elevation_labels = true;

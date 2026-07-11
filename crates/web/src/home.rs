@@ -65,7 +65,7 @@ pub(crate) fn render_project_list(projects: &[ProjectStatus], state: &Rc<RefCell
         let missing = if !p.valid {
             "<div class=\"missing\">folder not found</div>"
         } else if p.legacy_map {
-            "<div class=\"missing\">legacy map тАФ no map/manifest.json</div>"
+            "<div class=\"missing\">legacy map — no map/manifest.json</div>"
         } else {
             ""
         };
@@ -85,7 +85,7 @@ pub(crate) fn render_project_list(projects: &[ProjectStatus], state: &Rc<RefCell
         };
         let manage_row = if p.valid {
             format!(
-                "<div class=\"manage-row\"><button class=\"remove-btn\" data-path=\"{path}\" type=\"button\">Remove</button><button class=\"delete-btn\" data-path=\"{path}\" type=\"button\">DeleteтАж</button></div>",
+                "<div class=\"manage-row\"><button class=\"remove-btn\" data-path=\"{path}\" type=\"button\">Remove</button><button class=\"delete-btn\" data-path=\"{path}\" type=\"button\">Delete…</button></div>",
                 path = html_escape(&p.path)
             )
         } else {
@@ -220,7 +220,7 @@ fn sync_first_world_defaults(state: &Rc<RefCell<AppState>>, projects: &[ProjectS
     }
     set_text(
         "first-world-hint",
-        &format!("Start Build World with defaults ({id} in Documents, Small map) тАФ then adjust if needed."),
+        &format!("Start Build World with defaults ({id} in Documents, Small map) — then adjust if needed."),
     );
 }
 
@@ -255,7 +255,7 @@ pub fn attach_create_click(state: Rc<RefCell<AppState>>) {
         }
         let preset = select_value("new-preset");
         let state = state.clone();
-        set_text("home-status", "CreatingтАж");
+        set_text("home-status", "Creating…");
         wasm_bindgen_futures::spawn_local(async move {
             let body = CreateProjectInput {
                 id: &id,
@@ -312,7 +312,7 @@ pub fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
         }
         let preset = select_value("generate-preset");
         let state = state.clone();
-        set_text("generate-status", "CreatingтАж");
+        set_text("generate-status", "Creating…");
         wasm_bindgen_futures::spawn_local(async move {
             let body = CreateProjectInput {
                 id: &id,
@@ -446,7 +446,7 @@ pub fn attach_browse_folder_click(state: Rc<RefCell<AppState>>) {
 
 /// Calls the `window.mapkeeperPickFolder()` bridge defined in `index.html`
 /// (only present inside the Tauri shell) via `js_sys`, so this crate has no
-/// direct Tauri dependency тАФ it stays a plain WASM/web-sys build either way.
+/// direct Tauri dependency — it stays a plain WASM/web-sys build either way.
 async fn pick_folder_via_tauri() -> Option<String> {
     let bridge = js_sys::Reflect::get(&window(), &JsValue::from_str("mapkeeperPickFolder")).ok()?;
     let bridge: js_sys::Function = bridge.dyn_into().ok()?;
@@ -498,7 +498,7 @@ pub fn attach_first_world_handlers(state: Rc<RefCell<AppState>>) {
                 let _ = wrap.class_list().add_1("demoted");
                 set_text(
                     "first-world-hint",
-                    "Start Build World with defaults (Small map in Documents) тАФ then adjust if needed.",
+                    "Start Build World with defaults (Small map in Documents) — then adjust if needed.",
                 );
                 if let Some(btn) = document().get_element_by_id("first-world-advanced") {
                     btn.set_text_content(Some("Advanced options"));
@@ -548,7 +548,7 @@ pub fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                     return;
                 }
                 let state = state.clone();
-                set_text("home-status", "DeletingтАж");
+                set_text("home-status", "Deleting…");
                 wasm_bindgen_futures::spawn_local(async move {
                     let body = DeleteProjectInput { path: &path };
                     let sent = gloo_net::http::Request::post("/api/projects/delete").json(&body);
@@ -581,7 +581,7 @@ pub fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                     return;
                 };
                 let state = state.clone();
-                set_text("home-status", "Removing from launcherтАж");
+                set_text("home-status", "Removing from launcher…");
                 wasm_bindgen_futures::spawn_local(async move {
                     let body = ForgetProjectInput { path: &path };
                     let sent = gloo_net::http::Request::post("/api/projects/forget").json(&body);
@@ -624,7 +624,7 @@ pub fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                 .clamp(1, 4);
 
             let state = state.clone();
-            set_text("home-status", "OpeningтАж");
+            set_text("home-status", "Opening…");
             wasm_bindgen_futures::spawn_local(async move {
                 let body = OpenProjectInput { path: &path };
                 let sent = gloo_net::http::Request::post("/api/projects/open").json(&body);
@@ -661,13 +661,13 @@ pub fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                             match resume_step {
                                 1 => {
                                     set_wizard_status(
-                                        "Resumed at size тАФ confirm scale on the blank grid, then continue.",
+                                        "Resumed at size — confirm scale on the blank grid, then continue.",
                                     );
                                     schedule_redraw(state.clone());
                                 }
                                 3 => {
                                     set_wizard_status(
-                                        "Resumed at tectonics тАФ generate or accept geology.",
+                                        "Resumed at tectonics — generate or accept geology.",
                                     );
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
@@ -676,7 +676,7 @@ pub fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                 }
                                 4 => {
                                     set_wizard_status(
-                                        "Resumed at elevation тАФ generate or continue to climate.",
+                                        "Resumed at elevation — generate or continue to climate.",
                                     );
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
@@ -686,7 +686,7 @@ pub fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                 }
                                 5 => {
                                     set_wizard_status(
-                                        "Resumed at climate тАФ generate or continue to water.",
+                                        "Resumed at climate — generate or continue to water.",
                                     );
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;
@@ -696,7 +696,7 @@ pub fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                 }
                                 6 => {
                                     set_wizard_status(
-                                        "Resumed at water тАФ generate rivers or Finish.",
+                                        "Resumed at water — generate rivers or Finish.",
                                     );
                                     wasm_bindgen_futures::spawn_local(async move {
                                         load_geology(&state).await;

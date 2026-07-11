@@ -35,12 +35,12 @@ use web_sys::{Element, HtmlElement};
 
 pub(crate) fn build_step_label(step: u32) -> &'static str {
     match step {
-        1 => "Step 1 ┬╖ Size & grid",
-        3 => "Step 3 ┬╖ Tectonics",
-        4 => "Step 4 ┬╖ Elevation",
-        5 => "Step 5 ┬╖ Climate",
+        1 => "Step 1 · Size & grid",
+        3 => "Step 3 · Tectonics",
+        4 => "Step 4 · Elevation",
+        5 => "Step 5 · Climate",
         6 => "Step 6 · Water",
-        _ => "Step 2 ┬╖ Land silhouette",
+        _ => "Step 2 · Land silhouette",
     }
 }
 
@@ -125,7 +125,7 @@ async fn apply_wizard_preset_now(state: Rc<RefCell<AppState>>, preset: &str) -> 
     true
 }
 
-/// D-71: navigate back one Geo step (4тЖТ3тЖТ2тЖТ1).
+/// D-71: navigate back one Geo step (4→3→2→1).
 async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
     let from = state.borrow().wizard_step;
     let to = match from {
@@ -156,12 +156,12 @@ async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
     schedule_redraw(state.clone());
     match to {
         1 => set_wizard_status(
-            "Map size тАФ change preset to resize (resets Geo if you already generated land).",
+            "Map size — change preset to resize (resets Geo if you already generated land).",
         ),
-        2 => set_wizard_status("Land silhouette тАФ Back to size if the map is too large/small."),
-        3 => set_wizard_status("Tectonics тАФ Back returns to silhouette."),
-        4 => set_wizard_status("Elevation тАФ Back returns to tectonics."),
-        5 => set_wizard_status("Climate тАФ Back returns to elevation."),
+        2 => set_wizard_status("Land silhouette — Back to size if the map is too large/small."),
+        3 => set_wizard_status("Tectonics — Back returns to silhouette."),
+        4 => set_wizard_status("Elevation — Back returns to tectonics."),
+        5 => set_wizard_status("Climate — Back returns to elevation."),
         _ => {}
     }
 }
@@ -212,12 +212,12 @@ fn set_panel_hidden(id: &str, hidden: bool) {
 fn sync_wizard_nav(step: u32) {
     if let Some(crumb) = document().query_selector(".wiz-crumb").ok().flatten() {
         let text = match step {
-            1 => "Geo тА║ Size & grid",
-            3 => "Geo тА║ Tectonics",
-            4 => "Geo тА║ Elevation",
-            5 => "Climate тА║ Precipitation",
+            1 => "Geo › Size & grid",
+            3 => "Geo › Tectonics",
+            4 => "Geo › Elevation",
+            5 => "Climate › Precipitation",
             6 => "Water › Lakes & rivers",
-            _ => "Geo тА║ Land silhouette",
+            _ => "Geo › Land silhouette",
         };
         crumb.set_text_content(Some(text));
     }
@@ -252,7 +252,7 @@ fn sync_wizard_nav(step: u32) {
             let _ = climate_group.class_list().add_1("expanded");
             if let Ok(Some(head)) = climate_group.query_selector(".wiz-group-head") {
                 let _ = head.remove_attribute("disabled");
-                head.set_text_content(Some("тЦ╝ Climate"));
+                head.set_text_content(Some("▼ Climate"));
             }
             if let Ok(Some(list)) = climate_group.query_selector(".wiz-steps") {
                 if let Ok(items) = list.query_selector_all(".wiz-step") {
@@ -279,7 +279,7 @@ fn sync_wizard_nav(step: u32) {
             let _ = climate_group.class_list().remove_1("expanded");
             if let Ok(Some(head)) = climate_group.query_selector(".wiz-group-head") {
                 let _ = head.set_attribute("disabled", "");
-                head.set_text_content(Some("тЦ╢ Climate"));
+                head.set_text_content(Some("▶ Climate"));
             }
         }
     }
@@ -289,7 +289,7 @@ fn sync_wizard_nav(step: u32) {
             let _ = water_group.class_list().add_1("expanded");
             if let Ok(Some(head)) = water_group.query_selector(".wiz-group-head") {
                 let _ = head.remove_attribute("disabled");
-                head.set_text_content(Some("тЦ╝ Water"));
+                head.set_text_content(Some("▼ Water"));
             }
             if let Ok(Some(list)) = water_group.query_selector(".wiz-steps") {
                 if let Ok(items) = list.query_selector_all(".wiz-step") {
@@ -316,7 +316,7 @@ fn sync_wizard_nav(step: u32) {
             let _ = water_group.class_list().remove_1("expanded");
             if let Ok(Some(head)) = water_group.query_selector(".wiz-group-head") {
                 let _ = head.set_attribute("disabled", "");
-                head.set_text_content(Some("тЦ╢ Water"));
+                head.set_text_content(Some("▶ Water"));
             }
         }
     }
@@ -354,7 +354,7 @@ fn show_wizard_step(state: &AppState) {
 fn sync_wizard_size_meta(state: &AppState) {
     let (w, h) = (state.map_bounds.width, state.map_bounds.height);
     let n = state.map_bounds.len();
-    let line = format!("{w}├Ч{h} hex-rectangle ┬╖ {n} cells");
+    let line = format!("{w}×{h} hex-rectangle · {n} cells");
     set_text("wiz-size-meta", &line);
 }
 
@@ -457,18 +457,18 @@ fn rotate_wizard_recipe(state: &mut AppState) {
 /// D-68: quiet identity line under Regenerate (dogfood chrome).
 fn sync_wizard_gen_identity(state: &AppState) {
     let recipe = if state.wizard_recipe_id.is_empty() {
-        "тАФ"
+        "—"
     } else {
         state.wizard_recipe_id.as_str()
     };
     let seed = state
         .wizard_gen_seed
         .map(|s| format!("0x{s:016x}"))
-        .unwrap_or_else(|| "тАФ".to_string());
+        .unwrap_or_else(|| "—".to_string());
     set_text(
         "wiz-gen-identity",
         &format!(
-            "class: {} ┬╖ recipe: {} ┬╖ shore: {} ┬╖ nonce: {} ┬╖ seed: {}",
+            "class: {} · recipe: {} · shore: {} · nonce: {} · seed: {}",
             state.wizard_layout_class,
             recipe,
             state.wizard_character,
@@ -544,7 +544,7 @@ pub(crate) fn sync_wizard_actions(state: &AppState) {
 
 async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
     set_wizard_generating(true);
-    set_wizard_status("Generating silhouetteтАж (can take a moment on large maps)");
+    set_wizard_status("Generating silhouette… (can take a moment on large maps)");
     let (recipe_id, character, layout_class, nonce) = {
         let mut s = state.borrow_mut();
         clear_wizard_stamp_pending(&mut s);
@@ -667,7 +667,7 @@ async fn generate_wizard_geology(state: Rc<RefCell<AppState>>) {
         sync_wizard_actions(&s);
     }
     schedule_redraw(state.clone());
-    set_wizard_status("Geology generated тАФ classes shown on the map (see legend).");
+    set_wizard_status("Geology generated — classes shown on the map (see legend).");
 }
 
 async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
@@ -728,10 +728,10 @@ async fn generate_wizard_climate(state: Rc<RefCell<AppState>>) {
         return;
     }
     schedule_redraw(state.clone());
-    set_wizard_status("Climate generated тАФ temperature and precipitation layers saved.");
+    set_wizard_status("Climate generated — temperature and precipitation layers saved.");
 }
 
-/// Merge stamp cells into pending wizard edits (no I/O тАФ optimistic path guard).
+/// Merge stamp cells into pending wizard edits (no I/O — optimistic path guard).
 pub(crate) fn merge_wizard_stamp_pending(
     pending: &mut HashMap<(i32, i32), bool>,
     cells: &[(i32, i32)],
@@ -750,7 +750,7 @@ fn clear_wizard_stamp_pending(s: &mut AppState) {
 }
 
 /// Optimistic local stamp; persist only on mouseup / leave-edit (no mid-drag HTTP).
-/// One stamp per new center cell (`paint_last_cell` already dedupes) тАФ do not
+/// One stamp per new center cell (`paint_last_cell` already dedupes) — do not
 /// skip centers by brush radius (that broke M/L/XL short strokes).
 pub(crate) fn queue_wizard_land_mask_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32)) {
     let painted = {
@@ -777,10 +777,10 @@ pub(crate) fn queue_wizard_land_mask_stamp(state: Rc<RefCell<AppState>>, center:
         return;
     }
     schedule_redraw(state.clone());
-    // Status once тАФ avoid DOM thrash every mousemove.
+    // Status once — avoid DOM thrash every mousemove.
     let pending_n = state.borrow().pending_wizard_stamps.len();
     if pending_n == painted {
-        set_wizard_status("Edit pending тАФ release mouse to save.");
+        set_wizard_status("Edit pending — release mouse to save.");
     }
 }
 
@@ -836,7 +836,7 @@ async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
         return;
     };
 
-    set_wizard_status("Saving editтАж");
+    set_wizard_status("Saving edit…");
     let mut failed: Vec<((i32, i32), bool)> = Vec::new();
     for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
         let kinds: Vec<&'static str> = chunk
@@ -872,7 +872,7 @@ async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
     if state.borrow().pending_wizard_stamps.is_empty() {
         set_wizard_status("Edit saved.");
     } else {
-        set_wizard_status("Edit save failed тАФ retryingтАж");
+        set_wizard_status("Edit save failed — retrying…");
         schedule_wizard_stamp_flush(state);
     }
 }
@@ -935,11 +935,11 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         on_cancel.forget();
     }
 
-    // Save Draft тАФ flush pending paints; world already on disk from create.
+    // Save Draft — flush pending paints; world already on disk from create.
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
-            set_wizard_status("SavingтАж");
+            set_wizard_status("Saving…");
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 flush_pending_paints(state.clone()).await;
@@ -958,7 +958,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // тЖР Worlds тАФ close wizard and return Home (same as tool-dock switch-world).
+    // ← Worlds — close wizard and return Home (same as tool-dock switch-world).
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
@@ -974,7 +974,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // wizard-merge-size-grid (D-71): size+blank grid тЖТ silhouette.
+    // wizard-merge-size-grid (D-71): size+blank grid → silhouette.
     {
         let state = state.clone();
         let pending = pending_confirm.clone();
@@ -1077,7 +1077,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Layout class cards (D-65): pick class тЖТ recipe for that class тЖТ generate.
+    // Layout class cards (D-65): pick class → recipe for that class → generate.
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
@@ -1100,7 +1100,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 s.wizard_edit_mode = false;
                 sync_wizard_actions(&s);
             }
-            set_wizard_status("Generating selected classтАж");
+            set_wizard_status("Generating selected class…");
             wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-layout-classes") {
@@ -1122,7 +1122,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 s.wizard_edit_mode = false;
                 sync_wizard_actions(&s);
             }
-            set_wizard_status("New shape for selected classтАж");
+            set_wizard_status("New shape for selected class…");
             wasm_bindgen_futures::spawn_local(generate_wizard_land_mask(state.clone()));
         });
         document()
@@ -1173,7 +1173,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
             if edit_now {
                 set_wizard_status(
-                    "Edit mode: paint land/ocean тАФ SтАУXL follows zoom (zoom out = larger stamp).",
+                    "Edit mode: paint land/ocean — S–XL follows zoom (zoom out = larger stamp).",
                 );
             } else {
                 set_wizard_status("Edit mode off.");
@@ -1214,7 +1214,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Brush size 1xтАУ4x (D-43) for wizard land edit on large maps.
+    // Brush size 1x–4x (D-43) for wizard land edit on large maps.
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
@@ -1235,7 +1235,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             };
             let mut s = state.borrow_mut();
             s.wizard_brush_radius = radius.clamp(MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS);
-            // Panel sits over the map: keep last hover тЖТ huge preview redraw freeze.
+            // Panel sits over the map: keep last hover → huge preview redraw freeze.
             s.hover_cell = None;
             sync_wizard_actions(&s);
             // No map redraw required to flip S/M/L/XL active state.
@@ -1247,7 +1247,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         closure.forget();
     }
 
-    // Continue: step 2 тЖТ draft step 3 (tectonics).
+    // Continue: step 2 → draft step 3 (tectonics).
     for id in ["wiz-continue"] {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
@@ -1270,7 +1270,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                     s.wizard_geo_nonce = 0;
                     sync_wizard_actions(&s);
                 }
-                set_wizard_status("Step 3 ┬╖ Tectonics тАФ generate geology.");
+                set_wizard_status("Step 3 · Tectonics — generate geology.");
                 wasm_bindgen_futures::spawn_local(generate_wizard_geology(state.clone()));
             });
         });
@@ -1295,7 +1295,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             if let Some(style) = el.get_attribute("data-wiz-geo-style") {
                 wiz_toggle_style_group("wiz-geo-styles", "data-wiz-geo-style", &el);
                 state.borrow_mut().wizard_geo_style = style;
-                set_wizard_status("Geology style updated тАФ Generate to apply.");
+                set_wizard_status("Geology style updated — Generate to apply.");
             }
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-geo-styles") {
@@ -1313,7 +1313,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 s.wizard_geo_accepted = false;
                 sync_wizard_actions(&s);
             }
-            set_wizard_status("Generating geologyтАж");
+            set_wizard_status("Generating geology…");
             wasm_bindgen_futures::spawn_local(generate_wizard_geology(state.clone()));
         });
         if let Some(btn) = document().get_element_by_id("wiz-geo-generate") {
@@ -1377,7 +1377,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             if let Some(style) = el.get_attribute("data-wiz-elev-style") {
                 wiz_toggle_style_group("wiz-elev-styles", "data-wiz-elev-style", &el);
                 state.borrow_mut().wizard_elev_style = style;
-                set_wizard_status("Relief style updated тАФ Generate to apply.");
+                set_wizard_status("Relief style updated — Generate to apply.");
             }
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-elev-styles") {
@@ -1393,7 +1393,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 let mut s = state.borrow_mut();
                 s.wizard_elev_nonce = s.wizard_elev_nonce.saturating_add(1);
             }
-            set_wizard_status("Generating elevationтАж");
+            set_wizard_status("Generating elevation…");
             wasm_bindgen_futures::spawn_local(generate_wizard_elevation(state.clone()));
         });
         if let Some(btn) = document().get_element_by_id("wiz-elev-generate") {
@@ -1436,7 +1436,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             if let Some(style) = el.get_attribute("data-wiz-climate-style") {
                 wiz_toggle_style_group("wiz-climate-styles", "data-wiz-climate-style", &el);
                 state.borrow_mut().wizard_climate_style = style;
-                set_wizard_status("Precipitation style updated тАФ Generate to apply.");
+                set_wizard_status("Precipitation style updated — Generate to apply.");
             }
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-climate-styles") {
@@ -1452,7 +1452,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 let mut s = state.borrow_mut();
                 s.wizard_climate_nonce = s.wizard_climate_nonce.saturating_add(1);
             }
-            set_wizard_status("Generating climateтАж");
+            set_wizard_status("Generating climate…");
             wasm_bindgen_futures::spawn_local(generate_wizard_climate(state.clone()));
         });
         if let Some(btn) = document().get_element_by_id("wiz-climate-generate") {
@@ -1598,10 +1598,10 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             let expanded = group.class_list().contains("expanded");
             if expanded {
                 let _ = group.class_list().remove_1("expanded");
-                head.set_text_content(Some("тЦ╢ Geo"));
+                head.set_text_content(Some("▶ Geo"));
             } else {
                 let _ = group.class_list().add_1("expanded");
-                head.set_text_content(Some("тЦ╝ Geo"));
+                head.set_text_content(Some("▼ Geo"));
             }
         });
         if let Ok(Some(left)) = document().query_selector(".wiz-left") {
@@ -1660,7 +1660,7 @@ pub(crate) async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.geology = None;
     set_drawer_open(false);
     clear_inspect_panel();
-    set_world_label("тАФ");
+    set_world_label("—");
     set_text("legacy-map-note", "");
     sync_wizard_actions(&state_mut);
     drop(state_mut);

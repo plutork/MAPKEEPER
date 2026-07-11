@@ -55,7 +55,7 @@ fn toggle_dock_tab(tab: &str) {
     }
     open_dock_tab(tab);
 }
-/// Cell-id label shown to the author тАФ placeholder UI, real schema is 3.2.
+/// Cell-id label shown to the author — placeholder UI, real schema is 3.2.
 fn cell_label(q: i32, r: i32) -> String {
     format!("hex q{q} r{r}")
 }
@@ -106,7 +106,7 @@ fn queue_paint_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), new_eleva
     };
     schedule_redraw(state.clone());
     if !painted_cells.is_empty() {
-        set_text("status", "Autosave pendingтАж");
+        set_text("status", "Autosave pending…");
         schedule_paint_flush(state);
     }
 }
@@ -142,7 +142,7 @@ fn queue_paint_delta_stamp(state: Rc<RefCell<AppState>>, center: (i32, i32), ste
     };
     schedule_redraw(state.clone());
     if painted_cells > 0 {
-        set_text("status", "Autosave pendingтАж");
+        set_text("status", "Autosave pending…");
         schedule_paint_flush(state);
     }
 }
@@ -192,12 +192,12 @@ pub fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
             set_text("panel-cell", &cell_label(q, r));
             input("title").set_value("");
             textarea("notes").set_value("");
-            // Disabled while loading тАФ otherwise a fast typist can fill the
+            // Disabled while loading — otherwise a fast typist can fill the
             // fields before the fetch below resolves, and the (still pending)
             // response then silently overwrites what they just typed.
             input("title").set_disabled(true);
             textarea("notes").set_disabled(true);
-            set_text("status", "LoadingтАж");
+            set_text("status", "Loading…");
 
             wasm_bindgen_futures::spawn_local(load_profile_into_panel(state.clone(), q, r));
         });
@@ -542,7 +542,7 @@ pub fn attach_save_click(state: Rc<RefCell<AppState>>) {
             return;
         }
         let state = state.clone();
-        set_text("status", "SavingтАж");
+        set_text("status", "Saving…");
         wasm_bindgen_futures::spawn_local(async move {
             let body = ProfileInput {
                 display_name: display_name.clone(),

@@ -196,7 +196,7 @@ mod wizard_stamp_pending_tests {
     #[test]
     fn brush_tiers_stay_distinct_when_zoomed_in() {
         use crate::brush::effective_brush_radius_from_hex_size;
-        // Large hex px тЖТ zoom-derived radius floors to 0; tier floor keeps S<M<L<XL.
+        // Large hex px → zoom-derived radius floors to 0; tier floor keeps S<M<L<XL.
         let hex_px = 80.0;
         let s = effective_brush_radius_from_hex_size(0, hex_px);
         let m = effective_brush_radius_from_hex_size(1, hex_px);
@@ -208,7 +208,7 @@ mod wizard_stamp_pending_tests {
     #[test]
     fn zoom_max_grows_when_base_hex_is_small() {
         use crate::canvas::max_zoom_for_base_hex;
-        // World-like tiny base тЖТ high max; Small-like large base тЖТ max тЙИ 1.
+        // World-like tiny base → high max; Small-like large base → max ≈ 1.
         assert!(max_zoom_for_base_hex(5.0) > 5.0);
         assert_eq!(max_zoom_for_base_hex(40.0), 1.0);
         assert_eq!(max_zoom_for_base_hex(80.0), 1.0);

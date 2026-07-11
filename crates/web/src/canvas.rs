@@ -406,7 +406,7 @@ pub(crate) fn redraw(state: &AppState) -> usize {
                 draw_elevation_label(&ctx, cx, cy, size, elevation, label_below);
             }
 
-            // Profile-presence marker тАФ a separate layer from terrain, so both
+            // Profile-presence marker — a separate layer from terrain, so both
             // are visible at once (a cell can have terrain, a profile, or both).
             if draw_profile_dots && state.cells.contains_key(&(q, r)) {
                 ctx.begin_path();
@@ -422,12 +422,12 @@ pub(crate) fn redraw(state: &AppState) -> usize {
         .hover_cell
         .map(|(q, r)| elevation_at(&state.elevation, bounds, q, r));
     let hover_note = hover_elev
-        .map(|e| format!(" ┬╖ Hover elev {e}"))
+        .map(|e| format!(" · Hover elev {e}"))
         .unwrap_or_default();
     set_text(
         "view-stats",
         &format!(
-            "Zoom {:.2}x ┬╖ Draw {} / {} cells ┬╖ Grid {} ┬╖ {} ┬╖ {}{}",
+            "Zoom {:.2}x · Draw {} / {} cells · Grid {} · {} · {}{}",
             state.zoom,
             drawn_cells,
             bounds.len(),
