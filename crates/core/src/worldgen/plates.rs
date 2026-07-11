@@ -50,8 +50,8 @@ pub fn build_hidden_plates(bounds: &MapBounds, seed: u64) -> HiddenPlates {
 pub fn generate_plate_velocities(seed: u64, n_plates: usize) -> Vec<(f64, f64)> {
     (0..n_plates)
         .map(|p| {
-            let vx = hash01(seed ^ 0xA11C_E, p as i32, 0) * 2.0 - 1.0;
-            let vy = hash01(seed ^ 0xA11C_E, p as i32, 1) * 2.0 - 1.0;
+            let vx = hash01(seed ^ 0x000A_11CE, p as i32, 0) * 2.0 - 1.0;
+            let vy = hash01(seed ^ 0x000A_11CE, p as i32, 1) * 2.0 - 1.0;
             (vx, vy)
         })
         .collect()
@@ -135,9 +135,9 @@ pub fn assign_plate_ids(bounds: &MapBounds, seeds: &[usize]) -> Vec<u16> {
         }
     }
 
-    for i in 0..len {
-        if plate_ids[i] == u16::MAX {
-            plate_ids[i] = 0;
+    for pid in plate_ids.iter_mut().take(len) {
+        if *pid == u16::MAX {
+            *pid = 0;
         }
     }
     plate_ids
@@ -196,9 +196,9 @@ pub fn build_boundary_distances(bounds: &MapBounds, plates: &HiddenPlates) -> Ve
     let mut dist = vec![u8::MAX; len];
     let mut queue = std::collections::VecDeque::new();
 
-    for index in 0..len {
+    for (index, d) in dist.iter_mut().enumerate().take(len) {
         if is_cross_plate_cell(bounds, plates, index) {
-            dist[index] = 0;
+            *d = 0;
             queue.push_back(index);
         }
     }

@@ -367,19 +367,16 @@ fn trace_owned_stem(
         .unwrap_or(0);
     let mut chain = vec![source];
     let mut cur = source;
-    loop {
-        let Some(next) = bounds
-            .from_index(cur)
-            .into_iter()
-            .flat_map(|cell| cell.neighbors())
-            .filter_map(|n| bounds.index_of(n))
-            .filter(|&n| {
-                owned.contains(&n) && heights[n] < heights[cur] && heights[n] > SEA_LEVEL
-            })
-            .min_by_key(|&n| heights[n])
-        else {
-            break;
-        };
+    while let Some(next) = bounds
+        .from_index(cur)
+        .into_iter()
+        .flat_map(|cell| cell.neighbors())
+        .filter_map(|n| bounds.index_of(n))
+        .filter(|&n| {
+            owned.contains(&n) && heights[n] < heights[cur] && heights[n] > SEA_LEVEL
+        })
+        .min_by_key(|&n| heights[n])
+    {
         if chain.contains(&next) {
             break;
         }
@@ -672,7 +669,7 @@ fn finalize_traced_catalog(
     for update in &mut updates {
         trim_ocean_tail(&mut update.cells, heights);
         let id = catalog.rivers[update.idx].id;
-        while update.cells.len() > 1 {
+        if update.cells.len() > 1 {
             let mouth = *update.cells.last().unwrap();
             if cell_to_river
                 .get(&mouth)
@@ -687,9 +684,7 @@ fn finalize_traced_catalog(
                 } else {
                     update.outcome = TraceOutcome::Stuck;
                 }
-                break;
             }
-            break;
         }
         if update.cells.len() < MIN_RIVER_CELLS && !matches!(update.outcome, TraceOutcome::Parent { .. }) {
             update.outcome = TraceOutcome::Stuck;

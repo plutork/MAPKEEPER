@@ -138,8 +138,8 @@ fn compute_catchment_supply(
     let heights = &analysis.conditioned_heights;
     let mut supply: HashMap<u32, u64> = HashMap::new();
 
-    for i in 0..n {
-        if heights[i] <= SEA_LEVEL {
+    for (i, &h) in heights.iter().enumerate().take(n) {
+        if h <= SEA_LEVEL {
             continue;
         }
         let Some(bid) = depression_target(i, analysis, bounds) else {
@@ -165,9 +165,7 @@ fn depression_target(i: usize, analysis: &DepressionAnalysis, bounds: &MapBounds
         if analysis.fill_depth[cur] > 0 && analysis.basin_id[cur] > 0 {
             return Some(analysis.basin_id[cur]);
         }
-        let Some(next) = lowest_neighbor(cur, heights, bounds) else {
-            return None;
-        };
+        let next = lowest_neighbor(cur, heights, bounds)?;
         if next == cur || heights[next] >= heights[cur] {
             if analysis.fill_depth[cur] > 0 && analysis.basin_id[cur] > 0 {
                 return Some(analysis.basin_id[cur]);

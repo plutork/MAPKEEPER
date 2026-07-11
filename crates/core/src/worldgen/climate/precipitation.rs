@@ -77,7 +77,7 @@ pub(crate) fn land_precipitation(
         }
     };
 
-    let jitter = (hash01(seed ^ 0xC1AA_7E, cell.q, cell.r) - 0.5) * 14.0;
+    let jitter = (hash01(seed ^ 0x00C1_AA7E, cell.q, cell.r) - 0.5) * 14.0;
     value += jitter;
     value.round().clamp(1.0, 220.0) as i32
 }

@@ -745,8 +745,8 @@ pub fn generate_land_mask_recipe(
 
     let threshold = threshold_for_fraction(&heights, recipe.land_fraction);
     let mut layer = DenseLayer::new_categorical(LAND_MASK_LAYER_ID, n);
-    for index in 0..n {
-        let value = if heights[index] > threshold {
+    for (index, &h) in heights.iter().enumerate().take(n) {
+        let value = if h > threshold {
             LAND_MASK_LAND
         } else {
             LAND_MASK_OCEAN
@@ -851,6 +851,7 @@ fn nearest_index(bounds: &MapBounds, nx: f64, ny: f64, max_x: f64, max_y: f64) -
 
 /// Azgaar-style blob growth: parent height × decay × sharpness RNG; max-blend layers.
 /// Neighbor order is shuffled each step so hex axes do not form persistent strips (D-66).
+#[allow(clippy::too_many_arguments)]
 fn grow_blob(
     bounds: &MapBounds,
     heights: &mut [f64],
@@ -1629,9 +1630,9 @@ fn grow_organic_mass(
     }
 
     // Ban cells that touch the avoided mass (keep a channel).
-    for index in 0..n {
+    for (index, h) in heights.iter_mut().enumerate().take(n) {
         if avoid_set.contains(&index) {
-            heights[index] = 0.0;
+            *h = 0.0;
             continue;
         }
         let Some(cell) = bounds.from_index(index) else {
@@ -1643,15 +1644,15 @@ fn grow_organic_mass(
                 .is_some_and(|ni| avoid_set.contains(&ni))
         });
         if touches_avoid {
-            heights[index] = 0.0;
+            *h = 0.0;
         }
     }
 
     // Soft elliptical falloff + wobble — avoids flat circular / chord edges.
     // Radius scales with target so Large Continents can actually fill budget.
     let soft_r = ((target as f64 / std::f64::consts::PI).sqrt() * 3.2).max(8.0);
-    for index in 0..n {
-        if heights[index] <= 0.0 {
+    for (index, h) in heights.iter_mut().enumerate().take(n) {
+        if *h <= 0.0 {
             continue;
         }
         let Some(cell) = bounds.from_index(index) else {
@@ -1667,7 +1668,7 @@ fn grow_organic_mass(
         let r = soft_r * wobble;
         if d > r {
             let t = ((d - r) / (r * 0.8)).clamp(0.0, 1.0);
-            heights[index] *= 1.0 - t;
+            *h *= 1.0 - t;
         }
     }
 
@@ -1797,14 +1798,14 @@ fn is_land_cell(layer: &DenseLayer, index: usize) -> bool {
 fn mark_inland_seas(bounds: &MapBounds, layer: &mut DenseLayer) {
     let mut seen = vec![false; bounds.len()];
     let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
-    for index in 0..bounds.len() {
+    for (index, seen_cell) in seen.iter_mut().enumerate().take(bounds.len()) {
         let Some(cell) = bounds.from_index(index) else {
             continue;
         };
         if !is_boundary_cell(bounds, cell) || !is_non_land(layer, index) {
             continue;
         }
-        seen[index] = true;
+        *seen_cell = true;
         queue.push_back(index);
     }
     while let Some(index) = queue.pop_front() {

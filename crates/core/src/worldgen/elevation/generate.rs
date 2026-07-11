@@ -28,7 +28,7 @@ pub fn elevation_from_land_mask_and_geology(
     let len = bounds.len();
     let mut heights = vec![0i32; len];
 
-    for index in 0..len {
+    for (index, h) in heights.iter_mut().enumerate().take(len) {
         if !is_land_cell(land_mask, index) {
             continue;
         }
@@ -40,7 +40,7 @@ pub fn elevation_from_land_mask_and_geology(
             ElevationIntensity::Chaos => chaos_cell_height(kind, cell.q, cell.r, seed),
             _ => deterministic_cell_jitter(kind, cell.q, cell.r, seed, intensity),
         };
-        heights[index] = match intensity {
+        *h = match intensity {
             ElevationIntensity::Chaos => clamp_land(z),
             _ => clamp_to_band(z, kind, intensity),
         };
@@ -49,14 +49,14 @@ pub fn elevation_from_land_mask_and_geology(
     smooth_elevation_once(bounds, land_mask, geology, &mut heights, intensity);
 
     let mut elevation = DenseLayer::new_integer("elevation", len);
-    for index in 0..len {
+    for (index, &h) in heights.iter().enumerate().take(len) {
         let land = is_land_cell(land_mask, index);
         let kind = if land {
             geology_kind_at(geology, index)
         } else {
             GEOLOGY_NONE
         };
-        let z = clamp_elevation_by_geology(heights[index], kind, land, intensity);
+        let z = clamp_elevation_by_geology(h, kind, land, intensity);
         elevation.set(index, DenseState::Value(LayerValue::Int(z)));
     }
     elevation

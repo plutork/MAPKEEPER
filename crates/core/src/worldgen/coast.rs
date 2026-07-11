@@ -12,9 +12,9 @@ pub fn coast_distance_land_steps(bounds: &MapBounds, land_mask: &DenseLayer) -> 
     let mut dist = vec![u32::MAX; n];
     let mut queue = VecDeque::new();
 
-    for index in 0..n {
+    for (index, d) in dist.iter_mut().enumerate().take(n) {
         if !is_land_cell(land_mask, index) {
-            dist[index] = 0;
+            *d = 0;
             queue.push_back(index);
         }
     }

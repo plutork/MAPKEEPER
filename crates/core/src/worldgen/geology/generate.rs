@@ -23,7 +23,7 @@ pub fn generate_geology(
     let boundary_dist = build_boundary_distances(bounds, &plates);
     let mut layer = DenseLayer::new_categorical(GEOLOGY_LAYER_ID, bounds.len());
     let (max_x, max_y) = half_extent(bounds);
-    for index in 0..bounds.len() {
+    for (index, _) in boundary_dist.iter().enumerate().take(bounds.len()) {
         let Some(cell) = bounds.from_index(index) else {
             continue;
         };

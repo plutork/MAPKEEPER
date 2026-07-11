@@ -31,10 +31,9 @@ pub fn generate_climate_layers(
 
     let height = bounds.height.max(1) as f64;
 
-    for index in 0..n {
+    for (index, &coast) in coast_dist.iter().enumerate().take(n) {
         let land = is_land(land_mask, index);
         let elev = elevation.int_or(index, 0);
-        let coast = coast_dist[index];
 
         if !land || elev <= SEA_LEVEL {
             temperature.set(index, DenseState::Value(LayerValue::Int(12)));

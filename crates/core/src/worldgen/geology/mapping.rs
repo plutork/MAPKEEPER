@@ -39,6 +39,7 @@ pub(crate) fn half_extent(bounds: &MapBounds) -> (f64, f64) {
 }
 
 /// Map hidden plate boundary signal + author style → geology category.
+#[allow(clippy::too_many_arguments)]
 pub fn map_hidden_tectonics_to_geology_style(
     style: GeologyStyle,
     boundary: BoundaryKind,
@@ -113,8 +114,8 @@ fn should_place_orogenic(
     if boundary == BoundaryKind::Interior || boundary_dist > 3 {
         return false;
     }
-    let roll = hash01(seed ^ 0x0A0E_6E, cell.q, cell.r);
-    let gap = hash01(seed ^ 0x6A70_5, cell.q, cell.r);
+    let roll = hash01(seed ^ 0x000A_0E6E, cell.q, cell.r);
+    let gap = hash01(seed ^ 0x0006_A705, cell.q, cell.r);
     if boundary_dist == 0 && gap < 0.26 {
         return false;
     }
@@ -126,7 +127,7 @@ fn should_place_orogenic(
         3 => 0.05,
         _ => 0.0,
     };
-    if boundary_dist <= 1 && hash01(seed ^ 0x8B1D_E6, cell.q, cell.r) > 0.86 {
+    if boundary_dist <= 1 && hash01(seed ^ 0x008B_1DE6, cell.q, cell.r) > 0.86 {
         chance = chance.max(0.82);
     }
     chance *= match style {
@@ -145,7 +146,7 @@ fn orogenic_class_for_boundary(
     seed: u64,
     cell: Axial,
 ) -> &'static str {
-    let pick = hash01(seed ^ 0xA4D_0, cell.q, cell.r);
+    let pick = hash01(seed ^ 0x0000_0A4D, cell.q, cell.r);
     match boundary {
         BoundaryKind::Divergent => {
             if pick > 0.42 {

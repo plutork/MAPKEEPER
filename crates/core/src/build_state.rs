@@ -67,7 +67,7 @@ pub fn write_build_draft(world_path: &Path, step: u32) -> Result<(), String> {
     let mut doc: MapkeeperToml = toml::from_str(&raw).map_err(|e| e.to_string())?;
     doc.build = Some(BuildSection {
         status: "draft".into(),
-        step: step.max(1).min(BUILD_STEP_WATER),
+        step: step.clamp(1, BUILD_STEP_WATER),
         scheme: Some(BUILD_STEP_SCHEME_V71),
     });
     let out = toml::to_string_pretty(&doc).map_err(|e| e.to_string())?;
