@@ -327,8 +327,8 @@ Symbols include public modules/types/functions and impl blocks.
 - L35: `fn` `id`
 
 ### `crates/core/src/worldgen/hydrology/depression_fill.rs`
-- L12: `fn` `analyze_depressions`
-- L78: `fn` `lowest_neighbor`
+- L16: `fn` `analyze_depressions`
+- L109: `fn` `provisional_drainage`
 
 ### `crates/core/src/worldgen/hydrology/diagnostics.rs`
 - L17: `enum` `LegacyTerminalReason`
@@ -337,9 +337,9 @@ Symbols include public modules/types/functions and impl blocks.
 - L48: `fn` `diagnose_legacy_hydrology`
 
 ### `crates/core/src/worldgen/hydrology/lakes.rs`
-- L16: `fn` `generate_lakes`
-- L244: `fn` `lake_outflow_supply`
-- L267: `fn` `lake_acceptance_stats`
+- L14: `fn` `generate_lakes`
+- L214: `fn` `lake_outflow_supply`
+- L236: `fn` `lake_acceptance_stats`
 
 ### `crates/core/src/worldgen/hydrology/mod.rs`
 - L3: `module` `depression_fill`
@@ -390,6 +390,7 @@ Symbols include public modules/types/functions and impl blocks.
 - L41: `fn` `parse`
 - L49: `fn` `id`
 - L61: `struct` `DepressionAnalysis`
+- L84: `struct` `ProvisionalDrainage`
 
 ### `crates/core/src/worldgen/land.rs`
 - L9: `const` `LAND_MASK_LAYER_ID`

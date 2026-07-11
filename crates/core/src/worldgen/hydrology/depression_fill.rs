@@ -1,39 +1,53 @@
-//! DEM depression analysis — conditioned routing surface + basin metadata (H0).
+//! DEM depression analysis — Priority-Flood surface + provisional routing.
 
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 
+use crate::climate::PRECIPITATION_LAYER_ID;
 use crate::hex::MapBounds;
 use crate::hydro::{DEFAULT_LAND_ELEVATION, SEA_LEVEL};
 use crate::layer::DenseLayer;
 
-use super::types::DepressionAnalysis;
+use super::types::{DepressionAnalysis, ProvisionalDrainage};
+
+const FALLBACK_LAND_RUNOFF: u64 = 90;
 
 /// Build routing surface and geometric basin/spill metadata from elevation.
 pub fn analyze_depressions(elevation: &DenseLayer, bounds: &MapBounds) -> DepressionAnalysis {
     let n = bounds.len();
-    let mut conditioned = read_heights(elevation, n);
-    condition_depressions(&mut conditioned, bounds);
+    let original_heights = read_heights(elevation, n);
+    let (conditioned_heights, flood_rank, provisional_receiver) =
+        priority_flood(&original_heights, bounds);
 
     let fill_depth: Vec<i32> = (0..n)
         .map(|i| {
-            if conditioned[i] <= SEA_LEVEL {
+            if conditioned_heights[i] <= SEA_LEVEL {
                 0
             } else {
-                let orig = elevation.int_or(i, DEFAULT_LAND_ELEVATION);
-                (conditioned[i] - orig).max(0)
+                (conditioned_heights[i] - original_heights[i]).max(0)
             }
         })
         .collect();
 
     let (basin_id, spill_cell, spill_elevation) =
-        label_depression_basins(&conditioned, &fill_depth, bounds);
+        label_depression_basins(&conditioned_heights, &fill_depth, bounds);
+    let basin_parent = basin_hierarchy(
+        &basin_id,
+        &spill_cell,
+        &provisional_receiver,
+        &conditioned_heights,
+    );
 
     DepressionAnalysis {
-        conditioned_heights: conditioned,
+        original_heights,
+        conditioned_heights,
+        flood_rank,
+        provisional_receiver,
         fill_depth,
         basin_id,
         spill_cell,
         spill_elevation,
+        basin_parent,
     }
 }
 
@@ -43,42 +57,109 @@ fn read_heights(elevation: &DenseLayer, n: usize) -> Vec<i32> {
         .collect()
 }
 
-/// Raise sinks so each land cell can drain to a lower or equal neighbor.
-fn condition_depressions(heights: &mut [i32], bounds: &MapBounds) {
-    let land: Vec<usize> = (0..heights.len())
-        .filter(|&i| heights[i] > SEA_LEVEL)
-        .collect();
-    let max_iters = heights.len().max(1);
-    for _ in 0..max_iters {
-        let mut changed = false;
-        let mut sorted = land.clone();
-        sorted.sort_by_key(|&i| heights[i]);
-        for &i in &sorted {
-            let Some(min_n) = lowest_neighbor_elevation(i, heights, bounds) else {
-                continue;
-            };
-            if heights[i] > SEA_LEVEL && min_n > heights[i] {
-                heights[i] = min_n;
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
+/// Priority-Flood conditioned surface plus a strict, terrain-only receiver order.
+fn priority_flood(
+    original: &[i32],
+    bounds: &MapBounds,
+) -> (Vec<i32>, Vec<u32>, Vec<Option<usize>>) {
+    let n = original.len();
+    let mut conditioned = original.to_vec();
+    let mut rank = vec![u32::MAX; n];
+    let mut receiver = vec![None; n];
+    let mut visited = vec![false; n];
+    let mut queue = BinaryHeap::new();
+    let mut next_rank = 0u32;
+
+    for index in 0..n {
+        if original[index] <= SEA_LEVEL {
+            visited[index] = true;
+            queue.push(Reverse((original[index], index)));
         }
     }
+
+    loop {
+        while let Some(Reverse((height, index))) = queue.pop() {
+            rank[index] = next_rank;
+            next_rank = next_rank.saturating_add(1);
+            for neighbor in neighbor_indices(index, bounds) {
+                if visited[neighbor] || original[neighbor] <= SEA_LEVEL {
+                    continue;
+                }
+                visited[neighbor] = true;
+                conditioned[neighbor] = original[neighbor].max(height);
+                receiver[neighbor] = Some(index);
+                queue.push(Reverse((conditioned[neighbor], neighbor)));
+            }
+        }
+
+        let Some(seed) = (0..n)
+            .filter(|&index| !visited[index] && original[index] > SEA_LEVEL)
+            .min_by_key(|&index| (original[index], index))
+        else {
+            break;
+        };
+        visited[seed] = true;
+        queue.push(Reverse((original[seed], seed)));
+    }
+
+    (conditioned, rank, receiver)
 }
 
-fn lowest_neighbor_elevation(index: usize, heights: &[i32], bounds: &MapBounds) -> Option<i32> {
-    neighbor_indices(index, bounds)
-        .into_iter()
-        .map(|n| heights[n])
-        .min()
-}
+/// Build the ephemeral terrain-only receiver graph and runoff accumulation.
+pub fn provisional_drainage(
+    analysis: &DepressionAnalysis,
+    precipitation: Option<&DenseLayer>,
+    bounds: &MapBounds,
+    use_climate: bool,
+) -> ProvisionalDrainage {
+    let n = bounds.len();
+    let mut accumulated_runoff = vec![0u64; n];
+    for index in 0..n {
+        if analysis.original_heights[index] > SEA_LEVEL {
+            accumulated_runoff[index] = if use_climate {
+                precipitation
+                    .filter(|layer| layer.layer_id == PRECIPITATION_LAYER_ID)
+                    .map(|layer| layer.int_or(index, 0).max(0) as u64)
+                    .unwrap_or(0)
+            } else {
+                FALLBACK_LAND_RUNOFF
+            };
+        }
+    }
 
-pub(crate) fn lowest_neighbor(index: usize, heights: &[i32], bounds: &MapBounds) -> Option<usize> {
-    neighbor_indices(index, bounds)
-        .into_iter()
-        .min_by_key(|&n| heights[n])
+    let mut cells: Vec<usize> = (0..n)
+        .filter(|&index| analysis.original_heights[index] > SEA_LEVEL)
+        .collect();
+    cells.sort_by_key(|&index| Reverse(analysis.flood_rank[index]));
+    for index in cells {
+        let Some(receiver) = analysis.provisional_receiver[index] else {
+            continue;
+        };
+        if analysis.original_heights[receiver] > SEA_LEVEL {
+            accumulated_runoff[receiver] =
+                accumulated_runoff[receiver].saturating_add(accumulated_runoff[index]);
+        }
+    }
+
+    let mut basin_supply = HashMap::new();
+    for (&basin, _) in &analysis.spill_cell {
+        let lowest = analysis
+            .basin_id
+            .iter()
+            .enumerate()
+            .filter(|(_, &id)| id == basin)
+            .min_by_key(|(index, _)| analysis.flood_rank[*index])
+            .map(|(index, _)| index);
+        if let Some(index) = lowest {
+            basin_supply.insert(basin, accumulated_runoff[index]);
+        }
+    }
+
+    ProvisionalDrainage {
+        receiver: analysis.provisional_receiver.clone(),
+        accumulated_runoff,
+        basin_supply,
+    }
 }
 
 fn neighbor_indices(index: usize, bounds: &MapBounds) -> Vec<usize> {
@@ -88,6 +169,34 @@ fn neighbor_indices(index: usize, bounds: &MapBounds) -> Vec<usize> {
         .flat_map(|cell| cell.neighbors())
         .filter_map(|n| bounds.index_of(n))
         .collect()
+}
+
+fn basin_hierarchy(
+    basin_id: &[u32],
+    spill_cell: &HashMap<u32, usize>,
+    receiver: &[Option<usize>],
+    heights: &[i32],
+) -> HashMap<u32, Option<u32>> {
+    let mut parents = HashMap::new();
+    for (&basin, &spill) in spill_cell {
+        let mut current = Some(spill);
+        let mut parent = None;
+        for _ in 0..heights.len() {
+            let Some(index) = current else {
+                break;
+            };
+            if heights[index] <= SEA_LEVEL {
+                break;
+            }
+            if basin_id[index] != 0 && basin_id[index] != basin {
+                parent = Some(basin_id[index]);
+                break;
+            }
+            current = receiver[index];
+        }
+        parents.insert(basin, parent);
+    }
+    parents
 }
 
 /// Label geometric depression basins from filled cells (`fill_depth > 0`).
@@ -170,9 +279,9 @@ fn spill_for_component(
         .iter()
         .copied()
         .filter(|&i| {
-            neighbor_indices(i, bounds).iter().any(|&n| {
-                heights[n] <= SEA_LEVEL || (fill_depth[n] == 0 && !in_basin(n))
-            })
+            neighbor_indices(i, bounds)
+                .iter()
+                .any(|&n| heights[n] <= SEA_LEVEL || (fill_depth[n] == 0 && !in_basin(n)))
         })
         .collect();
     if enclosed_rim.is_empty() {
@@ -201,8 +310,7 @@ mod tests {
         for row in 0..bounds.height {
             for col in 0..w {
                 let i = (row * w + col) as usize;
-                let edge =
-                    row == 0 || col == 0 || row == bounds.height - 1 || col == w - 1;
+                let edge = row == 0 || col == 0 || row == bounds.height - 1 || col == w - 1;
                 elev.set(
                     i,
                     DenseState::Value(LayerValue::Int(if edge { 0 } else { 20 })),
@@ -258,7 +366,10 @@ mod tests {
                 .iter()
                 .any(|&n| analysis.conditioned_heights[n] <= SEA_LEVEL)
         });
-        assert!(has_spill, "coastal depression should expose spill toward sea");
+        assert!(
+            has_spill,
+            "coastal depression should expose spill toward sea"
+        );
     }
 
     #[test]
@@ -280,5 +391,57 @@ mod tests {
                 assert_eq!(fd, 0);
             }
         }
+    }
+
+    #[test]
+    fn priority_flood_ranks_are_deterministic_and_descend_to_terrain_receivers() {
+        let bounds = MapBounds::new(7, 7);
+        let mut elevation = DenseLayer::new_integer("elevation", bounds.len());
+        for index in 0..bounds.len() {
+            elevation.set(index, DenseState::Value(LayerValue::Int(20)));
+        }
+        for index in 0..bounds.width as usize {
+            elevation.set(index, DenseState::Value(LayerValue::Int(0)));
+        }
+        let center = (bounds.height / 2 * bounds.width + bounds.width / 2) as usize;
+        elevation.set(center, DenseState::Value(LayerValue::Int(4)));
+
+        let first = analyze_depressions(&elevation, &bounds);
+        let second = analyze_depressions(&elevation, &bounds);
+
+        assert_eq!(first, second);
+        assert_eq!(first.original_heights[0], 0);
+        for (index, receiver) in first.provisional_receiver.iter().enumerate() {
+            let Some(receiver) = receiver else {
+                continue;
+            };
+            if first.original_heights[*receiver] > SEA_LEVEL {
+                assert!(
+                    first.flood_rank[*receiver] < first.flood_rank[index],
+                    "receiver rank must decrease at {index}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn provisional_runoff_accumulates_at_a_depression_basin() {
+        let bounds = MapBounds::new(7, 7);
+        let mut elevation = DenseLayer::new_integer("elevation", bounds.len());
+        for index in 0..bounds.len() {
+            elevation.set(index, DenseState::Value(LayerValue::Int(20)));
+        }
+        for index in 0..bounds.width as usize {
+            elevation.set(index, DenseState::Value(LayerValue::Int(0)));
+        }
+        let center = (bounds.height / 2 * bounds.width + bounds.width / 2) as usize;
+        elevation.set(center, DenseState::Value(LayerValue::Int(4)));
+        let analysis = analyze_depressions(&elevation, &bounds);
+        let drainage = provisional_drainage(&analysis, None, &bounds, false);
+
+        assert!(
+            drainage.basin_supply.values().any(|&supply| supply > 1),
+            "a basin should receive runoff beyond its local cell"
+        );
     }
 }

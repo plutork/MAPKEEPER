@@ -1,16 +1,14 @@
 //! Precip-aware lake generation from depression analysis (hydrology-lake-generation-v1).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::climate::PRECIPITATION_LAYER_ID;
 use crate::hex::MapBounds;
 use crate::hydro::{DEFAULT_LAND_ELEVATION, SEA_LEVEL};
-use crate::layer::DenseLayer;
 use crate::lakes::{Lake, LakeCatalog, LAKE_CATALOG_SCHEMA_VERSION};
-use crate::worldgen::hydrology::depression_fill::lowest_neighbor;
+use crate::layer::DenseLayer;
+use crate::worldgen::hydrology::depression_fill::provisional_drainage;
 use crate::worldgen::hydrology::types::{DepressionAnalysis, LakeDensity};
-
-const FALLBACK_LAND_PRECIP: i32 = 90;
 
 /// Generate a lake catalog from depression analysis + climate inputs.
 pub fn generate_lakes(
@@ -35,8 +33,7 @@ pub fn generate_lakes(
         return LakeCatalog::default();
     }
 
-    let catchment_supply =
-        compute_catchment_supply(analysis, precipitation, elevation, bounds, use_climate);
+    let provisional = provisional_drainage(analysis, precipitation, bounds, use_climate);
 
     let land_cells = land_cell_count(elevation, n);
     let max_lake_cells = max_lake_cell_budget(land_cells, density);
@@ -49,15 +46,21 @@ pub fn generate_lakes(
             if cells.is_empty() {
                 return None;
             }
-            let supply = catchment_supply.get(&bid).copied().unwrap_or(0);
+            let supply = provisional.basin_supply.get(&bid).copied().unwrap_or(0);
             let outlet = analysis.spill_cell.get(&bid).copied();
             let endorheic = !spill_reaches_sea(outlet, analysis, bounds);
+            let fill_volume = cells
+                .iter()
+                .map(|&cell| analysis.fill_depth[cell].max(0) as u64)
+                .sum();
             Some(BasinCandidate {
                 bid,
                 cells,
                 supply,
                 outlet,
                 endorheic,
+                fill_volume,
+                hierarchy_depth: basin_hierarchy_depth(bid, analysis),
             })
         })
         .collect();
@@ -65,6 +68,8 @@ pub fn generate_lakes(
     candidates.sort_by(|a, b| {
         b.supply
             .cmp(&a.supply)
+            .then_with(|| b.fill_volume.cmp(&a.fill_volume))
+            .then_with(|| b.hierarchy_depth.cmp(&a.hierarchy_depth))
             .then_with(|| a.bid.cmp(&b.bid))
             .then_with(|| tie_break(seed, a.bid, b.bid))
     });
@@ -103,6 +108,8 @@ struct BasinCandidate {
     supply: u64,
     outlet: Option<usize>,
     endorheic: bool,
+    fill_volume: u64,
+    hierarchy_depth: u32,
 }
 
 fn collect_depression_basins(analysis: &DepressionAnalysis) -> Vec<u32> {
@@ -127,54 +134,17 @@ fn lake_cells_for_basin(bid: u32, analysis: &DepressionAnalysis) -> Vec<usize> {
         .collect()
 }
 
-fn compute_catchment_supply(
-    analysis: &DepressionAnalysis,
-    precipitation: Option<&DenseLayer>,
-    _elevation: &DenseLayer,
-    bounds: &MapBounds,
-    use_climate: bool,
-) -> HashMap<u32, u64> {
-    let n = bounds.len();
-    let heights = &analysis.conditioned_heights;
-    let mut supply: HashMap<u32, u64> = HashMap::new();
-
-    for (i, &h) in heights.iter().enumerate().take(n) {
-        if h <= SEA_LEVEL {
-            continue;
+fn basin_hierarchy_depth(bid: u32, analysis: &DepressionAnalysis) -> u32 {
+    let mut depth = 0u32;
+    let mut current = Some(bid);
+    while let Some(basin) = current {
+        current = analysis.basin_parent.get(&basin).copied().flatten();
+        depth = depth.saturating_add(1);
+        if depth > analysis.spill_cell.len() as u32 {
+            break;
         }
-        let Some(bid) = depression_target(i, analysis, bounds) else {
-            continue;
-        };
-        let contrib = if use_climate {
-            precipitation.unwrap().int_or(i, 0).max(0) as u64
-        } else {
-            FALLBACK_LAND_PRECIP as u64
-        };
-        *supply.entry(bid).or_insert(0) += contrib;
     }
-    supply
-}
-
-fn depression_target(i: usize, analysis: &DepressionAnalysis, bounds: &MapBounds) -> Option<u32> {
-    let heights = &analysis.conditioned_heights;
-    let mut cur = i;
-    for _ in 0..heights.len() {
-        if heights[cur] <= SEA_LEVEL {
-            return None;
-        }
-        if analysis.fill_depth[cur] > 0 && analysis.basin_id[cur] > 0 {
-            return Some(analysis.basin_id[cur]);
-        }
-        let next = lowest_neighbor(cur, heights, bounds)?;
-        if next == cur || heights[next] >= heights[cur] {
-            if analysis.fill_depth[cur] > 0 && analysis.basin_id[cur] > 0 {
-                return Some(analysis.basin_id[cur]);
-            }
-            return None;
-        }
-        cur = next;
-    }
-    None
+    depth
 }
 
 fn spill_reaches_sea(
@@ -185,9 +155,9 @@ fn spill_reaches_sea(
     let Some(spill) = spill else {
         return false;
     };
-    neighbor_indices(spill, bounds).iter().any(|&n| {
-        analysis.conditioned_heights[n] <= SEA_LEVEL
-    })
+    neighbor_indices(spill, bounds)
+        .iter()
+        .any(|&n| analysis.conditioned_heights[n] <= SEA_LEVEL)
 }
 
 fn neighbor_indices(index: usize, bounds: &MapBounds) -> Vec<usize> {
@@ -245,11 +215,11 @@ pub fn lake_outflow_supply(
     lake: &Lake,
     analysis: &DepressionAnalysis,
     precipitation: Option<&DenseLayer>,
-    elevation: &DenseLayer,
+    _elevation: &DenseLayer,
     bounds: &MapBounds,
     use_climate: bool,
 ) -> u64 {
-    let catchment = compute_catchment_supply(analysis, precipitation, elevation, bounds, use_climate);
+    let provisional = provisional_drainage(analysis, precipitation, bounds, use_climate);
     let mut basins = HashSet::new();
     for &c in &lake.cells {
         let bid = analysis.basin_id[c];
@@ -259,7 +229,7 @@ pub fn lake_outflow_supply(
     }
     basins
         .iter()
-        .map(|b| catchment.get(b).copied().unwrap_or(0))
+        .map(|b| provisional.basin_supply.get(b).copied().unwrap_or(0))
         .sum()
 }
 
@@ -289,8 +259,7 @@ mod tests {
         for row in 0..bounds.height {
             for col in 0..w {
                 let i = (row * w + col) as usize;
-                let edge =
-                    row == 0 || col == 0 || row == bounds.height - 1 || col == w - 1;
+                let edge = row == 0 || col == 0 || row == bounds.height - 1 || col == w - 1;
                 elev.set(
                     i,
                     DenseState::Value(LayerValue::Int(if edge { 0 } else { 25 })),
@@ -375,8 +344,14 @@ mod tests {
         let (s_n, s_c) = lake_acceptance_stats(&sparse);
         let (b_n, b_c) = lake_acceptance_stats(&balanced);
         let (r_n, r_c) = lake_acceptance_stats(&rich);
-        assert!(s_n <= b_n && b_n <= r_n, "counts sparse={s_n} bal={b_n} rich={r_n}");
-        assert!(s_c <= b_c && b_c <= r_c, "cells sparse={s_c} bal={b_c} rich={r_c}");
+        assert!(
+            s_n <= b_n && b_n <= r_n,
+            "counts sparse={s_n} bal={b_n} rich={r_n}"
+        );
+        assert!(
+            s_c <= b_c && b_c <= r_c,
+            "cells sparse={s_c} bal={b_c} rich={r_c}"
+        );
     }
 
     #[test]
@@ -442,7 +417,8 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures/worlds/enclosed-basin/map");
         let manifest_raw = std::fs::read_to_string(root.join("manifest.json")).unwrap();
-        let manifest: crate::layer::MapManifest = crate::layer::MapManifest::from_json(&manifest_raw).unwrap();
+        let manifest: crate::layer::MapManifest =
+            crate::layer::MapManifest::from_json(&manifest_raw).unwrap();
         let (w, h) = match manifest.bounds {
             crate::layer::Bounds::HexRectangle { width, height } => (width, height),
         };
@@ -455,19 +431,14 @@ mod tests {
             &bounds,
         );
         let analysis = analyze_depressions(&elev, &bounds);
-        let catalog = generate_lakes(
-            &analysis,
-            &elev,
-            None,
-            &bounds,
-            LakeDensity::Balanced,
-            99,
-        );
+        let catalog = generate_lakes(&analysis, &elev, None, &bounds, LakeDensity::Balanced, 99);
         for lake in &catalog.lakes {
             assert!(!lake.cells.is_empty());
-            assert!(
-                !lake.name.as_deref().unwrap_or("").eq_ignore_ascii_case("playa")
-            );
+            assert!(!lake
+                .name
+                .as_deref()
+                .unwrap_or("")
+                .eq_ignore_ascii_case("playa"));
         }
     }
 

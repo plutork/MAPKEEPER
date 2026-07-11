@@ -7,7 +7,7 @@ pub mod river_flux;
 pub mod river_validate;
 pub mod types;
 
-pub use depression_fill::analyze_depressions;
+pub use depression_fill::{analyze_depressions, provisional_drainage};
 pub use diagnostics::{
     diagnose_legacy_hydrology, LegacyHydrologyDiagnostics, LegacyRiverTerminal,
     LegacyTerminalReason,
@@ -19,4 +19,4 @@ pub use river_validate::{
     prune_invalid_river_trees, validate_catalog, validate_generated_catalog_strict,
     would_assign_parent_cycle, RiverTerminal, RiverValidationContext, RiverValidationReport,
 };
-pub use types::{DepressionAnalysis, LakeDensity, RiverDensity};
+pub use types::{DepressionAnalysis, LakeDensity, ProvisionalDrainage, RiverDensity};
