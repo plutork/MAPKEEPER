@@ -24,7 +24,7 @@ pub use drainage_graph::{
     build_drainage_graph, DrainageGraph, DrainageGraphError, DrainageNode, DrainageNodeId,
 };
 pub use lakes::generate_lakes;
-pub use render::{river_render_paths, RiverRenderPaths};
+pub use render::{legacy_river_render_paths, river_render_paths, RiverRenderPaths};
 pub use snapshot::{
     is_derived_hydrology_layer_id, HydrologySnapshot, HydrologySnapshotError,
     CHANNEL_NODE_LAYER_ID, CHANNEL_SEGMENT_LAYER_ID, HYDROLOGY_SNAPSHOT_FILE,

@@ -7,13 +7,15 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use mapkeeper_core::layer::ELEVATION_LAYER_ID;
+use mapkeeper_core::hex::MapBounds;
+use mapkeeper_core::layer::{DenseLayer, ELEVATION_LAYER_ID};
 use mapkeeper_core::rivers::{
     append_cell, cell_index, create_river, delete_river, pop_last_cell, RiverCatalog, RiverError,
 };
 use mapkeeper_core::worldgen::hydrology::{
-    analyze_depressions, build_channel_graph, build_drainage_graph, river_render_paths,
-    ChannelPolicy, HydrologyCatalog, HydrologySnapshot, RiverDensity, RiverRenderPaths,
+    analyze_depressions, build_channel_graph, build_drainage_graph, legacy_river_render_paths,
+    river_render_paths, ChannelPolicy, HydrologyCatalog, HydrologySnapshot, RiverDensity,
+    RiverRenderPaths,
 };
 use serde::{Deserialize, Serialize};
 
@@ -40,11 +42,18 @@ async fn get_rivers(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoRespo
         )
             .into_response();
     };
+    let bounds = world_io::map_bounds(&active.path);
+    let elevation = world_io::read_dense_layer(&active.path, ELEVATION_LAYER_ID, &bounds);
     match world_io::read_current_hydrology_snapshot(&active.path) {
-        Ok(Some(snapshot)) => Json(RiversResponse::from_snapshot(&snapshot)).into_response(),
-        Ok(None) => Json(RiversResponse::from_catalog(world_io::read_river_catalog(
-            &active.path,
-        )))
+        Ok(Some(snapshot)) => Json(RiversResponse::from_snapshot(
+            &snapshot, &bounds, &elevation,
+        ))
+        .into_response(),
+        Ok(None) => Json(RiversResponse::from_catalog(
+            world_io::read_river_catalog(&active.path),
+            &bounds,
+            &elevation,
+        ))
         .into_response(),
         Err(err) => (StatusCode::CONFLICT, err).into_response(),
     }
@@ -175,14 +184,18 @@ struct RiversResponse {
 }
 
 impl RiversResponse {
-    fn from_snapshot(snapshot: &HydrologySnapshot) -> Self {
+    fn from_snapshot(
+        snapshot: &HydrologySnapshot,
+        bounds: &MapBounds,
+        elevation: &DenseLayer,
+    ) -> Self {
         Self {
             catalog: snapshot.catalog.compatibility_river_catalog(),
-            render_paths: river_render_paths(&snapshot.channels.river_graph),
+            render_paths: river_render_paths(&snapshot.channels.river_graph, bounds, elevation),
         }
     }
 
-    fn from_catalog(catalog: RiverCatalog) -> Self {
+    fn from_catalog(catalog: RiverCatalog, bounds: &MapBounds, elevation: &DenseLayer) -> Self {
         let paths = catalog
             .rivers
             .iter()
@@ -191,7 +204,7 @@ impl RiversResponse {
             .collect();
         Self {
             catalog,
-            render_paths: RiverRenderPaths { paths },
+            render_paths: legacy_river_render_paths(paths, bounds, elevation),
         }
     }
 }
@@ -286,7 +299,7 @@ async fn generate_rivers_handler(
         "uniform_fallback"
     };
     Json(RiversGenerateResponse {
-        response: RiversResponse::from_snapshot(&snapshot),
+        response: RiversResponse::from_snapshot(&snapshot, &bounds, &elevation),
         precip_source,
         river_density: density.id(),
         name_migration_ambiguous_count,

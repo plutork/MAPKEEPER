@@ -174,7 +174,7 @@ pub(crate) fn draw_lakes(
     }
 }
 
-/// Hydrology v2 render projection: connected center-to-center strokes.
+/// Hydrology v2 render projection: connected center-to-center strokes + flow chevrons.
 pub(crate) fn draw_rivers(
     state: &AppState,
     ctx: &CanvasRenderingContext2d,
@@ -182,7 +182,8 @@ pub(crate) fn draw_rivers(
     ox: f64,
     oy: f64,
 ) {
-    if state.river_render_paths.paths.is_empty() {
+    let render = &state.river_render_paths;
+    if render.paths.is_empty() && render.mouth_extensions.is_empty() {
         return;
     }
     ctx.set_stroke_style_str("#4da6ff");
@@ -192,7 +193,7 @@ pub(crate) fn draw_rivers(
     ctx.set_line_join("round");
     let bounds = state.map_bounds;
     // hydrology-river-rendering: physical topology stays in core.
-    for path in &state.river_render_paths.paths {
+    for path in &render.paths {
         if path.len() == 1 {
             let Some(cell) = bounds.from_index(path[0]) else {
                 continue;
@@ -211,23 +212,87 @@ pub(crate) fn draw_rivers(
         }
         ctx.begin_path();
         let mut started = false;
+        let mut prev: Option<(f64, f64)> = None;
         for &idx in path {
             let Some(cell) = bounds.from_index(idx) else {
                 continue;
             };
             let (x, y) = cell.to_pixel(size);
             let (cx, cy) = (ox + x, oy + y);
-            if started {
+            if let Some((px, py)) = prev {
                 ctx.line_to(cx, cy);
+                draw_flow_chevron(ctx, px, py, cx, cy, size);
             } else {
                 ctx.move_to(cx, cy);
                 started = true;
             }
+            prev = Some((cx, cy));
         }
         if started {
             ctx.stroke();
         }
     }
+    for &[from_idx, to_idx] in &render.mouth_extensions {
+        let Some((from_x, from_y, to_x, to_y)) =
+            edge_centers(bounds, from_idx, to_idx, size, ox, oy)
+        else {
+            continue;
+        };
+        ctx.begin_path();
+        ctx.move_to(from_x, from_y);
+        ctx.line_to(to_x, to_y);
+        ctx.stroke();
+        draw_flow_chevron(ctx, from_x, from_y, to_x, to_y, size);
+    }
+}
+
+fn edge_centers(
+    bounds: MapBounds,
+    from_idx: usize,
+    to_idx: usize,
+    size: f64,
+    ox: f64,
+    oy: f64,
+) -> Option<(f64, f64, f64, f64)> {
+    let from = bounds.from_index(from_idx)?;
+    let to = bounds.from_index(to_idx)?;
+    let (fx, fy) = from.to_pixel(size);
+    let (tx, ty) = to.to_pixel(size);
+    Some((ox + fx, oy + fy, ox + tx, oy + ty))
+}
+
+fn draw_flow_chevron(
+    ctx: &CanvasRenderingContext2d,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    size: f64,
+) {
+    let mid_t = 0.65;
+    let mx = x0 + (x1 - x0) * mid_t;
+    let my = y0 + (y1 - y0) * mid_t;
+    let angle = (y1 - y0).atan2(x1 - x0);
+    let len = (size * 0.22).clamp(3.5, 9.0);
+    let wing = len * 0.55;
+    let tip_x = mx + (len * 0.5) * angle.cos();
+    let tip_y = my + (len * 0.5) * angle.sin();
+    let base_x = mx - (len * 0.5) * angle.cos();
+    let base_y = my - (len * 0.5) * angle.sin();
+    let left_angle = angle + std::f64::consts::FRAC_PI_4 * 1.5;
+    let right_angle = angle - std::f64::consts::FRAC_PI_4 * 1.5;
+    ctx.begin_path();
+    ctx.move_to(tip_x, tip_y);
+    ctx.line_to(
+        base_x + wing * left_angle.cos(),
+        base_y + wing * left_angle.sin(),
+    );
+    ctx.line_to(
+        base_x + wing * right_angle.cos(),
+        base_y + wing * right_angle.sin(),
+    );
+    ctx.close_path();
+    ctx.fill();
 }
 fn hex_corners(cx: f64, cy: f64, size: f64) -> [(f64, f64); 6] {
     std::array::from_fn(|i| {
