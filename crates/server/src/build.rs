@@ -163,16 +163,13 @@ async fn put_build_bounds(
         return (StatusCode::BAD_REQUEST, "unknown map_preset").into_response();
     };
     let reset = world_io::pipeline_has_downstream(&world_path);
-    match world_io::rewrite_world_bounds(&world_path, preset, true) {
-        Ok(bounds) => {
-            let _ = build_state::write_build_draft(&world_path, BUILD_STEP_SIZE);
-            Json(BuildBoundsResponse {
-                bounds: bounds_response(&bounds),
-                reset,
-            })
-            .into_response()
-        }
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    match world_io::reset_build_bounds(&world_path, preset) {
+        Ok(bounds) => Json(BuildBoundsResponse {
+            bounds: bounds_response(&bounds),
+            reset,
+        })
+        .into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
     }
 }
 
@@ -218,10 +215,7 @@ async fn generate_land_mask_handler(
         generate_land_mask(&bounds, style, character, seed)
     };
     let elevation = elevation_from_land_mask(&bounds, &mask);
-    if let Err(err) = world_io::write_dense_layer(&world_path, &mask) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
-    }
-    if let Err(err) = world_io::write_dense_layer(&world_path, &elevation) {
+    if let Err(err) = world_io::persist_land_mask_bundle(&world_path, &mask, &elevation) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
     Json(LandMaskGenerateResponse {
@@ -302,10 +296,13 @@ async fn generate_climate_handler(
     let nonce = input.regenerate_nonce.unwrap_or(0) as u64;
     let seed = climate_seed(&world_id, style, nonce);
     let layers = generate_climate_layers(&bounds, &mask, &elevation, style, seed);
-    for layer in [layers.temperature, layers.precipitation, layers.ice] {
-        if let Err(err) = world_io::write_dense_layer(&world_path, &layer) {
-            return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
-        }
+    if let Err(err) = world_io::persist_climate_layers_bundle(
+        &world_path,
+        &layers.temperature,
+        &layers.precipitation,
+        &layers.ice,
+    ) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
     StatusCode::NO_CONTENT.into_response()
 }
@@ -336,10 +333,7 @@ async fn put_land_mask_cells(
         let elev = if kind == LAND_MASK_LAND { 1 } else { 0 };
         elevation.set(index, DenseState::Value(LayerValue::Int(elev)));
     }
-    if let Err(err) = world_io::write_dense_layer(&world_path, &mask) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
-    }
-    if let Err(err) = world_io::write_dense_layer(&world_path, &elevation) {
+    if let Err(err) = world_io::persist_land_mask_bundle(&world_path, &mask, &elevation) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
     StatusCode::NO_CONTENT.into_response()

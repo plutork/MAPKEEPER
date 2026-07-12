@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use mapkeeper_core::build_state::{self, BUILD_STEP_SIZE};
 use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::climate::{ICE_LAYER_ID, PRECIPITATION_LAYER_ID, TEMPERATURE_LAYER_ID};
 use mapkeeper_core::geology::GEOLOGY_LAYER_ID;
@@ -350,8 +351,14 @@ pub(crate) fn read_dense_layer(
 
 pub(crate) fn write_dense_layer(world_path: &Path, layer: &DenseLayer) -> Result<(), String> {
     #[cfg(test)]
-    if SIMULATE_LAYER_WRITE_FAILURE.load(std::sync::atomic::Ordering::SeqCst) {
-        return Err("simulated layer write failure".to_string());
+    {
+        let attempt = LAYER_WRITE_ATTEMPT.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        let fail_on = SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.load(std::sync::atomic::Ordering::SeqCst);
+        if SIMULATE_LAYER_WRITE_FAILURE.load(std::sync::atomic::Ordering::SeqCst)
+            || (fail_on > 0 && attempt >= fail_on)
+        {
+            return Err("simulated layer write failure".to_string());
+        }
     }
     let path = layer_file_path(world_path, &layer.layer_id);
     if let Some(parent) = path.parent() {
@@ -567,6 +574,10 @@ pub(crate) fn write_lake_catalog(world_path: &Path, catalog: &LakeCatalog) -> Re
 }
 
 fn restore_file(path: &Path, backup: Option<String>) -> Result<(), String> {
+    restore_file_bytes(path, backup.map(|s| s.into_bytes()))
+}
+
+fn restore_file_bytes(path: &Path, backup: Option<Vec<u8>>) -> Result<(), String> {
     match backup {
         Some(bytes) => std::fs::write(path, bytes).map_err(|e| e.to_string()),
         None => {
@@ -577,6 +588,126 @@ fn restore_file(path: &Path, backup: Option<String>) -> Result<(), String> {
             }
         }
     }
+}
+
+/// Generic backup for a set of file paths (missing paths stored as `None`).
+struct FilesBundleBackup {
+    files: Vec<(PathBuf, Option<Vec<u8>>)>,
+}
+
+fn backup_files(paths: &[PathBuf]) -> FilesBundleBackup {
+    FilesBundleBackup {
+        files: paths
+            .iter()
+            .map(|path| (path.clone(), std::fs::read(path).ok()))
+            .collect(),
+    }
+}
+
+fn restore_files_bundle(backup: &FilesBundleBackup) -> Result<(), String> {
+    for (path, bytes) in &backup.files {
+        restore_file_bytes(path, bytes.clone())?;
+    }
+    Ok(())
+}
+
+fn collect_build_bounds_paths(world_path: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![
+        map_manifest_path(world_path),
+        world_path.join("mapkeeper.toml"),
+    ];
+    let layers_dir = world_path.join("map/layers");
+    if let Ok(entries) = std::fs::read_dir(&layers_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                paths.push(path);
+            }
+        }
+    }
+    for name in [
+        RIVER_CATALOG_FILE,
+        LAKE_CATALOG_FILE,
+        HYDROLOGY_SNAPSHOT_FILE,
+        NAMED_RIVERS_FILE,
+    ] {
+        let path = world_path.join("map").join(name);
+        if path.exists() {
+            paths.push(path);
+        }
+    }
+    paths
+}
+
+/// Bounds reset + build draft marker — rolls back on draft write failure.
+pub(crate) fn reset_build_bounds(
+    world_path: &Path,
+    preset: MapPreset,
+) -> Result<MapBounds, String> {
+    let backup = backup_files(&collect_build_bounds_paths(world_path));
+    let result = (|| -> Result<MapBounds, String> {
+        let bounds = rewrite_world_bounds(world_path, preset, true).map_err(|e| e.to_string())?;
+        build_state::write_build_draft(world_path, BUILD_STEP_SIZE)?;
+        Ok(bounds)
+    })();
+    match result {
+        Ok(bounds) => Ok(bounds),
+        Err(err) => {
+            restore_files_bundle(&backup)?;
+            Err(err)
+        }
+    }
+}
+
+pub(crate) fn persist_land_mask_bundle(
+    world_path: &Path,
+    mask: &DenseLayer,
+    elevation: &DenseLayer,
+) -> Result<(), String> {
+    #[cfg(test)]
+    reset_layer_write_attempts();
+    let paths = [
+        layer_file_path(world_path, LAND_MASK_LAYER_ID),
+        layer_file_path(world_path, ELEVATION_LAYER_ID),
+    ];
+    let backup = backup_files(&paths);
+    let result = (|| -> Result<(), String> {
+        write_dense_layer(world_path, mask)?;
+        write_dense_layer(world_path, elevation)?;
+        Ok(())
+    })();
+    if let Err(err) = result {
+        restore_files_bundle(&backup)?;
+        return Err(err);
+    }
+    Ok(())
+}
+
+pub(crate) fn persist_climate_layers_bundle(
+    world_path: &Path,
+    temperature: &DenseLayer,
+    precipitation: &DenseLayer,
+    ice: &DenseLayer,
+) -> Result<(), String> {
+    #[cfg(test)]
+    reset_layer_write_attempts();
+    let paths = [
+        layer_file_path(world_path, TEMPERATURE_LAYER_ID),
+        layer_file_path(world_path, PRECIPITATION_LAYER_ID),
+        layer_file_path(world_path, ICE_LAYER_ID),
+    ];
+    let backup = backup_files(&paths);
+    let result = (|| -> Result<(), String> {
+        write_dense_layer(world_path, temperature)?;
+        write_dense_layer(world_path, precipitation)?;
+        write_dense_layer(world_path, ice)?;
+        Ok(())
+    })();
+    if let Err(err) = result {
+        restore_files_bundle(&backup)?;
+        return Err(err);
+    }
+    Ok(())
 }
 
 /// Files touched by lake generation (lakes + river clear + hydrology invalidation).
@@ -677,6 +808,17 @@ pub fn persist_lake_generation(
 pub(crate) static SIMULATE_LAYER_WRITE_FAILURE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 #[cfg(test)]
+pub(crate) static SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+#[cfg(test)]
+static LAYER_WRITE_ATTEMPT: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+#[cfg(test)]
+pub(crate) fn reset_layer_write_attempts() {
+    LAYER_WRITE_ATTEMPT.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+#[cfg(test)]
 pub(crate) static SIMULATE_HYDROLOGY_ACTIVATION_FAILURE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 #[cfg(test)]
@@ -688,9 +830,15 @@ pub(crate) static FAILPOINT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::
 
 #[cfg(test)]
 pub(crate) fn failpoint_lock() -> std::sync::MutexGuard<'static, ()> {
-    FAILPOINT_TEST_LOCK
+    let guard = FAILPOINT_TEST_LOCK
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    SIMULATE_LAYER_WRITE_FAILURE.store(false, std::sync::atomic::Ordering::SeqCst);
+    SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.store(0, std::sync::atomic::Ordering::SeqCst);
+    LAYER_WRITE_ATTEMPT.store(0, std::sync::atomic::Ordering::SeqCst);
+    SIMULATE_CLEAR_RIVERS_FAILURE.store(false, std::sync::atomic::Ordering::SeqCst);
+    SIMULATE_HYDROLOGY_ACTIVATION_FAILURE.store(false, std::sync::atomic::Ordering::SeqCst);
+    guard
 }
 
 #[cfg(test)]
@@ -748,6 +896,7 @@ mod persist_lakes_tests {
 
     #[test]
     fn persist_lakes_matches_sync_layer() {
+        let _lock = super::failpoint_lock();
         let dir = tempdir().unwrap();
         let world = dir.path();
         let bounds = seed_world(world);
@@ -769,6 +918,7 @@ mod persist_lakes_tests {
 
     #[test]
     fn empty_catalog_roundtrip() {
+        let _lock = super::failpoint_lock();
         let dir = tempdir().unwrap();
         let world = dir.path();
         let bounds = seed_world(world);
@@ -927,6 +1077,7 @@ mod persist_rivers_tests {
 
     #[test]
     fn persist_rivers_matches_sync_layer() {
+        let _lock = super::failpoint_lock();
         let dir = tempdir().unwrap();
         let world = dir.path();
         let bounds = seed_world(world);
@@ -951,6 +1102,7 @@ mod persist_rivers_tests {
 
     #[test]
     fn persist_rivers_create_update_and_clear() {
+        let _lock = super::failpoint_lock();
         let dir = tempdir().unwrap();
         let world = dir.path();
         let bounds = seed_world(world);
@@ -1150,6 +1302,7 @@ mod persist_lake_generation_tests {
 
     #[test]
     fn succeeds_when_prior_water_files_missing() {
+        let _lock = super::failpoint_lock();
         let dir = tempdir().unwrap();
         let world = dir.path();
         let bounds = seed_world(world);
@@ -1240,5 +1393,169 @@ mod persist_lake_generation_tests {
         assert_eq!(water_bundle_bytes(world), before);
         assert_eq!(read_named_river_store(world), store);
         assert!(read_current_hydrology_snapshot(world).unwrap().is_some());
+    }
+}
+
+#[cfg(test)]
+mod build_lifecycle_tests {
+    use super::*;
+    use mapkeeper_core::build_state::{read_build, BUILD_STEP_SIZE};
+    use mapkeeper_core::climate::{generate_climate_layers, PrecipitationStyle};
+    use mapkeeper_core::land_mask::{generate_land_mask, LayoutClass, ShoreCharacter};
+    use mapkeeper_core::layer::{Bounds, MapManifest};
+    use mapkeeper_core::map_preset::MapPreset;
+    use std::collections::BTreeMap;
+    use std::sync::atomic::Ordering;
+    use tempfile::tempdir;
+
+    fn seed_world(path: &Path, world_id: &str) -> MapBounds {
+        let bounds = MapBounds::new(14, 8);
+        std::fs::create_dir_all(path.join("map/layers")).unwrap();
+        std::fs::write(
+            path.join("mapkeeper.toml"),
+            mapkeeper_core::build_state::manifest_toml_with_build(world_id, false),
+        )
+        .unwrap();
+        let manifest = MapManifest::default_v0(14, 8);
+        std::fs::write(
+            path.join("map/manifest.json"),
+            manifest.to_json_pretty().unwrap(),
+        )
+        .unwrap();
+        let ocean = mapkeeper_core::hydro::filled_elevation_layer(
+            &bounds,
+            mapkeeper_core::hydro::OCEAN_ELEVATION,
+        );
+        write_dense_layer(path, &ocean).unwrap();
+        bounds
+    }
+
+    fn file_bytes(paths: &[PathBuf]) -> BTreeMap<String, Option<Vec<u8>>> {
+        paths
+            .iter()
+            .map(|path| {
+                (
+                    path.display().to_string(),
+                    std::fs::read(path).ok(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn reset_build_bounds_rolls_back_when_draft_write_fails() {
+        let _lock = super::failpoint_lock();
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        seed_world(world, "bounds-fp");
+        std::fs::write(world.join("map/layers/land_mask.json"), b"{}").unwrap();
+        let before_manifest = std::fs::read_to_string(map_manifest_path(world)).unwrap();
+
+        std::env::set_var("MAPKEEPER_FAILPOINT", "build_draft");
+        let err = reset_build_bounds(world, MapPreset::Small).unwrap_err();
+        std::env::remove_var("MAPKEEPER_FAILPOINT");
+        assert!(err.contains("simulated"));
+
+        assert_eq!(
+            std::fs::read_to_string(map_manifest_path(world)).unwrap(),
+            before_manifest
+        );
+        assert!(read_build(world).is_none());
+        assert!(layer_file_path(world, LAND_MASK_LAYER_ID).exists());
+    }
+
+    #[test]
+    fn reset_build_bounds_writes_draft_on_success() {
+        let _lock = super::failpoint_lock();
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        seed_world(world, "bounds-ok");
+        std::fs::write(world.join("map/layers/land_mask.json"), b"{}").unwrap();
+
+        reset_build_bounds(world, MapPreset::Small).unwrap();
+        let build = read_build(world).expect("draft marker");
+        assert_eq!(build.step, BUILD_STEP_SIZE);
+        let manifest: MapManifest =
+            serde_json::from_str(&std::fs::read_to_string(map_manifest_path(world)).unwrap())
+                .unwrap();
+        let (w, h) = MapPreset::Small.dimensions();
+        assert_eq!(manifest.bounds, Bounds::HexRectangle { width: w, height: h });
+    }
+
+    #[test]
+    fn land_mask_bundle_rolls_back_when_elevation_write_fails() {
+        let _lock = super::failpoint_lock();
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world, "land-fp");
+        let mask = generate_land_mask(&bounds, LayoutClass::Pangea, ShoreCharacter::Smooth, 1);
+        let elevation =
+            mapkeeper_core::land_mask::elevation_from_land_mask(&bounds, &mask);
+        persist_land_mask_bundle(world, &mask, &elevation).unwrap();
+        let paths = [
+            layer_file_path(world, LAND_MASK_LAYER_ID),
+            layer_file_path(world, ELEVATION_LAYER_ID),
+        ];
+        let before = file_bytes(&paths);
+
+        let mask2 = generate_land_mask(&bounds, LayoutClass::Archipelago, ShoreCharacter::Jagged, 2);
+        let elevation2 =
+            mapkeeper_core::land_mask::elevation_from_land_mask(&bounds, &mask2);
+        SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.store(2, Ordering::SeqCst);
+        let err = persist_land_mask_bundle(world, &mask2, &elevation2).unwrap_err();
+        SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.store(0, Ordering::SeqCst);
+        assert!(err.contains("simulated"));
+        assert_eq!(file_bytes(&paths), before);
+    }
+
+    #[test]
+    fn climate_layers_rollback_when_second_write_fails() {
+        let _lock = super::failpoint_lock();
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world, "climate-fp");
+        let mask = generate_land_mask(&bounds, LayoutClass::Pangea, ShoreCharacter::Smooth, 1);
+        let elevation =
+            mapkeeper_core::land_mask::elevation_from_land_mask(&bounds, &mask);
+        persist_land_mask_bundle(world, &mask, &elevation).unwrap();
+        let layers = generate_climate_layers(
+            &bounds,
+            &mask,
+            &elevation,
+            PrecipitationStyle::Balanced,
+            9,
+        );
+        persist_climate_layers_bundle(
+            world,
+            &layers.temperature,
+            &layers.precipitation,
+            &layers.ice,
+        )
+        .unwrap();
+        let paths = [
+            layer_file_path(world, TEMPERATURE_LAYER_ID),
+            layer_file_path(world, PRECIPITATION_LAYER_ID),
+            layer_file_path(world, ICE_LAYER_ID),
+        ];
+        let before = file_bytes(&paths);
+
+        let layers2 = generate_climate_layers(
+            &bounds,
+            &mask,
+            &elevation,
+            PrecipitationStyle::WetCoasts,
+            10,
+        );
+        SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.store(2, Ordering::SeqCst);
+        let err = persist_climate_layers_bundle(
+            world,
+            &layers2.temperature,
+            &layers2.precipitation,
+            &layers2.ice,
+        )
+        .unwrap_err();
+        SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.store(0, Ordering::SeqCst);
+        assert!(err.contains("simulated"));
+        assert_eq!(file_bytes(&paths), before);
     }
 }

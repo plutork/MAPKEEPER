@@ -3,13 +3,13 @@
 use std::sync::{Arc, Barrier};
 use std::thread;
 
-use mapkeeper_core::build_state::{read_build, write_build_draft, BUILD_STEP_SIZE};
+use mapkeeper_core::build_state::read_build;
 use mapkeeper_core::hex::{Axial, MapBounds};
-use mapkeeper_core::layer::{Bounds, MapManifest};
+use mapkeeper_core::layer::MapManifest;
 use mapkeeper_core::map_preset::MapPreset;
 use tempfile::tempdir;
 
-use crate::world_io::{read_dense_layer, rewrite_world_bounds, write_dense_layer};
+use crate::world_io::{map_manifest_path, read_dense_layer, reset_build_bounds, write_dense_layer};
 
 fn seed_world(path: &std::path::Path, world_id: &str) -> MapBounds {
     let bounds = MapBounds::new(14, 8);
@@ -39,6 +39,7 @@ fn seed_world(path: &std::path::Path, world_id: &str) -> MapBounds {
 
 #[test]
 fn direct_parallel_dense_layer_rmw_can_lose_updates() {
+    let _lock = crate::world_io::failpoint_lock();
     let dir = tempdir().unwrap();
     let world = dir.path();
     let bounds = seed_world(world, "rmw-direct");
@@ -82,25 +83,22 @@ fn direct_parallel_dense_layer_rmw_can_lose_updates() {
 }
 
 #[test]
-fn bounds_reset_succeeds_when_build_draft_write_fails() {
+fn build_bounds_reset_rolls_back_when_draft_write_fails() {
+    let _lock = crate::world_io::failpoint_lock();
     let dir = tempdir().unwrap();
     let world = dir.path();
     seed_world(world, "build-fp");
     std::fs::write(world.join("map/layers/land_mask.json"), b"{}").unwrap();
+    let manifest_before = std::fs::read_to_string(map_manifest_path(world)).unwrap();
 
-    rewrite_world_bounds(world, MapPreset::Small, true).unwrap();
     std::env::set_var("MAPKEEPER_FAILPOINT", "build_draft");
-    let draft_err = write_build_draft(world, BUILD_STEP_SIZE).unwrap_err();
+    let err = reset_build_bounds(world, MapPreset::Small).unwrap_err();
     std::env::remove_var("MAPKEEPER_FAILPOINT");
-    assert!(draft_err.contains("simulated"));
+    assert!(err.contains("simulated"));
 
-    let manifest: MapManifest =
-        serde_json::from_str(&std::fs::read_to_string(world.join("map/manifest.json")).unwrap())
-            .unwrap();
-    let (w, h) = MapPreset::Small.dimensions();
-    assert_eq!(manifest.bounds, Bounds::HexRectangle { width: w, height: h });
-    assert!(
-        read_build(world).is_none(),
-        "build draft missing after simulated failure — known lifecycle divergence"
+    assert_eq!(
+        std::fs::read_to_string(map_manifest_path(world)).unwrap(),
+        manifest_before
     );
+    assert!(read_build(world).is_none());
 }

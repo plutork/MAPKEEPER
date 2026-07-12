@@ -82,44 +82,23 @@ async fn parallel_layer_batch_writes_serialize_via_app_state_mutex() {
 }
 
 #[tokio::test]
-async fn build_bounds_api_ignores_draft_write_failure() {
+async fn build_bounds_api_fails_when_draft_write_fails() {
     let dir = tempdir().unwrap();
     let world = dir.path().to_path_buf();
     seed_world(&world, "build-api-fp", 14, 8);
     std::fs::write(world.join("map/layers/land_mask.json"), b"{}").unwrap();
+    let manifest_before =
+        std::fs::read_to_string(world.join("map/manifest.json")).expect("manifest");
 
     std::env::set_var("MAPKEEPER_FAILPOINT", "build_draft");
     let harness = Harness::with_active_world(Some(world.clone()));
     let status = harness.put_build_bounds("small").await;
     std::env::remove_var("MAPKEEPER_FAILPOINT");
 
-    assert_eq!(status, StatusCode::OK);
-    assert!(
-        read_build(&world).is_none(),
-        "PUT /api/build/bounds uses `let _ = write_build_draft` — bounds change without draft marker"
-    );
-}
-
-#[test]
-#[ignore = "future build-lifecycle-tx: bounds reset and build draft share one transaction"]
-fn build_bounds_api_fails_when_draft_write_fails() {
-    let dir = tempdir().unwrap();
-    let world = dir.path().to_path_buf();
-    seed_world(&world, "build-api-fp-future", 14, 8);
-    std::fs::write(world.join("map/layers/land_mask.json"), b"{}").unwrap();
-    let manifest_before =
-        std::fs::read_to_string(world.join("map/manifest.json")).expect("manifest");
-
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    std::env::set_var("MAPKEEPER_FAILPOINT", "build_draft");
-    let status = rt.block_on(async {
-        let harness = Harness::with_active_world(Some(world.clone()));
-        harness.put_build_bounds("small").await
-    });
-    std::env::remove_var("MAPKEEPER_FAILPOINT");
-
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-    let manifest_after =
-        std::fs::read_to_string(world.join("map/manifest.json")).expect("manifest");
-    assert_eq!(manifest_after, manifest_before);
+    assert_eq!(
+        std::fs::read_to_string(world.join("map/manifest.json")).unwrap(),
+        manifest_before
+    );
+    assert!(read_build(&world).is_none());
 }
