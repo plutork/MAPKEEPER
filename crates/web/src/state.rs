@@ -7,6 +7,7 @@ use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::lakes::LakeCatalog;
 use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
 use mapkeeper_core::rivers::RiverCatalog;
+use mapkeeper_core::worldgen::hydrology::RiverRenderPaths;
 use serde::{Deserialize, Serialize};
 
 pub(crate) const MIN_ZOOM: f64 = 0.6;
@@ -412,6 +413,8 @@ pub(crate) struct AppState {
     pub(crate) active_river_id: Option<u32>,
     /// River catalog mirror (river-overlay-layer-v1).
     pub(crate) rivers: RiverCatalog,
+    /// Hydrology v2 draw-only topology projection.
+    pub(crate) river_render_paths: RiverRenderPaths,
     /// Lake catalog mirror (hydrology-lake-domain-v1).
     pub(crate) lakes: LakeCatalog,
     /// Precipitation layer exists on disk (probe on world open).

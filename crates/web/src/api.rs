@@ -9,6 +9,7 @@ use mapkeeper_core::lakes::LakeCatalog;
 use mapkeeper_core::layer::DenseLayer;
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::rivers::{river_at_cell, RiverCatalog};
+use mapkeeper_core::worldgen::hydrology::RiverRenderPaths;
 use serde::{Deserialize, Serialize};
 
 use crate::brush::{reset_view_on_world_open, sync_river_status};
@@ -202,16 +203,17 @@ async fn probe_precip_layer(state: &Rc<RefCell<AppState>>) {
     sync_water_diagnostics(&state.borrow());
 }
 
-/// Fetch river catalog (river-overlay-layer-v1).
+/// Fetch river topology projection.
 pub(crate) async fn load_rivers(state: &Rc<RefCell<AppState>>) {
     let Ok(resp) = gloo_net::http::Request::get("/api/rivers").send().await else {
         return;
     };
-    let Ok(catalog) = resp.json::<RiverCatalog>().await else {
+    let Ok(body) = resp.json::<RiversResponse>().await else {
         return;
     };
     let mut s = state.borrow_mut();
-    s.rivers = catalog;
+    s.rivers = body.catalog;
+    s.river_render_paths = body.render_paths;
     s.active_river_id = None;
     sync_river_status(&s);
     sync_water_diagnostics(&s);
@@ -235,9 +237,17 @@ pub(crate) struct RiversGenerateInput {
 }
 
 #[derive(Deserialize)]
-pub(crate) struct RiversGenerateResponse {
+pub(crate) struct RiversResponse {
     #[serde(flatten)]
     pub(crate) catalog: RiverCatalog,
+    #[serde(default)]
+    pub(crate) render_paths: RiverRenderPaths,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct RiversGenerateResponse {
+    #[serde(flatten)]
+    pub(crate) response: RiversResponse,
     pub(crate) precip_source: String,
     #[serde(default)]
     pub(crate) river_density: String,
@@ -440,6 +450,7 @@ pub(crate) async fn post_lake_generate(
         s.lakes = body.catalog;
         if rivers_cleared {
             s.rivers = RiverCatalog::default();
+            s.river_render_paths = RiverRenderPaths::default();
             s.active_river_id = None;
             sync_river_status(&s);
         }
@@ -525,11 +536,12 @@ pub(crate) async fn post_river_generate(
         set_text(status_id, "Generate failed (parse)");
         return;
     };
-    let (river_n, path_cells) = river_catalog_stats(&body.catalog);
+    let (river_n, path_cells) = river_catalog_stats(&body.response.catalog);
     let lake_n = state.borrow().lakes.lakes.len();
     {
         let mut s = state.borrow_mut();
-        s.rivers = body.catalog;
+        s.rivers = body.response.catalog;
+        s.river_render_paths = body.response.render_paths;
         s.active_river_id = None;
         bump_content_rev(&mut s);
         sync_river_status(&s);

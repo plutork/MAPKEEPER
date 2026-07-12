@@ -48,6 +48,7 @@ use elevation_view::ColorMode;
 use mapkeeper_core::lakes::LakeCatalog;
 use mapkeeper_core::map_preset::MapPreset;
 use mapkeeper_core::rivers::RiverCatalog;
+use mapkeeper_core::worldgen::hydrology::RiverRenderPaths;
 use wasm_bindgen::prelude::*;
 
 pub(crate) fn perf_emit(metrics: &PerfMetrics) {
@@ -69,6 +70,7 @@ pub fn start() {
         last_river_brush: Brush::River,
         active_river_id: None,
         rivers: RiverCatalog::default(),
+        river_render_paths: RiverRenderPaths::default(),
         lakes: LakeCatalog::default(),
         precip_layer_present: None,
         water_gen_trace: WaterGenTrace::default(),

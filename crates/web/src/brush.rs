@@ -278,6 +278,7 @@ pub(crate) fn reset_view_on_world_open(s: &mut AppState) {
     s.show_grid = s.map_bounds.len() <= elevation_view::OVERLAY_LOD_MAX_VISIBLE;
     s.active_river_id = None;
     s.rivers = RiverCatalog::default();
+    s.river_render_paths = Default::default();
     s.wizard_accepted = false;
     s.wizard_edit_mode = false;
     deactivate_paint_brush(s);

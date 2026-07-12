@@ -78,4 +78,6 @@ async fn generate_rivers_activates_v2_snapshot_not_legacy_catalog() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let generated: RiverCatalog = serde_json::from_slice(&body).unwrap();
     assert!(!generated.rivers.is_empty());
+    let response: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(response["render_paths"]["paths"].is_array());
 }

@@ -174,7 +174,7 @@ pub(crate) fn draw_lakes(
     }
 }
 
-/// Hydrology v2 physical-segment projection: center-to-center polyline strokes.
+/// Hydrology v2 render projection: connected center-to-center strokes.
 pub(crate) fn draw_rivers(
     state: &AppState,
     ctx: &CanvasRenderingContext2d,
@@ -182,7 +182,7 @@ pub(crate) fn draw_rivers(
     ox: f64,
     oy: f64,
 ) {
-    if state.rivers.rivers.is_empty() {
+    if state.river_render_paths.paths.is_empty() {
         return;
     }
     ctx.set_stroke_style_str("#4da6ff");
@@ -191,24 +191,27 @@ pub(crate) fn draw_rivers(
     ctx.set_line_cap("round");
     ctx.set_line_join("round");
     let bounds = state.map_bounds;
-    let dot_r = (size * 0.12).clamp(2.0, 6.0);
-    for river in &state.rivers.rivers {
-        if river.cells.is_empty() {
-            continue;
-        }
-        if river.cells.len() == 1 {
-            let Some(cell) = bounds.from_index(river.cells[0]) else {
+    // hydrology-river-rendering: physical topology stays in core.
+    for path in &state.river_render_paths.paths {
+        if path.len() == 1 {
+            let Some(cell) = bounds.from_index(path[0]) else {
                 continue;
             };
             let (x, y) = cell.to_pixel(size);
             ctx.begin_path();
-            let _ = ctx.arc(ox + x, oy + y, dot_r, 0.0, std::f64::consts::TAU);
+            let _ = ctx.arc(
+                ox + x,
+                oy + y,
+                (size * 0.12).clamp(2.0, 6.0),
+                0.0,
+                std::f64::consts::TAU,
+            );
             ctx.fill();
             continue;
         }
         ctx.begin_path();
         let mut started = false;
-        for &idx in &river.cells {
+        for &idx in path {
             let Some(cell) = bounds.from_index(idx) else {
                 continue;
             };

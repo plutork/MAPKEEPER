@@ -12,8 +12,8 @@ use mapkeeper_core::rivers::{
     append_cell, cell_index, create_river, delete_river, pop_last_cell, RiverCatalog, RiverError,
 };
 use mapkeeper_core::worldgen::hydrology::{
-    analyze_depressions, build_channel_graph, build_drainage_graph, ChannelPolicy,
-    HydrologyCatalog, HydrologySnapshot, RiverDensity,
+    analyze_depressions, build_channel_graph, build_drainage_graph, river_render_paths,
+    ChannelPolicy, HydrologyCatalog, HydrologySnapshot, RiverDensity, RiverRenderPaths,
 };
 use serde::{Deserialize, Serialize};
 
@@ -41,8 +41,11 @@ async fn get_rivers(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoRespo
             .into_response();
     };
     match world_io::read_current_hydrology_snapshot(&active.path) {
-        Ok(Some(snapshot)) => Json(snapshot.catalog.compatibility_river_catalog()).into_response(),
-        Ok(None) => Json(world_io::read_river_catalog(&active.path)).into_response(),
+        Ok(Some(snapshot)) => Json(RiversResponse::from_snapshot(&snapshot)).into_response(),
+        Ok(None) => Json(RiversResponse::from_catalog(world_io::read_river_catalog(
+            &active.path,
+        )))
+        .into_response(),
         Err(err) => (StatusCode::CONFLICT, err).into_response(),
     }
 }
@@ -165,9 +168,38 @@ async fn delete_river_handler(
 }
 
 #[derive(Serialize)]
-struct RiversGenerateResponse {
+struct RiversResponse {
     #[serde(flatten)]
     catalog: RiverCatalog,
+    render_paths: RiverRenderPaths,
+}
+
+impl RiversResponse {
+    fn from_snapshot(snapshot: &HydrologySnapshot) -> Self {
+        Self {
+            catalog: snapshot.catalog.compatibility_river_catalog(),
+            render_paths: river_render_paths(&snapshot.channels.river_graph),
+        }
+    }
+
+    fn from_catalog(catalog: RiverCatalog) -> Self {
+        let paths = catalog
+            .rivers
+            .iter()
+            .filter(|river| !river.cells.is_empty())
+            .map(|river| river.cells.clone())
+            .collect();
+        Self {
+            catalog,
+            render_paths: RiverRenderPaths { paths },
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct RiversGenerateResponse {
+    #[serde(flatten)]
+    response: RiversResponse,
     precip_source: &'static str,
     river_density: &'static str,
     name_migration_ambiguous_count: usize,
@@ -254,7 +286,7 @@ async fn generate_rivers_handler(
         "uniform_fallback"
     };
     Json(RiversGenerateResponse {
-        catalog: snapshot.catalog.compatibility_river_catalog(),
+        response: RiversResponse::from_snapshot(&snapshot),
         precip_source,
         river_density: density.id(),
         name_migration_ambiguous_count,
