@@ -77,14 +77,22 @@ pub fn river_render_paths(
                 .iter()
                 .filter(|(segment, _)| segment.from_node == outlet.id)
             {
-                let (Some(&from), Some(&to)) = (incoming.last(), outgoing.first()) else {
+                let from = incoming.last().copied();
+                let to = outgoing.first().copied();
+                if from.is_none() && to.is_none() {
                     continue;
-                };
-                if from != to {
-                    let span = lake_id
-                        .and_then(|layer| lake_span_path(from, to, bounds, layer))
-                        .unwrap_or_else(|| vec![from, to]);
-                    paths.push(span);
+                }
+                if from.is_some() && from == to {
+                    continue;
+                }
+                let span = lake_id
+                    .and_then(|layer| build_lake_span(from, to, bounds, layer))
+                    .or_else(|| match (from, to) {
+                        (Some(f), Some(t)) if f != t => Some(vec![f, t]),
+                        _ => None,
+                    });
+                if span.as_ref().is_some_and(|path| path.len() >= 2) {
+                    paths.push(span.unwrap());
                 }
             }
         }
@@ -152,6 +160,21 @@ fn is_water(elevation: &DenseLayer, index: usize) -> bool {
     )
 }
 
+/// Land inlet → lake hex chain → optional land outlet (D-102).
+fn build_lake_span(
+    from: Option<usize>,
+    to: Option<usize>,
+    bounds: &MapBounds,
+    lake_id_layer: &DenseLayer,
+) -> Option<Vec<usize>> {
+    match (from, to) {
+        (Some(f), Some(t)) if f != t => lake_span_path(f, t, bounds, lake_id_layer),
+        (Some(f), None) => lake_traverse_from_inlet(f, bounds, lake_id_layer),
+        (None, Some(t)) => lake_traverse_to_outlet(t, bounds, lake_id_layer),
+        _ => None,
+    }
+}
+
 /// Land inlet → lake hex chain → land outlet (D-102 lake as intermediate cells).
 fn lake_span_path(
     from: usize,
@@ -189,6 +212,86 @@ fn lake_span_path(
         path.push(to);
     }
     Some(path)
+}
+
+/// Inlet land only — traverse lake to the far shore (lake-outlet segment may have no land cells).
+fn lake_traverse_from_inlet(
+    from: usize,
+    bounds: &MapBounds,
+    lake_id_layer: &DenseLayer,
+) -> Option<Vec<usize>> {
+    let from_ax = bounds.from_index(from)?;
+    let entry = lake_neighbor(from_ax, bounds, lake_id_layer)?;
+    let lake_id = lake_id_layer.int_or(entry, 0);
+    if lake_id <= 0 {
+        return None;
+    }
+    let exit = farthest_lake_cell(entry, lake_id, bounds, lake_id_layer)?;
+    let through_lake = bfs_lake_path(entry, &[exit], lake_id, bounds, lake_id_layer)
+        .unwrap_or_else(|| vec![entry]);
+    let mut path = vec![from];
+    path.extend(through_lake);
+    Some(path)
+}
+
+/// Outlet land only — traverse lake from the far shore to the outlet neighbor.
+fn lake_traverse_to_outlet(
+    to: usize,
+    bounds: &MapBounds,
+    lake_id_layer: &DenseLayer,
+) -> Option<Vec<usize>> {
+    let to_ax = bounds.from_index(to)?;
+    let mut exit_candidates: Vec<usize> = to_ax
+        .neighbors()
+        .iter()
+        .filter_map(|neighbor| bounds.index_of(*neighbor))
+        .filter(|&idx| lake_id_layer.int_or(idx, 0) > 0)
+        .collect();
+    exit_candidates.sort_unstable();
+    let exit = *exit_candidates.first()?;
+    let lake_id = lake_id_layer.int_or(exit, 0);
+    if lake_id <= 0 {
+        return None;
+    }
+    let entry = farthest_lake_cell(exit, lake_id, bounds, lake_id_layer)?;
+    let through_lake =
+        bfs_lake_path(entry, &[exit], lake_id, bounds, lake_id_layer).unwrap_or_else(|| vec![exit]);
+    let mut path = through_lake;
+    if path.last().copied() != Some(to) {
+        path.push(to);
+    }
+    Some(path)
+}
+
+fn farthest_lake_cell(
+    start: usize,
+    lake_id: i32,
+    bounds: &MapBounds,
+    lake_id_layer: &DenseLayer,
+) -> Option<usize> {
+    use std::collections::{HashSet, VecDeque};
+    let mut queue = VecDeque::from([(start, 0u32)]);
+    let mut seen = HashSet::from([start]);
+    let mut best = (start, 0u32);
+    while let Some((current, dist)) = queue.pop_front() {
+        if dist > best.1 || (dist == best.1 && current < best.0) {
+            best = (current, dist);
+        }
+        let Some(axial) = bounds.from_index(current) else {
+            continue;
+        };
+        for neighbor in axial.neighbors() {
+            let Some(idx) = bounds.index_of(neighbor) else {
+                continue;
+            };
+            if lake_id_layer.int_or(idx, 0) != lake_id || seen.contains(&idx) {
+                continue;
+            }
+            seen.insert(idx);
+            queue.push_back((idx, dist + 1));
+        }
+    }
+    Some(best.0)
 }
 
 fn lake_neighbor(axial: Axial, bounds: &MapBounds, lake_id_layer: &DenseLayer) -> Option<usize> {
@@ -338,6 +441,68 @@ mod tests {
                 vec![outlet, downstream],
                 vec![inlet, lake, outlet],
             ]
+        );
+    }
+
+    #[test]
+    fn render_paths_span_lake_when_outlet_segment_has_no_land_cells() {
+        let bounds = MapBounds::new(5, 5);
+        let upstream = bounds.index_of(Axial::new(2, 0)).unwrap();
+        let inlet = bounds.index_of(Axial::new(1, 0)).unwrap();
+        let lake = bounds.index_of(Axial::new(0, 0)).unwrap();
+        let far_lake = bounds.index_of(Axial::new(-1, 0)).unwrap();
+        let mut lake_id = DenseLayer::new_integer("lake_id", bounds.len());
+        for idx in [lake, far_lake] {
+            lake_id.set(idx, DenseState::Value(LayerValue::Int(1)));
+        }
+
+        let graph = RiverGraph {
+            nodes: vec![
+                node(1, RiverGraphNodeKind::Source, 0, Some(upstream)),
+                node(2, RiverGraphNodeKind::LakeInlet, 7, None),
+                node(3, RiverGraphNodeKind::LakeOutlet, 7, None),
+                node(4, RiverGraphNodeKind::Mouth, 8, None),
+            ],
+            segments: vec![
+                PhysicalSegment {
+                    id: 1,
+                    from_node: 1,
+                    to_node: 2,
+                    cells: vec![inlet],
+                },
+                PhysicalSegment {
+                    id: 2,
+                    from_node: 3,
+                    to_node: 4,
+                    cells: vec![],
+                },
+            ],
+            channel_mask: vec![],
+            channel_segment_id: vec![],
+            channel_node_id: vec![],
+        };
+        let elevation = DenseLayer::new_integer("elevation", bounds.len());
+
+        let paths = river_render_paths(&graph, &bounds, &elevation, Some(&lake_id)).paths;
+        assert!(paths
+            .iter()
+            .any(|path| path.first() == Some(&inlet) && path.contains(&lake)));
+        assert!(paths.iter().any(|path| path.contains(&far_lake)));
+    }
+
+    #[test]
+    fn lake_traverse_from_inlet_reaches_farthest_lake_cell() {
+        let bounds = MapBounds::new(5, 5);
+        let inlet = bounds.index_of(Axial::new(1, 0)).unwrap();
+        let lake = bounds.index_of(Axial::new(0, 0)).unwrap();
+        let far_lake = bounds.index_of(Axial::new(-1, 0)).unwrap();
+        let mut lake_id = DenseLayer::new_integer("lake_id", bounds.len());
+        for idx in [lake, far_lake] {
+            lake_id.set(idx, DenseState::Value(LayerValue::Int(1)));
+        }
+        assert_eq!(
+            lake_traverse_from_inlet(inlet, &bounds, &lake_id),
+            Some(vec![inlet, lake, far_lake])
         );
     }
 
