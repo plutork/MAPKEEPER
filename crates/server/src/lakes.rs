@@ -7,8 +7,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use mapkeeper_core::layer::ELEVATION_LAYER_ID;
 use mapkeeper_core::lakes::{validate_catalog, LakeCatalog, LakeError};
+use mapkeeper_core::layer::ELEVATION_LAYER_ID;
 use mapkeeper_core::worldgen::hydrology::{analyze_depressions, generate_lakes, LakeDensity};
 use serde::{Deserialize, Serialize};
 

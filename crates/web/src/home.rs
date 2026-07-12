@@ -13,8 +13,8 @@ use crate::dom::{
     show_view, sync_preset_size_warning, window,
 };
 use crate::state::{
-    AppState, CreateProjectInput, DeleteProjectInput,
-    ForgetProjectInput, OpenProjectInput, ProjectStatus,
+    AppState, CreateProjectInput, DeleteProjectInput, ForgetProjectInput, OpenProjectInput,
+    ProjectStatus,
 };
 use crate::wizard::{
     build_step_label, close_build_wizard, ensure_wizard_recipe, open_build_wizard,

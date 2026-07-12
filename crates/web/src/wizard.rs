@@ -5,19 +5,18 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::api::{
-    flush_pending_paints, load_elevation, load_geology, load_map,
-    persist_build_draft, post_lake_generate, post_river_generate, refresh_projects,
+    flush_pending_paints, load_elevation, load_geology, load_map, persist_build_draft,
+    post_lake_generate, post_river_generate, refresh_projects,
 };
-use crate::water_diag::sync_water_diagnostics;
+use crate::brush::reset_view_on_world_open;
 use crate::brush::{effective_brush_radius_from_hex_size, paint_stamp_cells};
 use crate::canvas::{current_hex_size_px, schedule_redraw};
 use crate::dom::{
-    active_attr_in_group, click_target_element, document, hide_post_finish_note, hide_wiz_confirm,
-    select_value, set_drawer_open, set_select_value, set_text, set_world_label,
-    show_post_finish_note, show_wiz_confirm, sync_preset_size_warning, clear_inspect_panel,
+    active_attr_in_group, clear_inspect_panel, click_target_element, document,
+    hide_post_finish_note, hide_wiz_confirm, select_value, set_drawer_open, set_select_value,
+    set_text, set_world_label, show_post_finish_note, show_wiz_confirm, sync_preset_size_warning,
     toggle_active_in_group,
 };
-use crate::brush::reset_view_on_world_open;
 use crate::state::{
     bump_content_rev, fresh_elevation_layer, set_elevation_cell, AppState, BuildBoundsInput,
     BuildBoundsResponse, BuildStateInput, WizConfirmKind, WizardClimateGenerateInput,
@@ -25,6 +24,7 @@ use crate::state::{
     WizardLandMaskGenerateInput, WizardLandMaskGenerateResponse, MAX_BRUSH_RADIUS,
     MIN_BRUSH_RADIUS, PAINT_BATCH_MAX_CELLS, PAINT_SAVE_COOLDOWN_MS,
 };
+use crate::water_diag::sync_water_diagnostics;
 use gloo_timers::future::TimeoutFuture;
 use mapkeeper_core::hex::MapBounds;
 use mapkeeper_core::land_mask::{find_recipe, next_recipe, pick_recipe, LayoutClass};
@@ -846,11 +846,7 @@ async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
         let payload: Vec<WizardLandMaskCellInput<'_>> = chunk
             .iter()
             .zip(kinds.iter())
-            .map(|(((q, r), _), kind)| WizardLandMaskCellInput {
-                q: *q,
-                r: *r,
-                kind,
-            })
+            .map(|(((q, r), _), kind)| WizardLandMaskCellInput { q: *q, r: *r, kind })
             .collect();
         let sent = gloo_net::http::Request::put("/api/build/land-mask/cells")
             .json(&payload)
@@ -1503,7 +1499,8 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
         });
         if let Ok(Some(root)) = document().query_selector("#wiz-panel-step6") {
-            let _ = root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+            let _ =
+                root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
         closure.forget();
     }

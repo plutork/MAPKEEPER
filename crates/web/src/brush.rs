@@ -1,14 +1,12 @@
 //! Brush tiers, paint stamps, and dock brush UI sync (D-94).
 
 use crate::canvas::current_hex_size_px;
-use crate::dom::{
-    document, set_text,
-};
-use crate::state::{
-    AppState, Brush, MAX_BRUSH_TIER, MAX_EFFECTIVE_BRUSH_RADIUS, MIN_BRUSH_TIER, BRUSH_PREVIEW_HEX_DETAIL_MAX,
-    BRUSH_SCREEN_DIAMETERS_PX,
-};
+use crate::dom::{document, set_text};
 use crate::elevation_view::{self, ColorMode};
+use crate::state::{
+    AppState, Brush, BRUSH_PREVIEW_HEX_DETAIL_MAX, BRUSH_SCREEN_DIAMETERS_PX, MAX_BRUSH_TIER,
+    MAX_EFFECTIVE_BRUSH_RADIUS, MIN_BRUSH_TIER,
+};
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::rivers::RiverCatalog;
 use wasm_bindgen::JsCast;

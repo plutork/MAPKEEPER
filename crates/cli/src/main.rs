@@ -18,6 +18,7 @@ use mapkeeper_core::hydro::{
     filled_elevation_layer, hydro_from_elevation, DEFAULT_LAND_ELEVATION, ELEVATION_LAYER_ID,
     OCEAN_ELEVATION,
 };
+use mapkeeper_core::lakes::{LakeCatalog, LAKE_CATALOG_FILE};
 use mapkeeper_core::layer::{
     Bounds, DenseLayer, DenseState, LayerValue, MapManifest, ValueType, RIVER_ID_LAYER_ID,
     TERRAIN_LAYER_ID,
@@ -25,14 +26,15 @@ use mapkeeper_core::layer::{
 use mapkeeper_core::map_preset::{legacy_default_bounds, parse_map_preset, MapPreset};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
-use mapkeeper_core::lakes::{LakeCatalog, LAKE_CATALOG_FILE};
 use mapkeeper_core::river_flux::{generate_with_owners, RiverFluxParams};
 use mapkeeper_core::rivers::{
     append_cell, create_river, delete_river, pop_last_cell, sync_river_id_layer, RiverCatalog,
     RIVER_CATALOG_FILE,
 };
 use mapkeeper_core::world;
-use mapkeeper_core::worldgen::hydrology::{analyze_depressions, generate_lakes, LakeDensity, RiverDensity};
+use mapkeeper_core::worldgen::hydrology::{
+    analyze_depressions, generate_lakes, LakeDensity, RiverDensity,
+};
 use serde::Deserialize;
 
 #[derive(Parser)]
@@ -916,7 +918,10 @@ fn cmd_rivers_generate(world: &Path, density: &str) -> Result<()> {
         eprintln!("river flux: uniform precipitation fallback (no precipitation layer)");
     }
     if out.rejected_rivers > 0 {
-        eprintln!("river flux: rejected {} invalid river trees", out.rejected_rivers);
+        eprintln!(
+            "river flux: rejected {} invalid river trees",
+            out.rejected_rivers
+        );
     }
     println!("{}", out.catalog.to_json_pretty()?);
     Ok(())

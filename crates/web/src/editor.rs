@@ -9,28 +9,26 @@ use crate::api::{
 };
 use crate::brush::{
     active_dock_tab, apply_elevation_brush_intent, apply_paint_brush, brush_absolute_elevation,
-    brush_delta_sign, brush_paints, clear_pointer_interaction,
-    deactivate_paint_brush, effective_brush_radius_from_hex_size, effective_paint_radius,
-    river_brush, sync_brush_effective_label, sync_brush_radius_active, sync_brush_step_active, sync_falloff_active, sync_paint_tool_ui, sync_river_status,
-    terrain_brush,
+    brush_delta_sign, brush_paints, clear_pointer_interaction, deactivate_paint_brush,
+    effective_brush_radius_from_hex_size, effective_paint_radius, river_brush,
+    sync_brush_effective_label, sync_brush_radius_active, sync_brush_step_active,
+    sync_falloff_active, sync_paint_tool_ui, sync_river_status, terrain_brush,
 };
-use crate::canvas::{
-    clamp_zoom, current_hex_size_px, hex_layout, map_layout, schedule_redraw,
-};
+use crate::canvas::{clamp_zoom, current_hex_size_px, hex_layout, map_layout, schedule_redraw};
 use crate::dom::{
-    active_attr_in_group, canvas, click_target_element, document, drawer_is_open,
-    input, set_dock_tab, set_drawer_open, set_text, textarea, toggle_active_in_group, window,
+    active_attr_in_group, canvas, click_target_element, document, drawer_is_open, input,
+    set_dock_tab, set_drawer_open, set_text, textarea, toggle_active_in_group, window,
 };
+use crate::elevation_view::ColorMode;
 use crate::state::{
-    bump_content_rev, elevation_at, grid_lines_toggle_label, set_elevation_cell, AppState, Brush, ProfileInput, MAX_BRUSH_TIER, MAX_EFFECTIVE_BRUSH_RADIUS, MIN_BRUSH_TIER,
-    PAN_DRAG_THRESHOLD,
+    bump_content_rev, elevation_at, grid_lines_toggle_label, set_elevation_cell, AppState, Brush,
+    ProfileInput, MAX_BRUSH_TIER, MAX_EFFECTIVE_BRUSH_RADIUS, MIN_BRUSH_TIER, PAN_DRAG_THRESHOLD,
 };
-use mapkeeper_core::hex::{Axial, MapBounds};
 use crate::wizard::{
     close_build_wizard, queue_wizard_land_mask_stamp, schedule_wizard_stamp_flush,
     wizard_is_active, wizard_return_home,
 };
-use crate::elevation_view::ColorMode;
+use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::stamp_delta;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -623,7 +621,8 @@ pub fn attach_generate_lakes_click(state: Rc<RefCell<AppState>>) {
             }
         });
         if let Ok(Some(root)) = document().query_selector("[data-drawer=\"rivers\"]") {
-            let _ = root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+            let _ =
+                root.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
         closure.forget();
     }

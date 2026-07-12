@@ -23,8 +23,9 @@ use canvas::redraw;
 use dom::set_text;
 use editor::{
     attach_brush_hover_preview, attach_canvas_click, attach_close_click, attach_dock_click,
-    attach_escape_key, attach_generate_lakes_click, attach_generate_rivers_click, attach_paint_drag, attach_pan_drag,
-    attach_save_click, attach_switch_world_click, attach_wheel_zoom, attach_window_resize,
+    attach_escape_key, attach_generate_lakes_click, attach_generate_rivers_click,
+    attach_paint_drag, attach_pan_drag, attach_save_click, attach_switch_world_click,
+    attach_wheel_zoom, attach_window_resize,
 };
 use home::{
     attach_browse_folder_click, attach_build_start_click, attach_create_click,
@@ -44,9 +45,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use elevation_view::ColorMode;
+use mapkeeper_core::lakes::LakeCatalog;
 use mapkeeper_core::map_preset::MapPreset;
 use mapkeeper_core::rivers::RiverCatalog;
-use mapkeeper_core::lakes::LakeCatalog;
 use wasm_bindgen::prelude::*;
 
 pub(crate) fn perf_emit(metrics: &PerfMetrics) {

@@ -7,15 +7,16 @@ use std::collections::{HashMap, HashSet};
 use crate::climate::PRECIPITATION_LAYER_ID;
 use crate::hex::MapBounds;
 use crate::hydro::{DEFAULT_LAND_ELEVATION, SEA_LEVEL};
-use crate::layer::DenseLayer;
 use crate::lakes::LakeCatalog;
+use crate::layer::DenseLayer;
 use crate::rivers::{River, RiverCatalog, RIVER_CATALOG_SCHEMA_VERSION};
 use crate::worldgen::hydrology::lakes::lake_outflow_supply;
-use crate::worldgen::hydrology::types::{DepressionAnalysis, RiverDensity};
 use crate::worldgen::hydrology::river_validate::{
-    classify_terminal, enforce_strict_generated_catalog, mouth_touches_sea as validate_mouth_touches_sea,
-    would_assign_parent_cycle, RiverTerminal, RiverValidationContext,
+    classify_terminal, enforce_strict_generated_catalog,
+    mouth_touches_sea as validate_mouth_touches_sea, would_assign_parent_cycle, RiverTerminal,
+    RiverValidationContext,
 };
+use crate::worldgen::hydrology::types::{DepressionAnalysis, RiverDensity};
 
 use super::depression_fill::analyze_depressions;
 
@@ -133,14 +134,7 @@ pub fn generate_with_owners(
         );
     }
 
-    let mut catalog = build_catalog(
-        &owner,
-        heights,
-        bounds,
-        &lake_cells,
-        parents,
-        next_id,
-    );
+    let mut catalog = build_catalog(&owner, heights, bounds, &lake_cells, parents, next_id);
     let pre_count = catalog.rivers.len() as u32;
     let rejected_trace = finalize_traced_catalog(
         &mut catalog,
@@ -345,12 +339,7 @@ fn build_catalog(
     }
 }
 
-fn trace_owned_stem(
-    id: u32,
-    owners: &[u32],
-    heights: &[i32],
-    bounds: &MapBounds,
-) -> Vec<usize> {
+fn trace_owned_stem(id: u32, owners: &[u32], heights: &[i32], bounds: &MapBounds) -> Vec<usize> {
     let owned: HashSet<usize> = owners
         .iter()
         .enumerate()
@@ -372,9 +361,7 @@ fn trace_owned_stem(
         .into_iter()
         .flat_map(|cell| cell.neighbors())
         .filter_map(|n| bounds.index_of(n))
-        .filter(|&n| {
-            owned.contains(&n) && heights[n] < heights[cur] && heights[n] > SEA_LEVEL
-        })
+        .filter(|&n| owned.contains(&n) && heights[n] < heights[cur] && heights[n] > SEA_LEVEL)
         .min_by_key(|&n| heights[n])
     {
         if chain.contains(&next) {
@@ -511,9 +498,8 @@ fn next_trace_step(
     path: &[usize],
 ) -> Option<usize> {
     let blocked: HashSet<usize> = path.iter().copied().collect();
-    strict_downhill_step(mouth, heights, bounds, lake_cells, &blocked).or_else(|| {
-        plateau_step(mouth, heights, bounds, lake_cells, &blocked)
-    })
+    strict_downhill_step(mouth, heights, bounds, lake_cells, &blocked)
+        .or_else(|| plateau_step(mouth, heights, bounds, lake_cells, &blocked))
 }
 
 fn extend_river_path(
@@ -664,17 +650,18 @@ fn finalize_traced_catalog(
         for &c in &cells {
             cell_to_river.insert(c, id);
         }
-        updates.push(TraceUpdate { idx, cells, outcome });
+        updates.push(TraceUpdate {
+            idx,
+            cells,
+            outcome,
+        });
     }
     for update in &mut updates {
         trim_ocean_tail(&mut update.cells, heights);
         let id = catalog.rivers[update.idx].id;
         if update.cells.len() > 1 {
             let mouth = *update.cells.last().unwrap();
-            if cell_to_river
-                .get(&mouth)
-                .is_some_and(|&owner| owner != id)
-            {
+            if cell_to_river.get(&mouth).is_some_and(|&owner| owner != id) {
                 update.cells.pop();
                 let new_mouth = *update.cells.last().unwrap();
                 if let Some((pid, _)) =
@@ -686,7 +673,9 @@ fn finalize_traced_catalog(
                 }
             }
         }
-        if update.cells.len() < MIN_RIVER_CELLS && !matches!(update.outcome, TraceOutcome::Parent { .. }) {
+        if update.cells.len() < MIN_RIVER_CELLS
+            && !matches!(update.outcome, TraceOutcome::Parent { .. })
+        {
             update.outcome = TraceOutcome::Stuck;
         }
     }
@@ -910,8 +899,8 @@ pub fn river_path_cell_count(catalog: &RiverCatalog) -> usize {
 mod tests {
     use super::*;
     use crate::hex::Axial;
-    use crate::layer::{DenseLayer, DenseState, LayerValue};
     use crate::lakes::{Lake, LakeCatalog};
+    use crate::layer::{DenseLayer, DenseState, LayerValue};
     use crate::worldgen::hydrology::analyze_depressions;
     use crate::worldgen::hydrology::river_validate::{
         validate_generated_catalog_strict, RiverValidationContext,
@@ -1132,7 +1121,8 @@ mod tests {
         }
         let scaled = generate_with_owners(&elev, &bounds, Some(&balanced), default_params());
         assert!(scaled.used_climate);
-        let delta = (scaled.catalog.rivers.len() as i32 - uniform.catalog.rivers.len() as i32).abs();
+        let delta =
+            (scaled.catalog.rivers.len() as i32 - uniform.catalog.rivers.len() as i32).abs();
         assert!(
             delta <= 3,
             "balanced mean precip should track uniform river count, delta={delta}"
@@ -1150,24 +1140,10 @@ mod tests {
             lakes: None,
             density,
         };
-        let few = generate_with_owners(
-            &elev,
-            &bounds,
-            None,
-            params_base(RiverDensity::Few),
-        );
-        let balanced = generate_with_owners(
-            &elev,
-            &bounds,
-            None,
-            params_base(RiverDensity::Balanced),
-        );
-        let many = generate_with_owners(
-            &elev,
-            &bounds,
-            None,
-            params_base(RiverDensity::Many),
-        );
+        let few = generate_with_owners(&elev, &bounds, None, params_base(RiverDensity::Few));
+        let balanced =
+            generate_with_owners(&elev, &bounds, None, params_base(RiverDensity::Balanced));
+        let many = generate_with_owners(&elev, &bounds, None, params_base(RiverDensity::Many));
         let f = few.catalog.rivers.len();
         let b = balanced.catalog.rivers.len();
         let m = many.catalog.rivers.len();
@@ -1192,11 +1168,7 @@ mod tests {
             })
             .collect();
         land.sort_by_key(|(_, h)| *h);
-        let lake_cells: Vec<usize> = land
-            .iter()
-            .take(4)
-            .map(|(i, _)| *i)
-            .collect();
+        let lake_cells: Vec<usize> = land.iter().take(4).map(|(i, _)| *i).collect();
         assert!(
             lake_cells.len() >= 2,
             "fixture needs land cells on slope lowland"
@@ -1280,7 +1252,8 @@ mod tests {
             .join(name)
             .join("map");
         let manifest_raw = std::fs::read_to_string(root.join("manifest.json")).unwrap();
-        let manifest: crate::layer::MapManifest = crate::layer::MapManifest::from_json(&manifest_raw).unwrap();
+        let manifest: crate::layer::MapManifest =
+            crate::layer::MapManifest::from_json(&manifest_raw).unwrap();
         let (w, h) = match manifest.bounds {
             crate::layer::Bounds::HexRectangle { width, height } => (width, height),
         };
@@ -1319,7 +1292,9 @@ mod tests {
     fn small_preset_seed_sweep_passes_strict_validate() {
         use crate::map_preset::MapPreset;
         use crate::worldgen::climate::{generate_climate_layers, PrecipitationStyle};
-        use crate::worldgen::elevation::{elevation_from_land_mask_and_geology, ElevationIntensity};
+        use crate::worldgen::elevation::{
+            elevation_from_land_mask_and_geology, ElevationIntensity,
+        };
         use crate::worldgen::geology::{generate_geology, GeologyStyle};
         use crate::worldgen::land::{generate_land_mask, LayoutClass, ShoreCharacter};
 
@@ -1335,8 +1310,13 @@ mod tests {
                     seed,
                     ElevationIntensity::Standard,
                 );
-                let climate =
-                    generate_climate_layers(&bounds, &mask, &elev, PrecipitationStyle::Balanced, seed);
+                let climate = generate_climate_layers(
+                    &bounds,
+                    &mask,
+                    &elev,
+                    PrecipitationStyle::Balanced,
+                    seed,
+                );
                 let analysis = analyze_depressions(&elev, &bounds);
                 let out = generate_with_owners(
                     &elev,

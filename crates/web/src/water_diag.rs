@@ -12,11 +12,7 @@ use crate::state::{AppState, WaterGenTrace};
 pub(crate) fn lake_catalog_stats(catalog: &LakeCatalog) -> (usize, usize, usize) {
     let lakes = catalog.lakes.len();
     let cells: usize = catalog.lakes.iter().map(|l| l.cells.len()).sum();
-    let endorheic = catalog
-        .lakes
-        .iter()
-        .filter(|l| l.endorheic)
-        .count();
+    let endorheic = catalog.lakes.iter().filter(|l| l.endorheic).count();
     (lakes, cells, endorheic)
 }
 
@@ -58,9 +54,7 @@ pub(crate) fn format_water_diagnostics(state: &AppState) -> String {
         "lakes: {lake_n} · {lake_cells} cells · endorheic {endorheic} · next_id {}\n",
         state.lakes.next_id
     ));
-    out.push_str(&format!(
-        "rivers: {river_n} · {path_cells} path cells\n",
-    ));
+    out.push_str(&format!("rivers: {river_n} · {path_cells} path cells\n",));
     out.push_str(&format!("precip layer: {precip}\n"));
     out.push('\n');
     out.push_str("=== last action ===\n");

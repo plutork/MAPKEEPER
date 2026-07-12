@@ -10,8 +10,13 @@ use crate::rivers::{River, RiverCatalog};
 /// Computed terminal — not persisted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RiverTerminal {
-    Sea { mouth_cell: usize },
-    Lake { mouth_cell: usize, lake_id: u32 },
+    Sea {
+        mouth_cell: usize,
+    },
+    Lake {
+        mouth_cell: usize,
+        lake_id: u32,
+    },
     Parent {
         mouth_cell: usize,
         parent_id: u32,
@@ -96,11 +101,7 @@ pub fn mouth_touches_sea(index: usize, heights: &[i32], bounds: &MapBounds) -> b
     neighbors(bounds, index).any(|n| heights[n] <= SEA_LEVEL)
 }
 
-pub fn mouth_touches_lake(
-    index: usize,
-    lake_cells: &HashSet<usize>,
-    bounds: &MapBounds,
-) -> bool {
+pub fn mouth_touches_lake(index: usize, lake_cells: &HashSet<usize>, bounds: &MapBounds) -> bool {
     neighbors(bounds, index).any(|n| lake_cells.contains(&n))
 }
 
@@ -215,10 +216,7 @@ fn validate_structural_one(
             }
             r.cells.contains(&idx).then_some(r.id)
         }) {
-            push(
-                &mut out,
-                RiverValidationCode::CellOccupied,
-            );
+            push(&mut out, RiverValidationCode::CellOccupied);
             let _ = other;
             break;
         }
@@ -437,10 +435,7 @@ pub fn enforce_strict_generated_catalog(
 }
 
 /// Remove rivers whose root tree lacks a valid sea/lake terminal.
-pub fn prune_invalid_river_trees(
-    catalog: &mut RiverCatalog,
-    ctx: &RiverValidationContext,
-) -> u32 {
+pub fn prune_invalid_river_trees(catalog: &mut RiverCatalog, ctx: &RiverValidationContext) -> u32 {
     let mut rejected = 0u32;
     loop {
         let invalid_roots: HashSet<u32> = catalog
@@ -448,8 +443,9 @@ pub fn prune_invalid_river_trees(
             .iter()
             .filter(|r| is_root(r))
             .filter(|r| {
-                classify_terminal(r, catalog, ctx)
-                    .is_none_or(|t| !matches!(t, RiverTerminal::Sea { .. } | RiverTerminal::Lake { .. }))
+                classify_terminal(r, catalog, ctx).is_none_or(|t| {
+                    !matches!(t, RiverTerminal::Sea { .. } | RiverTerminal::Lake { .. })
+                })
             })
             .map(|r| r.id)
             .collect();
@@ -505,10 +501,7 @@ mod tests {
     }
 
     fn land_idx(bounds: &MapBounds) -> usize {
-        bounds
-            .from_index(0)
-            .map(|_| 0)
-            .unwrap_or(0)
+        bounds.from_index(0).map(|_| 0).unwrap_or(0)
     }
 
     fn idx(bounds: &MapBounds, q: i32, r: i32) -> usize {

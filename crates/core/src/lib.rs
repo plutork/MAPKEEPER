@@ -5,11 +5,11 @@ pub mod build_state;
 pub mod cell_id;
 pub mod hex;
 pub mod hydro;
+pub mod lakes;
 pub mod layer;
 pub mod map_preset;
 pub mod profile;
 pub mod projects;
-pub mod lakes;
 pub mod rivers;
 pub mod world;
 

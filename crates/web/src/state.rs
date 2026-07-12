@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use crate::elevation_view::ColorMode;
 use mapkeeper_core::hex::{Axial, MapBounds};
-use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
 use mapkeeper_core::lakes::LakeCatalog;
+use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
 use mapkeeper_core::rivers::RiverCatalog;
 use serde::{Deserialize, Serialize};
 
