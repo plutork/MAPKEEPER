@@ -750,11 +750,11 @@ pub(crate) async fn post_river_generate(
     let named_n = body
         .response
         .named_river_count
-        .unwrap_or_else(|| body.response.named_rivers.len());
+        .unwrap_or(body.response.named_rivers.len());
     let segments = body
         .response
         .channel_segment_count
-        .unwrap_or_else(|| body.response.catalog.rivers.len());
+        .unwrap_or(body.response.catalog.rivers.len());
     let channel_cells = body.response.channel_cell_count.unwrap_or_else(|| {
         body.response
             .catalog

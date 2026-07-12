@@ -48,6 +48,20 @@ Run yourself. Report **OK / FAIL** briefly. Stop at the first blocking FAIL and 
 10. Prefer reproducing with **`.\setup.ps1`** (first-time) or **`.\run.ps1`** unless the error is already clear. Use `cargo check -p mapkeeper-desktop` only as a faster narrowing step.
 11. For **update** failures: dirty tree? `ff-only` rejection? network/auth?
 
+## Maintainer hygiene (contributors — not first-line alpha `/doctor`)
+
+When the user is **pushing MAPKEEPER changes** (not stuck on `run.ps1`):
+
+| Situation | Action |
+|-----------|--------|
+| Before push | `.\scripts\check.ps1` — local CI parity (schema, test, clippy, codemap, encoding) |
+| Faster daily habit | Enable **opt-in** pre-push hook: `.\setup.ps1` asks, or `git config core.hooksPath .githooks` |
+| Hook disabled / skipped | Manual `.\scripts\check.ps1` is enough — hooks are **not** mandatory for alpha testers |
+| Check step fails | Read step hint in `check.ps1` output; fix toolchain or code; do not patch product source unless user asks |
+| Still stuck on env | Continue ordered checks above (MSVC, wasm, web dist) |
+
+`update.ps1` already runs `check.ps1` before rebuild when the tree is clean.
+
 ## Playbooks
 
 | Failure | Action |

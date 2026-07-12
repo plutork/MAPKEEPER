@@ -412,7 +412,7 @@ Symbols include public modules/types/functions and impl blocks.
 ### `crates/core/src/worldgen/hydrology/render.rs`
 - L14: `struct` `RiverRenderPaths`
 - L22: `fn` `river_render_paths`
-- L116: `fn` `legacy_river_render_paths`
+- L117: `fn` `legacy_river_render_paths`
 
 ### `crates/core/src/worldgen/hydrology/river_polygon.rs`
 - L4: `fn` `smooth_centerline`
@@ -631,14 +631,14 @@ Symbols include public modules/types/functions and impl blocks.
 - L428: `fn` `lakes_file_path`
 - L432: `fn` `hydrology_snapshot_path`
 - L438: `fn` `hydrology_base_fingerprint`
-- L468: `fn` `persist_hydrology_snapshot`
-- L521: `fn` `read_current_hydrology_snapshot`
-- L536: `fn` `invalidate_hydrology_snapshot`
-- L544: `fn` `read_lake_catalog`
-- L551: `fn` `write_lake_catalog`
-- L574: `fn` `persist_lakes`
-- L593: `fn` `clear_rivers`
-- L599: `fn` `persist_lake_generation`
+- L466: `fn` `persist_hydrology_snapshot`
+- L519: `fn` `read_current_hydrology_snapshot`
+- L534: `fn` `invalidate_hydrology_snapshot`
+- L542: `fn` `read_lake_catalog`
+- L549: `fn` `write_lake_catalog`
+- L572: `fn` `persist_lakes`
+- L591: `fn` `clear_rivers`
+- L597: `fn` `persist_lake_generation`
 
 ### `crates/web/src/api.rs`
 - L822: `fn` `schedule_paint_flush`

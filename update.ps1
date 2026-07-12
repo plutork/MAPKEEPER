@@ -36,7 +36,7 @@ if ($LASTEXITCODE -ne 0) {
 $after = (& git rev-parse --short HEAD).Trim()
 Write-Host "After:  $after"
 
-Write-Host "Running pre-build checks (tests + codemap drift)..."
+Write-Host "Running pre-build checks (CI parity via scripts/check.ps1)..."
 powershell -File (Join-Path $Root "scripts\check.ps1")
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Checks failed - fix before update/rebuild."

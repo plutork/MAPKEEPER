@@ -56,7 +56,8 @@ pub fn river_render_paths(
         .collect();
     let mut paths = segment_paths
         .iter()
-        .filter_map(|(_, cells)| (!cells.is_empty()).then(|| cells.clone()))
+        .filter(|&(_, cells)| !cells.is_empty())
+        .map(|(_, cells)| cells.clone())
         .collect::<Vec<_>>();
 
     for inlet in graph

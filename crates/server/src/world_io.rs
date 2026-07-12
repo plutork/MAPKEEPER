@@ -445,9 +445,7 @@ pub(crate) fn hydrology_base_fingerprint(world_path: &Path) -> (u64, String) {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for layer_id in INPUTS {
         for byte in layer_id.bytes().chain([0u8]).chain(
-            std::fs::read(layer_file_path(world_path, layer_id))
-                .unwrap_or_default()
-                .into_iter(),
+            std::fs::read(layer_file_path(world_path, layer_id)).unwrap_or_default(),
         ) {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(0x100_0000_01b3);
@@ -702,6 +700,9 @@ mod persist_lakes_tests {
 
     #[test]
     fn rollback_catalog_when_layer_write_fails() {
+        let _lock = HYDROLOGY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let dir = tempdir().unwrap();
         let world = dir.path();
         let bounds = seed_world(world);

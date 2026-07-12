@@ -111,9 +111,9 @@ pub fn provisional_drainage(
 ) -> ProvisionalDrainage {
     let n = bounds.len();
     let mut accumulated_runoff = vec![0u64; n];
-    for index in 0..n {
+    for (index, slot) in accumulated_runoff.iter_mut().enumerate().take(n) {
         if analysis.original_heights[index] > SEA_LEVEL {
-            accumulated_runoff[index] = terrain_runoff(index, precipitation, precip_state);
+            *slot = terrain_runoff(index, precipitation, precip_state);
         }
     }
 
@@ -132,7 +132,7 @@ pub fn provisional_drainage(
     }
 
     let mut basin_supply = HashMap::new();
-    for (&basin, _) in &analysis.spill_cell {
+    for &basin in analysis.spill_cell.keys() {
         let lowest = analysis
             .basin_id
             .iter()

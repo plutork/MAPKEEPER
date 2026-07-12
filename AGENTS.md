@@ -21,6 +21,7 @@ Human guide: [`docs/CURSOR-ALPHA.md`](docs/CURSOR-ALPHA.md).
 - **Do not** create commits or branches unless the user explicitly asks as a contributor.
 - **Do not** silently install heavy toolchains — always ask first; MSVC is manual + confirmation.
 - `.\update.ps1`: **stop** if the git working tree is dirty.
+- **Before push (maintainers):** `.\scripts\check.ps1` — local mirror of CI (schema, tests, clippy, codemap, encoding). Optional: enable `.githooks/pre-push` via `setup.ps1`.
 - **Never delete** world folders.
 - **Do not** reference private maintainer-only repos or internal OS docs.
 - Do not invent installer-first download/SmartScreen flows unless a future decision restores consumer installer distribution.

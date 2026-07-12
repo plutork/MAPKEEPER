@@ -98,7 +98,7 @@ if ($LASTEXITCODE -ne 0) {
 if (Ask-Yes "Enable pre-push checks (scripts/check.ps1 - tests + codemap drift)?") {
     & git config core.hooksPath .githooks
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "Could not set core.hooksPath — enable manually: git config core.hooksPath .githooks"
+        Write-Host "Could not set core.hooksPath - enable manually: git config core.hooksPath .githooks"
     } else {
         Write-Host "Git hooks enabled (.githooks/pre-push)."
     }

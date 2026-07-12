@@ -48,9 +48,9 @@ pub fn build_drainage_graph(
     let lake_at_cell = lake_cells(lakes, bounds)?;
     let mut nodes = Vec::new();
     let mut terrain_node = vec![None; bounds.len()];
-    for cell in 0..bounds.len() {
+    for (cell, slot) in terrain_node.iter_mut().enumerate().take(bounds.len()) {
         if analysis.original_heights[cell] > SEA_LEVEL && !lake_at_cell.contains_key(&cell) {
-            terrain_node[cell] = Some(DrainageNodeId(nodes.len()));
+            *slot = Some(DrainageNodeId(nodes.len()));
             nodes.push(DrainageNode::TerrainCell(cell));
         }
     }
@@ -99,9 +99,9 @@ pub fn build_drainage_graph(
             let outlet = lake
                 .outlet_cell
                 .ok_or(DrainageGraphError::MissingLakeOutlet { lake_id: lake.id })?;
-            if !lake_at_cell
+            if lake_at_cell
                 .get(&outlet)
-                .is_some_and(|&owner| owner == lake.id)
+                .is_none_or(|&owner| owner != lake.id)
                 && !touches_lake(outlet, lake.id, &lake_at_cell, bounds)
             {
                 return Err(DrainageGraphError::IllegalLakeOutlet {
