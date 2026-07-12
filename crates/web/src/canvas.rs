@@ -7,6 +7,11 @@ use std::rc::Rc;
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::{hydro_from_elevation, HydroKind};
 
+use crate::brush::{
+    brush_preview_uses_circle, effective_paint_radius, paint_stamp_cells, river_brush,
+    sync_brush_effective_label, sync_brush_radius_active, sync_brush_step_active,
+    sync_falloff_active,
+};
 use crate::dom::{canvas, context, perf_now, set_text, window};
 use crate::elevation_view::{
     draw_elevation_label, draw_mountain_glyph, elevation_fill_rgb, labels_status_label,
@@ -15,13 +20,8 @@ use crate::elevation_view::{
 use crate::state::{
     count_visible_in_bounds, draw_snapshot, elevation_at, geology_tint, grid_lines_stats_label,
     grid_lines_toggle_label, show_profile_markers, stroke_grid_enabled, AppState, Brush,
-    BRUSH_PREVIEW_GAP, CANVAS_PAD, FILL_SCALE_GRID_OFF, FILL_SCALE_GRID_ON, GRID_LINE_WIDTH, MIN_ZOOM, ZOOM_CLOSEUP_HEX_PX,
-    ZOOM_MAX_HARD,
-};
-use crate::brush::{
-    brush_preview_uses_circle, effective_paint_radius, paint_stamp_cells, river_brush,
-    sync_brush_effective_label, sync_brush_radius_active, sync_brush_step_active,
-    sync_falloff_active,
+    BRUSH_PREVIEW_GAP, CANVAS_PAD, FILL_SCALE_GRID_OFF, FILL_SCALE_GRID_ON, GRID_LINE_WIDTH,
+    MIN_ZOOM, ZOOM_CLOSEUP_HEX_PX, ZOOM_MAX_HARD,
 };
 use crate::wizard::wizard_is_active;
 use wasm_bindgen::prelude::*;
@@ -174,7 +174,7 @@ pub(crate) fn draw_lakes(
     }
 }
 
-/// river-overlay-layer-v1: straight center-to-center polyline strokes.
+/// Hydrology v2 physical-segment projection: center-to-center polyline strokes.
 pub(crate) fn draw_rivers(
     state: &AppState,
     ctx: &CanvasRenderingContext2d,

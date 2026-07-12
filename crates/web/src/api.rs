@@ -5,9 +5,9 @@ use std::rc::Rc;
 
 use gloo_timers::future::TimeoutFuture;
 use mapkeeper_core::hex::{Axial, MapBounds};
+use mapkeeper_core::lakes::LakeCatalog;
 use mapkeeper_core::layer::DenseLayer;
 use mapkeeper_core::profile::CellProfile;
-use mapkeeper_core::lakes::LakeCatalog;
 use mapkeeper_core::rivers::{river_at_cell, RiverCatalog};
 use serde::{Deserialize, Serialize};
 
@@ -16,10 +16,12 @@ use crate::dom::{input, perf_now, set_text, set_world_label, show_view, textarea
 use crate::home::{refresh_suggested_path, render_project_list};
 use crate::state::{
     bump_content_rev, draw_snapshot, fresh_elevation_layer, AppState, BuildStateInput,
-    LayerCellWrite, MapResponse, PerfMetrics, ProjectsResponse, PAINT_BATCH_MAX_CELLS,
-    PAINT_SAVE_COOLDOWN_MS, WaterGenTrace,
+    LayerCellWrite, MapResponse, PerfMetrics, ProjectsResponse, WaterGenTrace,
+    PAINT_BATCH_MAX_CELLS, PAINT_SAVE_COOLDOWN_MS,
 };
-use crate::water_diag::{lake_catalog_stats, river_catalog_stats, set_water_gen_trace, sync_water_diagnostics};
+use crate::water_diag::{
+    lake_catalog_stats, river_catalog_stats, set_water_gen_trace, sync_water_diagnostics,
+};
 use crate::wizard::sync_wizard_actions;
 
 pub(crate) async fn persist_build_draft(step: u32) -> bool {
@@ -241,6 +243,8 @@ pub(crate) struct RiversGenerateResponse {
     pub(crate) river_density: String,
     #[serde(default)]
     pub(crate) rejected_river_count: u32,
+    #[serde(default)]
+    pub(crate) name_migration_ambiguous_count: usize,
 }
 
 #[derive(Serialize)]
@@ -457,10 +461,7 @@ pub(crate) async fn post_lake_generate(
     if rivers_cleared {
         set_text(status_id, "Rivers cleared — regenerate rivers.");
     } else {
-        set_text(
-            status_id,
-            &format!("Generated {lake_n} lake(s)."),
-        );
+        set_text(status_id, &format!("Generated {lake_n} lake(s)."));
     }
     crate::canvas::schedule_redraw(state);
 }
@@ -545,8 +546,9 @@ pub(crate) async fn post_river_generate(
                 action: "generate_rivers".into(),
                 request: req_line,
                 result: format!(
-                    "rivers={river_n} path_cells={path_cells} rejected={} precip={} density={density_note} lakes_in_catalog={lake_n}",
+                    "rivers={river_n} path_cells={path_cells} rejected={} name_migration_ambiguous={} precip={} density={density_note} lakes_in_catalog={lake_n}",
                     body.rejected_river_count,
+                    body.name_migration_ambiguous_count,
                     body.precip_source
                 ),
                 error: String::new(),
@@ -565,9 +567,7 @@ pub(crate) async fn post_river_generate(
     };
     set_text(
         status_id,
-        &format!(
-            "Generated {river_n} river(s) — {source_note} · density {density_note}",
-        ),
+        &format!("Generated {river_n} river(s) — {source_note} · density {density_note}",),
     );
     crate::canvas::schedule_redraw(state);
 }

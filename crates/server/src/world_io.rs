@@ -16,7 +16,9 @@ use mapkeeper_core::layer::{
 use mapkeeper_core::map_preset::{legacy_default_bounds, MapPreset};
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
 use mapkeeper_core::rivers::{sync_river_id_layer, RiverCatalog, RIVER_CATALOG_FILE};
-use mapkeeper_core::worldgen::hydrology::{HydrologySnapshot, HYDROLOGY_SNAPSHOT_FILE};
+use mapkeeper_core::worldgen::hydrology::{
+    compatibility_river_id_layer, HydrologySnapshot, HYDROLOGY_SNAPSHOT_FILE,
+};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -391,6 +393,7 @@ pub(crate) fn persist_rivers(
     write_dense_layer(world_path, &layer)
 }
 
+#[allow(dead_code)] // Removed with the final legacy hydrology cleanup slice.
 pub(crate) fn persist_generated_rivers(
     world_path: &Path,
     catalog: &RiverCatalog,
@@ -439,7 +442,6 @@ fn is_hydrology_base_input_layer(layer_id: &str) -> bool {
 
 /// Atomically activate one complete v2 hydrology bundle. The previous bundle
 /// is restored if staging or activation fails.
-#[allow(dead_code)] // Snapshot activation endpoint follows in the next slice.
 pub(crate) fn persist_hydrology_snapshot(
     world_path: &Path,
     snapshot: &HydrologySnapshot,
@@ -449,6 +451,9 @@ pub(crate) fn persist_hydrology_snapshot(
         .validate_current(base_revision, &fingerprint)
         .map_err(|err| format!("refusing stale hydrology snapshot: {err:?}"))?;
     let path = hydrology_snapshot_path(world_path);
+    let river_layer_path = layer_file_path(world_path, RIVER_ID_LAYER_ID);
+    let prior_snapshot = std::fs::read_to_string(&path).ok();
+    let prior_river_layer = std::fs::read_to_string(&river_layer_path).ok();
     let parent = path.parent().ok_or("hydrology snapshot has no parent")?;
     std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     let staged = path.with_extension("json.staged");
@@ -473,6 +478,15 @@ pub(crate) fn persist_hydrology_snapshot(
         }
         let _ = std::fs::remove_file(&staged);
         return Err(err.to_string());
+    }
+    let river_layer = compatibility_river_id_layer(
+        &snapshot.channels.river_graph,
+        snapshot.channels.river_graph.channel_mask.len(),
+    );
+    if let Err(err) = write_dense_layer(world_path, &river_layer) {
+        restore_file(&path, prior_snapshot)?;
+        restore_file(&river_layer_path, prior_river_layer)?;
+        return Err(err);
     }
     if had_active {
         std::fs::remove_file(&backup).map_err(|err| err.to_string())?;

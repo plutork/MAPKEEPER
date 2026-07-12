@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::catalog::HydrologyCatalog;
 use super::channel_graph::ChannelGraph;
 use super::drainage_graph::DrainageGraph;
 
@@ -20,6 +21,8 @@ pub struct HydrologySnapshot {
     pub effective_seed: u64,
     pub drainage: DrainageGraph,
     pub channels: ChannelGraph,
+    #[serde(default)]
+    pub catalog: HydrologyCatalog,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,7 +52,13 @@ impl HydrologySnapshot {
             effective_seed,
             drainage,
             channels,
+            catalog: HydrologyCatalog::default(),
         }
+    }
+
+    pub fn with_catalog(mut self, catalog: HydrologyCatalog) -> Self {
+        self.catalog = catalog;
+        self
     }
 
     pub fn validate_current(

@@ -8,11 +8,13 @@ use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use mapkeeper_core::layer::ELEVATION_LAYER_ID;
-use mapkeeper_core::river_flux::{generate_with_owners, RiverFluxParams};
 use mapkeeper_core::rivers::{
     append_cell, cell_index, create_river, delete_river, pop_last_cell, RiverCatalog, RiverError,
 };
-use mapkeeper_core::worldgen::hydrology::{analyze_depressions, RiverDensity};
+use mapkeeper_core::worldgen::hydrology::{
+    analyze_depressions, build_channel_graph, build_drainage_graph, ChannelPolicy,
+    HydrologyCatalog, HydrologySnapshot, RiverDensity,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
@@ -20,6 +22,13 @@ use crate::world_io;
 
 fn river_error_status(err: RiverError) -> (StatusCode, String) {
     (StatusCode::BAD_REQUEST, err.to_string())
+}
+
+fn ensure_catalog_writable() -> Result<(), (StatusCode, String)> {
+    Err((
+        StatusCode::CONFLICT,
+        "legacy river catalog is read-only; generated rivers come from Hydrology v2".to_string(),
+    ))
 }
 
 async fn get_rivers(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
@@ -31,7 +40,11 @@ async fn get_rivers(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoRespo
         )
             .into_response();
     };
-    Json(world_io::read_river_catalog(&active.path)).into_response()
+    match world_io::read_current_hydrology_snapshot(&active.path) {
+        Ok(Some(snapshot)) => Json(snapshot.catalog.compatibility_river_catalog()).into_response(),
+        Ok(None) => Json(world_io::read_river_catalog(&active.path)).into_response(),
+        Err(err) => (StatusCode::CONFLICT, err).into_response(),
+    }
 }
 
 async fn put_rivers(
@@ -46,6 +59,9 @@ async fn put_rivers(
         )
             .into_response();
     };
+    if let Err((status, message)) = ensure_catalog_writable() {
+        return (status, message).into_response();
+    }
     let bounds = world_io::map_bounds(&active.path);
     if let Err(err) = world_io::persist_rivers(&active.path, &catalog, &bounds) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
@@ -72,6 +88,9 @@ async fn append_river_cell(
         )
             .into_response();
     };
+    if let Err((status, message)) = ensure_catalog_writable() {
+        return (status, message).into_response();
+    }
     let bounds = world_io::map_bounds(&active.path);
     let index = match cell_index(&bounds, input.q, input.r) {
         Ok(i) => i,
@@ -105,6 +124,9 @@ async fn pop_river_cell(
         )
             .into_response();
     };
+    if let Err((status, message)) = ensure_catalog_writable() {
+        return (status, message).into_response();
+    }
     let bounds = world_io::map_bounds(&active.path);
     let mut catalog = world_io::read_river_catalog(&active.path);
     if let Err(err) = pop_last_cell(&mut catalog, river_id) {
@@ -128,6 +150,9 @@ async fn delete_river_handler(
         )
             .into_response();
     };
+    if let Err((status, message)) = ensure_catalog_writable() {
+        return (status, message).into_response();
+    }
     let bounds = world_io::map_bounds(&active.path);
     let mut catalog = world_io::read_river_catalog(&active.path);
     if let Err(err) = delete_river(&mut catalog, river_id) {
@@ -146,6 +171,7 @@ struct RiversGenerateResponse {
     precip_source: &'static str,
     river_density: &'static str,
     rejected_river_count: u32,
+    name_migration_ambiguous_count: usize,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -177,37 +203,80 @@ async fn generate_rivers_handler(
         .as_deref()
         .map(RiverDensity::parse)
         .unwrap_or(RiverDensity::Balanced);
-    let _nonce = input.regenerate_nonce.unwrap_or(0);
-    let lakes_ref = if lakes.lakes.is_empty() {
-        None
-    } else {
-        Some(&lakes)
+    let drainage = match build_drainage_graph(&analysis, &lakes, &bounds) {
+        Ok(graph) => graph,
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!("invalid drainage graph: {err:?}"),
+            )
+                .into_response()
+        }
     };
-    let out = generate_with_owners(
-        &elevation,
-        &bounds,
+    let channels = match build_channel_graph(
+        &drainage,
+        &analysis,
         precipitation.as_ref(),
-        RiverFluxParams {
-            analysis: Some(&analysis),
-            lakes: lakes_ref,
-            density,
-        },
-    );
-    if let Err(err) = world_io::persist_generated_rivers(&active.path, &out.catalog, &bounds) {
+        channel_policy(density),
+    ) {
+        Ok(graph) => graph,
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!("invalid channel graph: {err:?}"),
+            )
+                .into_response()
+        }
+    };
+    let legacy = world_io::read_river_catalog(&active.path);
+    let catalog = HydrologyCatalog::from_river_graph(&channels.river_graph, &legacy);
+    let name_migration_ambiguous_count = catalog
+        .migration
+        .iter()
+        .filter(|report| report.ambiguous)
+        .count();
+    let (base_revision, fingerprint) = world_io::hydrology_base_fingerprint(&active.path);
+    let snapshot = HydrologySnapshot::new(
+        base_revision,
+        fingerprint,
+        "hydrology-v2".to_string(),
+        "channel-v1".to_string(),
+        u64::from(input.regenerate_nonce.unwrap_or(0)),
+        drainage,
+        channels,
+    )
+    .with_catalog(catalog);
+    if let Err(err) = world_io::persist_hydrology_snapshot(&active.path, &snapshot) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
-    let precip_source = if out.used_climate {
+    let precip_source = if precipitation.is_some() {
         "climate"
     } else {
         "uniform_fallback"
     };
     Json(RiversGenerateResponse {
-        catalog: out.catalog,
+        catalog: snapshot.catalog.compatibility_river_catalog(),
         precip_source,
         river_density: density.id(),
-        rejected_river_count: out.rejected_rivers,
+        rejected_river_count: 0,
+        name_migration_ambiguous_count,
     })
     .into_response()
+}
+
+fn channel_policy(density: RiverDensity) -> ChannelPolicy {
+    let base = ChannelPolicy::default();
+    match density {
+        RiverDensity::Few => ChannelPolicy {
+            min_flow: base.min_flow.saturating_mul(2),
+            min_contributing_area: base.min_contributing_area.saturating_add(1),
+        },
+        RiverDensity::Balanced => base,
+        RiverDensity::Many => ChannelPolicy {
+            min_flow: (base.min_flow / 2).max(1),
+            min_contributing_area: 1,
+        },
+    }
 }
 
 pub(crate) fn routes() -> Router<Arc<Mutex<AppState>>> {
