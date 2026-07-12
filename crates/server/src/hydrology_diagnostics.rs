@@ -1,4 +1,4 @@
-//! Read-only legacy hydrology diagnostics (hydrology-v2--diagnostics-baseline).
+//! Read-only diagnostics for the active Hydrology v2 snapshot.
 
 use std::sync::{Arc, Mutex};
 
@@ -9,8 +9,9 @@ use axum::routing::get;
 use axum::{Json, Router};
 use mapkeeper_core::lakes::sync_lake_id_layer;
 use mapkeeper_core::layer::{ELEVATION_LAYER_ID, LAKE_ID_LAYER_ID, RIVER_ID_LAYER_ID};
-use mapkeeper_core::rivers::sync_river_id_layer;
-use mapkeeper_core::worldgen::hydrology::{analyze_depressions, diagnose_legacy_hydrology};
+use mapkeeper_core::worldgen::hydrology::{
+    analyze_depressions, compatibility_river_id_layer, diagnose_hydrology,
+};
 use serde::Serialize;
 
 use crate::state::AppState;
@@ -19,8 +20,8 @@ use crate::world_io;
 #[derive(Serialize)]
 struct HydrologyDiagnosticsResponse {
     #[serde(flatten)]
-    diagnostics: mapkeeper_core::worldgen::hydrology::LegacyHydrologyDiagnostics,
-    river_id_matches_catalog: bool,
+    diagnostics: mapkeeper_core::worldgen::hydrology::HydrologyDiagnostics,
+    river_id_matches_snapshot: bool,
     lake_id_matches_catalog: bool,
 }
 
@@ -36,14 +37,23 @@ async fn get_hydrology_diagnostics(State(state): State<Arc<Mutex<AppState>>>) ->
     let bounds = world_io::map_bounds(&active.path);
     let elevation = world_io::read_dense_layer(&active.path, ELEVATION_LAYER_ID, &bounds);
     let analysis = analyze_depressions(&elevation, &bounds);
-    let rivers = world_io::read_river_catalog(&active.path);
     let lakes = world_io::read_lake_catalog(&active.path);
-    let diagnostics = diagnose_legacy_hydrology(&analysis, &rivers, &lakes, &bounds);
+    let snapshot = match world_io::read_current_hydrology_snapshot(&active.path) {
+        Ok(snapshot) => snapshot,
+        Err(err) => return (StatusCode::CONFLICT, err).into_response(),
+    };
+    let diagnostics = diagnose_hydrology(&analysis, &lakes, snapshot.as_ref());
     let river_id = world_io::read_dense_layer(&active.path, RIVER_ID_LAYER_ID, &bounds);
     let lake_id = world_io::read_dense_layer(&active.path, LAKE_ID_LAYER_ID, &bounds);
     let response = HydrologyDiagnosticsResponse {
         diagnostics,
-        river_id_matches_catalog: river_id == sync_river_id_layer(&rivers, &bounds),
+        river_id_matches_snapshot: snapshot.as_ref().is_some_and(|snapshot| {
+            river_id
+                == compatibility_river_id_layer(
+                    &snapshot.channels.river_graph,
+                    snapshot.channels.river_graph.channel_mask.len(),
+                )
+        }),
         lake_id_matches_catalog: lake_id == sync_lake_id_layer(&lakes, &bounds),
     };
     Json(response).into_response()

@@ -170,7 +170,6 @@ struct RiversGenerateResponse {
     catalog: RiverCatalog,
     precip_source: &'static str,
     river_density: &'static str,
-    rejected_river_count: u32,
     name_migration_ambiguous_count: usize,
 }
 
@@ -258,7 +257,6 @@ async fn generate_rivers_handler(
         catalog: snapshot.catalog.compatibility_river_catalog(),
         precip_source,
         river_density: density.id(),
-        rejected_river_count: 0,
         name_migration_ambiguous_count,
     })
     .into_response()

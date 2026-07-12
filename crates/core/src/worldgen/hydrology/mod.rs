@@ -6,8 +6,6 @@ pub mod depression_fill;
 pub mod diagnostics;
 pub mod drainage_graph;
 pub mod lakes;
-pub mod river_flux;
-pub mod river_validate;
 pub mod snapshot;
 pub mod types;
 
@@ -20,20 +18,11 @@ pub use channel_graph::{
     HydrologyFlow, PhysicalSegment, RiverGraph, RiverGraphNode, RiverGraphNodeKind,
 };
 pub use depression_fill::{analyze_depressions, provisional_drainage};
-pub use diagnostics::{
-    diagnose_legacy_hydrology, LegacyHydrologyDiagnostics, LegacyRiverTerminal,
-    LegacyTerminalReason,
-};
+pub use diagnostics::{diagnose_hydrology, HydrologyDiagnostics};
 pub use drainage_graph::{
     build_drainage_graph, DrainageGraph, DrainageGraphError, DrainageNode, DrainageNodeId,
 };
 pub use lakes::generate_lakes;
-pub use river_flux::*;
-pub use river_validate::{
-    classify_terminal, enforce_strict_generated_catalog, mouth_diagnostics,
-    prune_invalid_river_trees, validate_catalog, validate_generated_catalog_strict,
-    would_assign_parent_cycle, RiverTerminal, RiverValidationContext, RiverValidationReport,
-};
 pub use snapshot::{
     is_derived_hydrology_layer_id, HydrologySnapshot, HydrologySnapshotError,
     CHANNEL_NODE_LAYER_ID, CHANNEL_SEGMENT_LAYER_ID, HYDROLOGY_SNAPSHOT_FILE,

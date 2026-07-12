@@ -242,8 +242,6 @@ pub(crate) struct RiversGenerateResponse {
     #[serde(default)]
     pub(crate) river_density: String,
     #[serde(default)]
-    pub(crate) rejected_river_count: u32,
-    #[serde(default)]
     pub(crate) name_migration_ambiguous_count: usize,
 }
 
@@ -546,8 +544,7 @@ pub(crate) async fn post_river_generate(
                 action: "generate_rivers".into(),
                 request: req_line,
                 result: format!(
-                    "rivers={river_n} path_cells={path_cells} rejected={} name_migration_ambiguous={} precip={} density={density_note} lakes_in_catalog={lake_n}",
-                    body.rejected_river_count,
+                    "rivers={river_n} path_cells={path_cells} name_migration_ambiguous={} precip={} density={density_note} lakes_in_catalog={lake_n}",
                     body.name_migration_ambiguous_count,
                     body.precip_source
                 ),

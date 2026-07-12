@@ -393,15 +393,6 @@ pub(crate) fn persist_rivers(
     write_dense_layer(world_path, &layer)
 }
 
-#[allow(dead_code)] // Removed with the final legacy hydrology cleanup slice.
-pub(crate) fn persist_generated_rivers(
-    world_path: &Path,
-    catalog: &RiverCatalog,
-    bounds: &MapBounds,
-) -> Result<(), String> {
-    persist_rivers(world_path, catalog, bounds)
-}
-
 pub(crate) fn lakes_file_path(world_path: &Path) -> PathBuf {
     world_path.join("map").join(LAKE_CATALOG_FILE)
 }

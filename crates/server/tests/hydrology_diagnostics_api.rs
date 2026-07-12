@@ -1,11 +1,10 @@
-//! Read-only legacy hydrology diagnostics endpoint.
+//! Read-only Hydrology v2 diagnostics endpoint.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use mapkeeper_core::hydro::{filled_elevation_layer, OCEAN_ELEVATION};
 use mapkeeper_core::layer::MapManifest;
-use mapkeeper_core::rivers::{River, RiverCatalog};
 use mapkeeper_server::{build_router, ServerConfig};
 use tempfile::tempdir;
 use tower::ServiceExt;
@@ -28,28 +27,10 @@ fn seed_world(world: &std::path::Path) {
 }
 
 #[tokio::test]
-async fn diagnostics_report_catalog_layer_mismatch() {
+async fn diagnostics_report_missing_snapshot_without_reading_legacy_catalog() {
     let dir = tempdir().unwrap();
     let world = dir.path().to_path_buf();
     seed_world(&world);
-    let rivers = RiverCatalog {
-        schema_version: 1,
-        next_id: 2,
-        rivers: vec![River {
-            id: 1,
-            cells: vec![10],
-            source: 10,
-            mouth: 10,
-            parent: 1,
-            basin: 1,
-            name: None,
-        }],
-    };
-    std::fs::write(
-        world.join("map/rivers.json"),
-        rivers.to_json_pretty().unwrap(),
-    )
-    .unwrap();
 
     let web_dist = tempdir().unwrap();
     let app = build_router(&ServerConfig {
@@ -67,7 +48,7 @@ async fn diagnostics_report_catalog_layer_mismatch() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["river_count"], 1);
-    assert_eq!(json["river_id_matches_catalog"], false);
-    assert_eq!(json["terminals"][0]["reason"], "Invalid");
+    assert_eq!(json["snapshot_active"], false);
+    assert_eq!(json["generated_river_count"], 0);
+    assert_eq!(json["river_id_matches_snapshot"], false);
 }

@@ -26,14 +26,10 @@ use mapkeeper_core::layer::{
 use mapkeeper_core::map_preset::{legacy_default_bounds, parse_map_preset, MapPreset};
 use mapkeeper_core::profile::CellProfile;
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
-use mapkeeper_core::river_flux::{generate_with_owners, RiverFluxParams};
-use mapkeeper_core::rivers::{
-    append_cell, create_river, delete_river, pop_last_cell, sync_river_id_layer, RiverCatalog,
-    RIVER_CATALOG_FILE,
-};
+use mapkeeper_core::rivers::{RiverCatalog, RIVER_CATALOG_FILE};
 use mapkeeper_core::world;
 use mapkeeper_core::worldgen::hydrology::{
-    analyze_depressions, generate_lakes, LakeDensity, RiverDensity,
+    analyze_depressions, generate_lakes, HydrologySnapshot, LakeDensity, HYDROLOGY_SNAPSHOT_FILE,
 };
 use serde::Deserialize;
 
@@ -229,7 +225,7 @@ enum RiversAction {
         #[arg(long, default_value = ".")]
         world: PathBuf,
     },
-    /// Append a cell to a river chain (omit --river-id to start a new river).
+    /// Legacy manual river editing is no longer supported.
     Append {
         cell_id: String,
         #[arg(long, default_value = ".")]
@@ -237,21 +233,21 @@ enum RiversAction {
         #[arg(long)]
         river_id: Option<u32>,
     },
-    /// Remove the last cell from a river.
+    /// Legacy manual river editing is no longer supported.
     Pop {
         #[arg(long, default_value = ".")]
         world: PathBuf,
         #[arg(long)]
         river_id: u32,
     },
-    /// Delete a river entirely.
+    /// Legacy manual river editing is no longer supported.
     Delete {
         #[arg(long, default_value = ".")]
         world: PathBuf,
         #[arg(long)]
         river_id: u32,
     },
-    /// Generate rivers from elevation (replace all).
+    /// Legacy CLI generation is no longer supported.
     Generate {
         #[arg(long, default_value = ".")]
         world: PathBuf,
@@ -336,14 +332,10 @@ fn main() -> Result<()> {
         },
         Command::Rivers { action } => match action {
             RiversAction::List { world } => cmd_rivers_list(&world),
-            RiversAction::Append {
-                cell_id,
-                world,
-                river_id,
-            } => cmd_rivers_append(&world, &cell_id, river_id),
-            RiversAction::Pop { world, river_id } => cmd_rivers_pop(&world, river_id),
-            RiversAction::Delete { world, river_id } => cmd_rivers_delete(&world, river_id),
-            RiversAction::Generate { world, density } => cmd_rivers_generate(&world, &density),
+            RiversAction::Append { .. }
+            | RiversAction::Pop { .. }
+            | RiversAction::Delete { .. }
+            | RiversAction::Generate { .. } => legacy_river_mutation_unavailable(),
         },
         Command::Lakes { action } => match action {
             LakesAction::List { world } => cmd_lakes_list(&world),
@@ -825,106 +817,18 @@ fn read_river_catalog(world: &Path) -> RiverCatalog {
         .unwrap_or_default()
 }
 
-fn write_river_catalog(world: &Path, catalog: &RiverCatalog) -> Result<()> {
-    let path = rivers_file_path(world);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&path, catalog.to_json_pretty()?)?;
-    Ok(())
-}
-
-fn persist_rivers(world: &Path, catalog: &RiverCatalog, bounds: &MapBounds) -> Result<()> {
-    write_river_catalog(world, catalog)?;
-    let layer = sync_river_id_layer(catalog, bounds);
-    write_dense_layer(world, &layer)
-}
-
-fn persist_generated_rivers(
-    world: &Path,
-    catalog: &RiverCatalog,
-    bounds: &MapBounds,
-) -> Result<()> {
-    persist_rivers(world, catalog, bounds)
-}
-
 fn cmd_rivers_list(world: &Path) -> Result<()> {
-    let catalog = read_river_catalog(world);
+    let catalog = fs::read_to_string(world.join("map").join(HYDROLOGY_SNAPSHOT_FILE))
+        .ok()
+        .and_then(|raw| HydrologySnapshot::from_json(&raw).ok())
+        .map(|snapshot| snapshot.catalog.compatibility_river_catalog())
+        .unwrap_or_else(|| read_river_catalog(world));
     println!("{}", catalog.to_json_pretty()?);
     Ok(())
 }
 
-fn cmd_rivers_append(world: &Path, cell_id: &str, river_id: Option<u32>) -> Result<()> {
-    let bounds = read_bounds(world);
-    let index = cell_index(&bounds, cell_id)?;
-    let mut catalog = read_river_catalog(world);
-    match river_id {
-        Some(id) => append_cell(&mut catalog, &bounds, id, index)
-            .map_err(|e| anyhow::anyhow!(e.to_string()))?,
-        None => {
-            create_river(&mut catalog, &bounds, index)
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-        }
-    }
-    persist_rivers(world, &catalog, &bounds)?;
-    println!("{}", catalog.to_json_pretty()?);
-    Ok(())
-}
-
-fn cmd_rivers_pop(world: &Path, river_id: u32) -> Result<()> {
-    let bounds = read_bounds(world);
-    let mut catalog = read_river_catalog(world);
-    pop_last_cell(&mut catalog, river_id).map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    persist_rivers(world, &catalog, &bounds)?;
-    println!("{}", catalog.to_json_pretty()?);
-    Ok(())
-}
-
-fn cmd_rivers_delete(world: &Path, river_id: u32) -> Result<()> {
-    let bounds = read_bounds(world);
-    let mut catalog = read_river_catalog(world);
-    delete_river(&mut catalog, river_id).map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    persist_rivers(world, &catalog, &bounds)?;
-    println!("{}", catalog.to_json_pretty()?);
-    Ok(())
-}
-
-fn cmd_rivers_generate(world: &Path, density: &str) -> Result<()> {
-    let bounds = read_bounds(world);
-    let elevation = read_elevation_dense(world, &bounds);
-    let precipitation = read_optional_precip_layer(world, &bounds);
-    let lakes = read_lake_catalog(world);
-    let analysis = analyze_depressions(&elevation, &bounds);
-    let density = RiverDensity::parse(density);
-    let lakes_ref = if lakes.lakes.is_empty() {
-        None
-    } else {
-        Some(&lakes)
-    };
-    let out = generate_with_owners(
-        &elevation,
-        &bounds,
-        precipitation.as_ref(),
-        RiverFluxParams {
-            analysis: Some(&analysis),
-            lakes: lakes_ref,
-            density,
-        },
-    );
-    persist_generated_rivers(world, &out.catalog, &bounds)?;
-    if out.used_climate {
-        eprintln!("river flux: using climate precipitation layer");
-    } else {
-        eprintln!("river flux: uniform precipitation fallback (no precipitation layer)");
-    }
-    if out.rejected_rivers > 0 {
-        eprintln!(
-            "river flux: rejected {} invalid river trees",
-            out.rejected_rivers
-        );
-    }
-    println!("{}", out.catalog.to_json_pretty()?);
-    Ok(())
+fn legacy_river_mutation_unavailable() -> Result<()> {
+    bail!("legacy river editing and generation were removed; use the mapkeeper desktop editor")
 }
 
 fn lakes_file_path(world: &Path) -> PathBuf {
@@ -956,7 +860,14 @@ fn persist_lake_generation(world: &Path, catalog: &LakeCatalog, bounds: &MapBoun
     write_lake_catalog(world, catalog)?;
     let layer = mapkeeper_core::lakes::sync_lake_id_layer(catalog, bounds);
     write_dense_layer(world, &layer)?;
-    persist_rivers(world, &RiverCatalog::default(), bounds)?;
+    let snapshot_path = world.join("map").join(HYDROLOGY_SNAPSHOT_FILE);
+    if snapshot_path.exists() {
+        fs::remove_file(snapshot_path)?;
+    }
+    write_dense_layer(
+        world,
+        &DenseLayer::new_integer(RIVER_ID_LAYER_ID, bounds.len()),
+    )?;
     Ok(())
 }
 

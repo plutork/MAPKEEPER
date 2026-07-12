@@ -34,6 +34,3 @@ pub mod elevation_gen {
 pub mod climate {
     pub use crate::worldgen::climate::*;
 }
-pub mod river_flux {
-    pub use crate::worldgen::hydrology::river_flux::*;
-}
