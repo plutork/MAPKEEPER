@@ -40,8 +40,8 @@ Run yourself. Report **OK / FAIL** briefly. Stop at the first blocking FAIL and 
 2. Current directory is repo root: `Cargo.toml`, `setup.ps1`, and `run.ps1` exist.
 3. `git` is present; repo status is readable.
 4. `rustc` / `cargo` / `rustup` on PATH; host target is **MSVC**.
-5. MSVC Build Tools / `cl.exe` available. If missing: explain **manual** Visual Studio Build Tools with workload **Desktop development with C++**. **Never silent-install.**
-6. WebView2 runtime appears available.
+5. Do not infer a missing MSVC installation from `cl.exe` on PATH. `cargo build -p mapkeeper-desktop` is the build-toolchain check.
+6. Do not infer a missing WebView2 Runtime from a registry key. A successful desktop launch is the runtime check.
 7. `rustup target list --installed` includes `wasm32-unknown-unknown`.
 8. `wasm-bindgen` CLI available; align version with the project pin when possible (read from `crates/web/Cargo.toml` — currently `wasm-bindgen = "=0.2.100"`).
 9. `crates/web/dist/index.html` exists **or** web build succeeds.
@@ -54,8 +54,8 @@ Run yourself. Report **OK / FAIL** briefly. Stop at the first blocking FAIL and 
 |---------|--------|
 | First-time / missing toolchain | Prefer guiding **`.\setup.ps1`** (consent built-in); use this chat if setup itself fails |
 | No cargo / rustup | Propose official Rust install or `winget` **only with consent**; restart terminal; recheck / re-run setup |
-| No `cl` / MSVC | Explain VS Build Tools + Desktop development with C++; user confirms/manual step; recheck |
-| No WebView2 | Explain official WebView2 Runtime; confirm; recheck |
+| Desktop build reports an MSVC linker/compiler error | Explain VS Build Tools + Desktop development with C++; user confirms/manual step; re-run the failing build |
+| Desktop launch reports a WebView2 error | Explain official WebView2 Runtime; confirm; re-run `.\run.ps1` |
 | Missing wasm target | `rustup target add wasm32-unknown-unknown` **with consent** (or re-run setup) |
 | Missing wasm-bindgen | `cargo install wasm-bindgen-cli --version <project pin>` **with consent** |
 | Web build fail | Show concise error; fix toolchain first; **do not** patch product source unless user explicitly asks to contribute code |

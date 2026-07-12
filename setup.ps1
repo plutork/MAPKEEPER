@@ -12,18 +12,6 @@ function Ask-Yes($Prompt) {
     return ($r -eq "y" -or $r -eq "Y" -or $r -eq "yes")
 }
 
-function Test-WebView2 {
-    $keys = @(
-        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BCC-807D2914E9B6}",
-        "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BCC-807D2914E9B6}",
-        "HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BCC-807D2914E9B6}"
-    )
-    foreach ($k in $keys) {
-        if (Test-Path $k) { return $true }
-    }
-    return $false
-}
-
 function Get-WasmBindgenPin {
     $cargoToml = Join-Path $Root "crates\web\Cargo.toml"
     if (-not (Test-Path $cargoToml)) { return "0.2.100" }
@@ -74,36 +62,8 @@ if (-not (Test-Cmd "rustc") -or -not (Test-Cmd "rustup")) {
     exit 1
 }
 
-if (-not (Test-Cmd "cl")) {
-    Write-Host ""
-    Write-Host "MSVC Build Tools (C++ workload) are required and must be installed manually."
-    Write-Host "1. https://visualstudio.microsoft.com/visual-cpp-build-tools/"
-    Write-Host "2. Install Build Tools with workload 'Desktop development with C++'."
-    Write-Host "3. Restart the terminal (or use x64 Native Tools / Developer PowerShell)."
-    Write-Host "This script will NOT silent-install MSVC."
-    if (-not (Ask-Yes "Confirm MSVC Build Tools are installed and this terminal can see them?")) {
-        Write-Host "Stopped. Finish MSVC setup, then re-run .\setup.ps1"
-        Write-Host "Or run /doctor in Cursor."
-        exit 1
-    }
-    if (-not (Test-Cmd "cl")) {
-        Write-Host "Still cannot find 'cl'. Open a Developer PowerShell and retry .\setup.ps1"
-        exit 1
-    }
-}
-
-if (-not (Test-WebView2)) {
-    Write-Host "WebView2 Runtime not detected."
-    Write-Host "Download: https://developer.microsoft.com/microsoft-edge/webview2/"
-    if (-not (Ask-Yes "Confirm WebView2 Runtime is installed?")) {
-        Write-Host "Stopped. Install WebView2, then re-run .\setup.ps1"
-        Write-Host "Or run /doctor in Cursor."
-        exit 1
-    }
-}
-
 $targets = & rustup target list --installed 2>$null
-if ($targets -notmatch "wasm32-unknown-unknown") {
+if ($targets -notcontains "wasm32-unknown-unknown") {
     Write-Host "Adding Rust target wasm32-unknown-unknown (needed for web UI)."
     if (-not (Ask-Yes "Run: rustup target add wasm32-unknown-unknown?")) {
         Write-Host "Stopped. Or run /doctor in Cursor."
@@ -132,10 +92,10 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "Checking desktop crate..."
-cargo check -p mapkeeper-desktop
+Write-Host "Building desktop crate..."
+cargo build -p mapkeeper-desktop
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Desktop check failed. Run /doctor in Cursor."
+    Write-Host "Desktop build failed. Run /doctor in Cursor."
     exit $LASTEXITCODE
 }
 

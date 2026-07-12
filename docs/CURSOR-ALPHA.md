@@ -99,7 +99,7 @@ You must open the **MAPKEEPER repo root** (the folder that contains `Cargo.toml`
 ```
 
 - The script **asks before** heavy installs (Rust via winget, etc.).
-- **MSVC Build Tools** (C++ workload) are **manual** — follow the link in the script if `cl` is missing.
+- If the desktop build reports an MSVC error, install Build Tools with the C++ workload manually.
 - If setup tells you to restart the terminal, close the terminal panel and run `.\setup.ps1` again.
 
 You only need **`setup.ps1` once** per machine (or after wiping the toolchain).
