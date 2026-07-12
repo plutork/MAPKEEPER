@@ -8,7 +8,7 @@ use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use mapkeeper_core::hex::MapBounds;
-use mapkeeper_core::layer::{DenseLayer, ELEVATION_LAYER_ID};
+use mapkeeper_core::layer::{DenseLayer, ELEVATION_LAYER_ID, LAKE_ID_LAYER_ID};
 use mapkeeper_core::rivers::{
     append_cell, cell_index, create_river, delete_river, pop_last_cell, RiverCatalog, RiverError,
 };
@@ -44,15 +44,17 @@ async fn get_rivers(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoRespo
     };
     let bounds = world_io::map_bounds(&active.path);
     let elevation = world_io::read_dense_layer(&active.path, ELEVATION_LAYER_ID, &bounds);
+    let lake_id = world_io::read_dense_layer(&active.path, LAKE_ID_LAYER_ID, &bounds);
     match world_io::read_current_hydrology_snapshot(&active.path) {
         Ok(Some(snapshot)) => Json(RiversResponse::from_snapshot(
-            &snapshot, &bounds, &elevation,
+            &snapshot, &bounds, &elevation, &lake_id,
         ))
         .into_response(),
         Ok(None) => Json(RiversResponse::from_catalog(
             world_io::read_river_catalog(&active.path),
             &bounds,
             &elevation,
+            &lake_id,
         ))
         .into_response(),
         Err(err) => (StatusCode::CONFLICT, err).into_response(),
@@ -188,14 +190,25 @@ impl RiversResponse {
         snapshot: &HydrologySnapshot,
         bounds: &MapBounds,
         elevation: &DenseLayer,
+        lake_id: &DenseLayer,
     ) -> Self {
         Self {
             catalog: snapshot.catalog.compatibility_river_catalog(),
-            render_paths: river_render_paths(&snapshot.channels.river_graph, bounds, elevation),
+            render_paths: river_render_paths(
+                &snapshot.channels.river_graph,
+                bounds,
+                elevation,
+                Some(lake_id),
+            ),
         }
     }
 
-    fn from_catalog(catalog: RiverCatalog, bounds: &MapBounds, elevation: &DenseLayer) -> Self {
+    fn from_catalog(
+        catalog: RiverCatalog,
+        bounds: &MapBounds,
+        elevation: &DenseLayer,
+        _lake_id: &DenseLayer,
+    ) -> Self {
         let paths = catalog
             .rivers
             .iter()
@@ -239,6 +252,7 @@ async fn generate_rivers_handler(
     };
     let bounds = world_io::map_bounds(&active.path);
     let elevation = world_io::read_dense_layer(&active.path, ELEVATION_LAYER_ID, &bounds);
+    let lake_id = world_io::read_dense_layer(&active.path, LAKE_ID_LAYER_ID, &bounds);
     let precipitation = world_io::read_optional_precip_layer(&active.path, &bounds);
     let lakes = world_io::read_lake_catalog(&active.path);
     let analysis = analyze_depressions(&elevation, &bounds);
@@ -299,7 +313,7 @@ async fn generate_rivers_handler(
         "uniform_fallback"
     };
     Json(RiversGenerateResponse {
-        response: RiversResponse::from_snapshot(&snapshot, &bounds, &elevation),
+        response: RiversResponse::from_snapshot(&snapshot, &bounds, &elevation, &lake_id),
         precip_source,
         river_density: density.id(),
         name_migration_ambiguous_count,
