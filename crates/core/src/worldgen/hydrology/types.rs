@@ -2,6 +2,87 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
+use crate::climate::PRECIPITATION_LAYER_ID;
+use crate::hydro::{DEFAULT_LAND_ELEVATION, SEA_LEVEL};
+use crate::layer::{DenseLayer, DenseState, LayerValue};
+
+/// Uniform land runoff when precipitation input is missing or unusable.
+pub const FALLBACK_LAND_RUNOFF: u64 = 90;
+
+/// Classified precipitation layer usability for hydrology runoff (hydrology-precip-input-semantics-v1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrecipInputState {
+    Missing,
+    InvalidOrEmpty,
+    Valid,
+}
+
+impl PrecipInputState {
+    pub fn id(self) -> &'static str {
+        match self {
+            PrecipInputState::Missing => "missing",
+            PrecipInputState::InvalidOrEmpty => "invalid_or_empty",
+            PrecipInputState::Valid => "valid",
+        }
+    }
+
+    /// Legacy API alias kept for one release (`precip_source`).
+    pub fn legacy_precip_source(self) -> &'static str {
+        match self {
+            PrecipInputState::Valid => "climate",
+            PrecipInputState::Missing | PrecipInputState::InvalidOrEmpty => "uniform_fallback",
+        }
+    }
+
+    pub fn uses_climate_runoff(self) -> bool {
+        matches!(self, PrecipInputState::Valid)
+    }
+}
+
+/// Classify whether the precipitation layer can drive per-cell runoff.
+pub fn classify_precip_input(
+    elevation: &DenseLayer,
+    precipitation: Option<&DenseLayer>,
+) -> PrecipInputState {
+    let Some(precip) = precipitation else {
+        return PrecipInputState::Missing;
+    };
+    if precip.layer_id != PRECIPITATION_LAYER_ID {
+        return PrecipInputState::InvalidOrEmpty;
+    }
+    let n = elevation.len().min(precip.len());
+    for index in 0..n {
+        if elevation.int_or(index, DEFAULT_LAND_ELEVATION) <= SEA_LEVEL {
+            continue;
+        }
+        if matches!(
+            precip.state(index),
+            DenseState::Value(LayerValue::Int(v)) if v > 0
+        ) {
+            return PrecipInputState::Valid;
+        }
+    }
+    PrecipInputState::InvalidOrEmpty
+}
+
+/// Per-terrain-cell local runoff from classified precipitation input.
+pub fn terrain_runoff(
+    cell: usize,
+    precipitation: Option<&DenseLayer>,
+    state: PrecipInputState,
+) -> u64 {
+    match state {
+        PrecipInputState::Valid => precipitation
+            .filter(|layer| layer.layer_id == PRECIPITATION_LAYER_ID)
+            .map(|layer| layer.int_or(cell, 0).max(0) as u64)
+            .unwrap_or(FALLBACK_LAND_RUNOFF),
+        PrecipInputState::Missing | PrecipInputState::InvalidOrEmpty => FALLBACK_LAND_RUNOFF,
+    }
+}
+
 /// Wizard / generate lake density presets (hydrology-lake-generation-v1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LakeDensity {
@@ -88,4 +169,73 @@ pub struct ProvisionalDrainage {
     pub accumulated_runoff: Vec<u64>,
     /// Selected depression basin → contributing runoff at its lowest-rank cell.
     pub basin_supply: HashMap<u32, u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layer::{DenseLayer, DenseState, LayerValue};
+
+    fn land_elevation(n: usize) -> DenseLayer {
+        let mut elev = DenseLayer::new_integer("elevation", n);
+        for i in 0..n {
+            elev.set(i, DenseState::Value(LayerValue::Int(20)));
+        }
+        elev
+    }
+
+    #[test]
+    fn missing_precip_is_missing() {
+        let elev = land_elevation(4);
+        assert_eq!(
+            classify_precip_input(&elev, None),
+            PrecipInputState::Missing
+        );
+    }
+
+    #[test]
+    fn empty_precip_layer_is_invalid() {
+        let elev = land_elevation(4);
+        let precip = DenseLayer::new_integer(PRECIPITATION_LAYER_ID, 4);
+        assert_eq!(
+            classify_precip_input(&elev, Some(&precip)),
+            PrecipInputState::InvalidOrEmpty
+        );
+    }
+
+    #[test]
+    fn valid_dry_climate_stays_valid() {
+        let elev = land_elevation(4);
+        let mut precip = DenseLayer::new_integer(PRECIPITATION_LAYER_ID, 4);
+        for i in 0..4 {
+            precip.set(i, DenseState::Value(LayerValue::Int(3)));
+        }
+        let state = classify_precip_input(&elev, Some(&precip));
+        assert_eq!(state, PrecipInputState::Valid);
+        assert_eq!(terrain_runoff(0, Some(&precip), state), 3);
+    }
+
+    #[test]
+    fn invalid_all_zero_land_values_use_fallback() {
+        let elev = land_elevation(4);
+        let mut precip = DenseLayer::new_integer(PRECIPITATION_LAYER_ID, 4);
+        for i in 0..4 {
+            precip.set(i, DenseState::Value(LayerValue::Int(0)));
+        }
+        let state = classify_precip_input(&elev, Some(&precip));
+        assert_eq!(state, PrecipInputState::InvalidOrEmpty);
+        assert_eq!(terrain_runoff(0, Some(&precip), state), FALLBACK_LAND_RUNOFF);
+    }
+
+    #[test]
+    fn lakes_and_channels_share_classification_policy() {
+        let elev = land_elevation(6);
+        let mut wet = DenseLayer::new_integer(PRECIPITATION_LAYER_ID, 6);
+        for i in 0..6 {
+            wet.set(i, DenseState::Value(LayerValue::Int(120)));
+        }
+        let state = classify_precip_input(&elev, Some(&wet));
+        assert_eq!(state, PrecipInputState::Valid);
+        assert_eq!(terrain_runoff(2, Some(&wet), state), 120);
+    }
 }

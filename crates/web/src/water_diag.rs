@@ -6,6 +6,7 @@ use mapkeeper_core::lakes::LakeCatalog;
 use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
 use mapkeeper_core::rivers::RiverCatalog;
 
+use crate::brush::channel_topology_counts;
 use crate::dom::set_water_diagnostics;
 use crate::state::{AppState, WaterGenTrace};
 
@@ -31,16 +32,30 @@ fn land_cell_count(elevation: &DenseLayer, bounds: MapBounds) -> usize {
         .count()
 }
 
+fn format_channel_topology_line(segments: usize, channel_cells: usize, read_only: bool) -> String {
+    let mut line = format!(
+        "channels: {segments} physical segments · {channel_cells} channel cells\n",
+    );
+    if read_only {
+        line.push_str("rivers authoring: read-only (hydrology v2 snapshot)\n");
+    }
+    line
+}
+
 pub(crate) fn format_water_diagnostics(state: &AppState) -> String {
     let bounds = state.map_bounds;
     let (lake_n, lake_cells, endorheic) = lake_catalog_stats(&state.lakes);
-    let (river_n, path_cells) = river_catalog_stats(&state.rivers);
+    let (segments, channel_cells) = channel_topology_counts(state);
     let land = land_cell_count(&state.elevation, bounds);
-    let precip = match state.precip_layer_present {
-        Some(true) => "present",
-        Some(false) => "missing",
-        None => "unknown",
-    };
+    let precip = state
+        .precip_input_state
+        .as_deref()
+        .or(match state.precip_layer_present {
+            Some(true) => Some("present (unclassified)"),
+            Some(false) => Some("missing"),
+            None => Some("unknown"),
+        })
+        .unwrap_or("unknown");
     let mut out = String::new();
     out.push_str("=== snapshot ===\n");
     out.push_str(&format!(
@@ -54,8 +69,37 @@ pub(crate) fn format_water_diagnostics(state: &AppState) -> String {
         "lakes: {lake_n} · {lake_cells} cells · endorheic {endorheic} · next_id {}\n",
         state.lakes.next_id
     ));
-    out.push_str(&format!("rivers: {river_n} · {path_cells} path cells\n",));
-    out.push_str(&format!("precip layer: {precip}\n"));
+    out.push_str(&format_channel_topology_line(
+        segments,
+        channel_cells,
+        state.rivers_read_only,
+    ));
+    if !state.named_rivers.is_empty() {
+        out.push_str(&format!("named rivers: {}\n", state.named_rivers.len()));
+        for river in &state.named_rivers {
+            out.push_str(&format!(
+                "  #{id} \"{name}\" → segments {:?}\n",
+                river.segment_ids,
+                id = river.id,
+                name = river.name
+            ));
+        }
+    }
+    let ambiguous: Vec<_> = state
+        .name_migration
+        .iter()
+        .filter(|report| report.ambiguous)
+        .collect();
+    if !ambiguous.is_empty() {
+        out.push_str(&format!(
+            "name migration ambiguous: {} (review required)\n",
+            ambiguous.len()
+        ));
+        for report in ambiguous {
+            out.push_str(&format!("  \"{}\"\n", report.name));
+        }
+    }
+    out.push_str(&format!("precip input: {precip}\n"));
     out.push('\n');
     out.push_str("=== last action ===\n");
     let trace = &state.water_gen_trace;
@@ -83,4 +127,17 @@ pub(crate) fn sync_water_diagnostics(state: &AppState) {
 pub(crate) fn set_water_gen_trace(state: &mut AppState, trace: WaterGenTrace) {
     state.water_gen_trace = trace;
     sync_water_diagnostics(state);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_channel_topology_line;
+
+    #[test]
+    fn diagnostics_use_segment_vocabulary() {
+        let text = format_channel_topology_line(3, 12, true);
+        assert!(text.contains("channels: 3 physical segments · 12 channel cells"));
+        assert!(text.contains("rivers authoring: read-only"));
+        assert!(!text.contains("rivers: 3"));
+    }
 }

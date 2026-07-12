@@ -3,12 +3,13 @@
 use serde::Serialize;
 
 use super::snapshot::HydrologySnapshot;
-use super::types::DepressionAnalysis;
+use super::types::{DepressionAnalysis, PrecipInputState};
 use crate::lakes::LakeCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HydrologyDiagnostics {
     pub snapshot_active: bool,
+    pub precip_input_state: PrecipInputState,
     pub depression_basin_count: usize,
     pub depression_cell_count: usize,
     pub unresolved_depression_count: usize,
@@ -20,6 +21,15 @@ pub struct HydrologyDiagnostics {
     pub channel_segment_count: usize,
     pub channel_cell_count: usize,
     pub generated_river_count: usize,
+    pub named_river_count: usize,
+    /// Hydrology v2 topology is input-deterministic (Variant A).
+    pub deterministic: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generator_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_version: Option<String>,
 }
 
 /// Report persisted v2 topology only; legacy catalogs are migration input, not truth.
@@ -27,6 +37,7 @@ pub fn diagnose_hydrology(
     analysis: &DepressionAnalysis,
     lakes: &LakeCatalog,
     snapshot: Option<&HydrologySnapshot>,
+    precip_input_state: PrecipInputState,
 ) -> HydrologyDiagnostics {
     let basin_ids: std::collections::BTreeSet<u32> = analysis
         .basin_id
@@ -40,7 +51,11 @@ pub fn diagnose_hydrology(
         channel_segment_count,
         channel_cell_count,
         generated_river_count,
-    ) = snapshot.map_or((0, 0, 0, 0, 0), |snapshot| {
+        named_river_count,
+        input_fingerprint,
+        generator_version,
+        policy_version,
+    ) = snapshot.map_or((0, 0, 0, 0, 0, 0, None, None, None), |snapshot| {
         let graph = &snapshot.channels.river_graph;
         (
             snapshot.drainage.nodes.len(),
@@ -52,11 +67,16 @@ pub fn diagnose_hydrology(
                 .filter(|&&is_channel| is_channel)
                 .count(),
             snapshot.catalog.physical_segments.len(),
+            snapshot.catalog.named_river_count(),
+            Some(snapshot.fingerprint.clone()),
+            Some(snapshot.generator_version.clone()),
+            Some(snapshot.policy_version.clone()),
         )
     });
 
     HydrologyDiagnostics {
         snapshot_active: snapshot.is_some(),
+        precip_input_state,
         depression_basin_count: basin_ids.len(),
         depression_cell_count: analysis
             .fill_depth
@@ -79,5 +99,10 @@ pub fn diagnose_hydrology(
         channel_segment_count,
         channel_cell_count,
         generated_river_count,
+        named_river_count,
+        deterministic: true,
+        input_fingerprint,
+        generator_version,
+        policy_version,
     }
 }

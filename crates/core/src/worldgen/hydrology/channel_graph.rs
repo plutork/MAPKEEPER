@@ -4,12 +4,11 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::climate::PRECIPITATION_LAYER_ID;
 use crate::hydro::SEA_LEVEL;
 use crate::layer::DenseLayer;
 
 use super::drainage_graph::{DrainageGraph, DrainageNode, DrainageNodeId};
-use super::types::DepressionAnalysis;
+use super::types::{DepressionAnalysis, PrecipInputState, terrain_runoff};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChannelPolicy {
@@ -40,6 +39,8 @@ pub enum RiverGraphNodeKind {
     LakeInlet,
     LakeOutlet,
     Mouth,
+    /// Channel termination at an endorheic sink (no ocean mouth extension).
+    EndorheicMouth,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,9 +90,10 @@ pub fn build_channel_graph(
     drainage: &DrainageGraph,
     analysis: &DepressionAnalysis,
     precipitation: Option<&DenseLayer>,
+    precip_state: PrecipInputState,
     policy: ChannelPolicy,
 ) -> Result<ChannelGraph, ChannelGraphError> {
-    let flow = accumulate(drainage, analysis, precipitation);
+    let flow = accumulate(drainage, analysis, precipitation, precip_state);
     let river_graph = extract_river_graph(drainage, &flow, policy);
     let graph = ChannelGraph { flow, river_graph };
     validate_channel_graph(drainage, &graph)?;
@@ -102,6 +104,7 @@ fn accumulate(
     drainage: &DrainageGraph,
     analysis: &DepressionAnalysis,
     precipitation: Option<&DenseLayer>,
+    precip_state: PrecipInputState,
 ) -> HydrologyFlow {
     let mut local_runoff = vec![0u64; drainage.nodes.len()];
     let mut contributing_area = vec![0u32; drainage.nodes.len()];
@@ -112,10 +115,7 @@ fn accumulate(
         if analysis.original_heights[*cell] <= SEA_LEVEL {
             continue;
         }
-        local_runoff[node_id] = precipitation
-            .filter(|layer| layer.layer_id == PRECIPITATION_LAYER_ID)
-            .map(|layer| layer.int_or(*cell, 0).max(0) as u64)
-            .unwrap_or(90);
+        local_runoff[node_id] = terrain_runoff(*cell, precipitation, precip_state);
         contributing_area[node_id] = 1;
     }
 
@@ -177,10 +177,15 @@ fn extract_river_graph(
         let receives_lake = upstream[node_id]
             .iter()
             .any(|&upstream| matches!(drainage.nodes[upstream], DrainageNode::Lake(_)));
-        let drains_to_terminal = drainage.receiver[node_id]
-            .is_some_and(|downstream| is_terminal(&drainage.nodes[downstream.0]));
-        let kind = if drains_to_terminal {
+        let drains_to_ocean = drainage.receiver[node_id]
+            .is_some_and(|downstream| matches!(drainage.nodes[downstream.0], DrainageNode::OceanSink));
+        let drains_to_endorheic = drainage.receiver[node_id].is_some_and(|downstream| {
+            matches!(drainage.nodes[downstream.0], DrainageNode::EndorheicSink)
+        });
+        let kind = if drains_to_ocean {
             Some(RiverGraphNodeKind::Mouth)
+        } else if drains_to_endorheic {
+            Some(RiverGraphNodeKind::EndorheicMouth)
         } else if receives_lake {
             Some(RiverGraphNodeKind::LakeOutlet)
         } else if channel_upstream == 0 {
@@ -232,12 +237,23 @@ fn extract_river_graph(
             });
             next_id += 1;
             if drainage.receiver[node_id]
-                .is_some_and(|downstream| is_terminal(&drainage.nodes[downstream.0]))
+                .is_some_and(|downstream| matches!(drainage.nodes[downstream.0], DrainageNode::OceanSink))
             {
                 lake_mouth.insert(DrainageNodeId(node_id), next_id);
                 nodes.push(RiverGraphNode {
                     id: next_id,
                     kind: RiverGraphNodeKind::Mouth,
+                    drainage_node: drainage.receiver[node_id].unwrap(),
+                    terrain_cell: None,
+                });
+                next_id += 1;
+            } else if drainage.receiver[node_id].is_some_and(|downstream| {
+                matches!(drainage.nodes[downstream.0], DrainageNode::EndorheicSink)
+            }) {
+                lake_mouth.insert(DrainageNodeId(node_id), next_id);
+                nodes.push(RiverGraphNode {
+                    id: next_id,
+                    kind: RiverGraphNodeKind::EndorheicMouth,
                     drainage_node: drainage.receiver[node_id].unwrap(),
                     terrain_cell: None,
                 });
@@ -258,7 +274,7 @@ fn extract_river_graph(
     let mut next_segment = 1u32;
     for node in &nodes {
         let target = match node.kind {
-            RiverGraphNodeKind::Mouth => None,
+            RiverGraphNodeKind::Mouth | RiverGraphNodeKind::EndorheicMouth => None,
             RiverGraphNodeKind::LakeInlet => lake_outlet
                 .get(&node.drainage_node)
                 .copied()
@@ -446,8 +462,22 @@ mod tests {
     fn channels_are_deterministic_closed_and_conservative() {
         let (bounds, analysis) = slope();
         let drainage = build_drainage_graph(&analysis, &LakeCatalog::default(), &bounds).unwrap();
-        let first = build_channel_graph(&drainage, &analysis, None, permissive_policy()).unwrap();
-        let second = build_channel_graph(&drainage, &analysis, None, permissive_policy()).unwrap();
+        let first = build_channel_graph(
+            &drainage,
+            &analysis,
+            None,
+            PrecipInputState::Missing,
+            permissive_policy(),
+        )
+        .unwrap();
+        let second = build_channel_graph(
+            &drainage,
+            &analysis,
+            None,
+            PrecipInputState::Missing,
+            permissive_policy(),
+        )
+        .unwrap();
 
         assert_eq!(first, second);
         assert!(first.river_graph.channel_mask.iter().any(|&cell| cell));
@@ -483,7 +513,14 @@ mod tests {
         };
         let drainage = build_drainage_graph(&analysis, &lakes, &bounds).unwrap();
         let channels =
-            build_channel_graph(&drainage, &analysis, None, permissive_policy()).unwrap();
+            build_channel_graph(
+                &drainage,
+                &analysis,
+                None,
+                PrecipInputState::Missing,
+                permissive_policy(),
+            )
+            .unwrap();
         let lake = drainage
             .nodes
             .iter()

@@ -47,7 +47,7 @@ pub(crate) fn terrain_brush(brush: &Brush) -> bool {
 }
 
 pub(crate) fn river_brush(brush: &Brush) -> bool {
-    matches!(brush, Brush::River | Brush::RiverErase)
+    matches!(brush, Brush::River | Brush::RiverPin | Brush::RiverErase)
 }
 
 pub(crate) fn active_dock_tab() -> Option<String> {
@@ -114,6 +114,7 @@ pub(crate) fn sync_brush_swatch_active(brush: &Brush) {
         Brush::Raise => "raise".to_string(),
         Brush::Lower => "lower".to_string(),
         Brush::River => "river".to_string(),
+        Brush::RiverPin => "river-pin".to_string(),
         Brush::RiverErase => "river-erase".to_string(),
     };
     if let Some(drawer) = document().get_element_by_id("dock-drawer") {
@@ -157,16 +158,96 @@ pub(crate) fn brush_preview_uses_circle(radius: i32) -> bool {
     radius > BRUSH_PREVIEW_HEX_DETAIL_MAX
 }
 
-pub(crate) fn sync_river_status(state: &AppState) {
-    let active = state
+pub(crate) const RIVERS_READ_ONLY_MSG: &str =
+    "Generated rivers are read-only — use Rebuild rivers to rebuild.";
+
+pub(crate) fn channel_topology_counts(state: &AppState) -> (usize, usize) {
+    let segments = state
+        .channel_segment_count
+        .unwrap_or_else(|| state.rivers.rivers.len());
+    let cells = state.channel_cell_count.unwrap_or_else(|| {
+        state.rivers.rivers.iter().map(|r| r.cells.len()).sum()
+    });
+    (segments, cells)
+}
+
+pub(crate) fn is_tributary(catalog: &RiverCatalog, river_id: u32) -> bool {
+    catalog
+        .rivers
+        .iter()
+        .find(|river| river.id == river_id)
+        .is_some_and(|river| river.parent != river.id)
+}
+
+pub(crate) fn sync_detach_tributary_ui(state: &AppState) {
+    let enabled = state
         .active_river_id
-        .map(|id| format!("River #{id}"))
-        .unwrap_or_else(|| "New river on next click".to_string());
-    let count = state.rivers.rivers.len();
-    set_text(
-        "river-status",
-        &format!("{active} · {count} river(s) on map"),
-    );
+        .is_some_and(|id| is_tributary(&state.rivers, id));
+    if let Some(button) = document().get_element_by_id("detach-tributary") {
+        if enabled {
+            let _ = button.remove_attribute("disabled");
+        } else {
+            let _ = button.set_attribute("disabled", "disabled");
+        }
+    }
+}
+
+pub(crate) fn sync_manual_river_authoring_ui(state: &AppState) {
+    let read_only = state.rivers_read_only;
+    if let Some(authoring) = document().get_element_by_id("manual-rivers-authoring") {
+        if read_only {
+            let _ = authoring.class_list().add_1("hidden");
+        } else {
+            let _ = authoring.class_list().remove_1("hidden");
+        }
+    }
+    sync_detach_tributary_ui(state);
+    if let Some(note) = document().get_element_by_id("manual-rivers-readonly-note") {
+        if read_only {
+            let _ = note.class_list().remove_1("hidden");
+        } else {
+            let _ = note.class_list().add_1("hidden");
+        }
+    }
+}
+
+pub(crate) fn sync_name_migration_warning(state: &AppState) {
+    let ambiguous = state.name_migration.iter().filter(|r| r.ambiguous).count();
+    if let Some(note) = document().get_element_by_id("river-migration-warning") {
+        if ambiguous > 0 {
+            set_text(
+                "river-migration-warning",
+                &format!("{ambiguous} river name(s) could not be rebound — see diagnostics."),
+            );
+            let _ = note.class_list().remove_1("hidden");
+        } else {
+            let _ = note.class_list().add_1("hidden");
+        }
+    }
+}
+
+pub(crate) fn sync_river_status(state: &AppState) {
+    let (segments, cells) = channel_topology_counts(state);
+    let named = state.named_rivers.len();
+    if state.rivers_read_only {
+        set_text(
+            "river-status",
+            &format!("{named} named river(s) · {segments} physical segments · {cells} channel cells (read-only)"),
+        );
+    } else {
+        let active = state.active_river_id.map(|id| {
+            if is_tributary(&state.rivers, id) {
+                format!("River #{id} (tributary — Detach to split)")
+            } else {
+                format!("River #{id}")
+            }
+        }).unwrap_or_else(|| "New river on next click".to_string());
+        set_text(
+            "river-status",
+            &format!("{active} · {segments} legacy river(s)"),
+        );
+    }
+    sync_detach_tributary_ui(state);
 }
 pub(crate) fn brush_tier_screen_diameter(tier: i32) -> f64 {
     let i = tier.clamp(MIN_BRUSH_TIER, MAX_BRUSH_TIER) as usize;
@@ -277,8 +358,14 @@ pub(crate) fn reset_view_on_world_open(s: &mut AppState) {
     s.show_peaks = false;
     s.show_grid = s.map_bounds.len() <= elevation_view::OVERLAY_LOD_MAX_VISIBLE;
     s.active_river_id = None;
+    s.river_pin_source = None;
     s.rivers = RiverCatalog::default();
     s.river_render_paths = Default::default();
+    s.rivers_read_only = false;
+    s.channel_segment_count = None;
+    s.channel_cell_count = None;
+    s.named_rivers.clear();
+    s.name_migration.clear();
     s.wizard_accepted = false;
     s.wizard_edit_mode = false;
     deactivate_paint_brush(s);
@@ -286,7 +373,7 @@ pub(crate) fn reset_view_on_world_open(s: &mut AppState) {
 /// Map a brush to absolute target elevation. `Inspect` / Raise / Lower write nothing here.
 pub(crate) fn brush_absolute_elevation(brush: &Brush) -> Option<i32> {
     match brush {
-        Brush::Inspect | Brush::Raise | Brush::Lower | Brush::River | Brush::RiverErase => None,
+        Brush::Inspect | Brush::Raise | Brush::Lower | Brush::River | Brush::RiverPin | Brush::RiverErase => None,
         Brush::SetLand => Some(1),
         Brush::SetWater => Some(0),
     }

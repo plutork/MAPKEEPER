@@ -10,6 +10,8 @@ pub const HYDROLOGY_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 pub const HYDROLOGY_SNAPSHOT_FILE: &str = "hydrology-v2.json";
 pub const CHANNEL_NODE_LAYER_ID: &str = "hydrology_channel_node_id";
 pub const CHANNEL_SEGMENT_LAYER_ID: &str = "hydrology_channel_segment_id";
+pub const HYDROLOGY_GENERATOR_VERSION: &str = "hydrology-v2";
+pub const HYDROLOGY_CHANNEL_POLICY_BASE: &str = "channel-v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HydrologySnapshot {
@@ -18,6 +20,7 @@ pub struct HydrologySnapshot {
     pub fingerprint: String,
     pub generator_version: String,
     pub policy_version: String,
+    /// Stable topology identity from base inputs + channel policy — not author RNG.
     pub effective_seed: u64,
     pub drainage: DrainageGraph,
     pub channels: ChannelGraph,
@@ -98,6 +101,21 @@ impl HydrologySnapshot {
     }
 }
 
+/// Channel policy id including river density preset (topology-affecting).
+pub fn hydrology_policy_version(river_density: &str) -> String {
+    format!("{HYDROLOGY_CHANNEL_POLICY_BASE}/{river_density}")
+}
+
+/// Derive stable seed from base revision + policy — UI nonce must not affect topology.
+pub fn derive_effective_seed(base_revision: u64, policy_version: &str) -> u64 {
+    let mut hash = base_revision;
+    for byte in policy_version.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    hash
+}
+
 pub fn is_derived_hydrology_layer_id(layer_id: &str) -> bool {
     matches!(layer_id, CHANNEL_NODE_LAYER_ID | CHANNEL_SEGMENT_LAYER_ID)
 }
@@ -111,5 +129,13 @@ mod tests {
         assert!(is_derived_hydrology_layer_id(CHANNEL_NODE_LAYER_ID));
         assert!(is_derived_hydrology_layer_id(CHANNEL_SEGMENT_LAYER_ID));
         assert!(!is_derived_hydrology_layer_id("elevation"));
+    }
+
+    #[test]
+    fn effective_seed_is_stable_for_same_policy() {
+        let a = derive_effective_seed(0xabc, "channel-v1/balanced");
+        let b = derive_effective_seed(0xabc, "channel-v1/balanced");
+        assert_eq!(a, b);
+        assert_ne!(a, derive_effective_seed(0xabc, "channel-v1/many"));
     }
 }

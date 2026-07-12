@@ -17,7 +17,8 @@ use mapkeeper_core::map_preset::{legacy_default_bounds, MapPreset};
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
 use mapkeeper_core::rivers::{sync_river_id_layer, RiverCatalog, RIVER_CATALOG_FILE};
 use mapkeeper_core::worldgen::hydrology::{
-    compatibility_river_id_layer, HydrologySnapshot, HYDROLOGY_SNAPSHOT_FILE,
+    compatibility_river_id_layer, HydrologySnapshot, NamedRiverStore, NAMED_RIVERS_FILE,
+    HYDROLOGY_SNAPSHOT_FILE,
 };
 use serde::Deserialize;
 
@@ -367,6 +368,37 @@ pub(crate) fn rivers_file_path(world_path: &Path) -> PathBuf {
     world_path.join("map").join(RIVER_CATALOG_FILE)
 }
 
+pub(crate) fn named_rivers_file_path(world_path: &Path) -> PathBuf {
+    world_path.join("map").join(NAMED_RIVERS_FILE)
+}
+
+pub(crate) fn read_named_river_store(world_path: &Path) -> NamedRiverStore {
+    std::fs::read_to_string(named_rivers_file_path(world_path))
+        .ok()
+        .and_then(|raw| NamedRiverStore::from_json(&raw).ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn write_named_river_store(
+    world_path: &Path,
+    store: &NamedRiverStore,
+) -> Result<(), String> {
+    let path = named_rivers_file_path(world_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let body = store.to_json_pretty().map_err(|e| e.to_string())?;
+    std::fs::write(&path, body).map_err(|e| e.to_string())
+}
+
+pub(crate) fn clear_named_rivers(world_path: &Path) -> Result<(), String> {
+    let path = named_rivers_file_path(world_path);
+    if path.exists() {
+        std::fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 pub(crate) fn read_river_catalog(world_path: &Path) -> RiverCatalog {
     std::fs::read_to_string(rivers_file_path(world_path))
         .ok()
@@ -559,6 +591,7 @@ pub(crate) fn persist_lakes(
 
 /// Replace rivers with an empty catalog + zero `river_id` layer.
 pub(crate) fn clear_rivers(world_path: &Path, bounds: &MapBounds) -> Result<(), String> {
+    clear_named_rivers(world_path)?;
     persist_rivers(world_path, &RiverCatalog::default(), bounds)
 }
 
@@ -588,7 +621,7 @@ mod persist_lakes_tests {
     use mapkeeper_core::map_preset::MapPreset;
     use mapkeeper_core::worldgen::hydrology::{
         analyze_depressions, build_channel_graph, build_drainage_graph, ChannelPolicy,
-        HydrologySnapshot,
+        HydrologySnapshot, PrecipInputState,
     };
     use std::sync::atomic::Ordering;
     use tempfile::tempdir;
@@ -614,7 +647,14 @@ mod persist_lakes_tests {
         let analysis = analyze_depressions(&elevation, bounds);
         let drainage = build_drainage_graph(&analysis, &LakeCatalog::default(), bounds).unwrap();
         let channels =
-            build_channel_graph(&drainage, &analysis, None, ChannelPolicy::default()).unwrap();
+            build_channel_graph(
+                &drainage,
+                &analysis,
+                None,
+                PrecipInputState::Missing,
+                ChannelPolicy::default(),
+            )
+            .unwrap();
         let (base_revision, fingerprint) = hydrology_base_fingerprint(world);
         HydrologySnapshot::new(
             base_revision,

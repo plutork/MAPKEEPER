@@ -5,14 +5,16 @@ use std::rc::Rc;
 
 use crate::api::{
     delete_river_at_cell, flush_pending_paints, load_profile_into_panel, post_lake_generate,
-    post_river_append, post_river_generate, post_river_pop, schedule_paint_flush,
+    post_river_append, post_river_detach, post_river_generate, post_river_pin, post_river_pop, schedule_paint_flush,
 };
 use crate::brush::{
     active_dock_tab, apply_elevation_brush_intent, apply_paint_brush, brush_absolute_elevation,
     brush_delta_sign, brush_paints, clear_pointer_interaction, deactivate_paint_brush,
     effective_brush_radius_from_hex_size, effective_paint_radius, river_brush,
     sync_brush_effective_label, sync_brush_radius_active, sync_brush_step_active,
-    sync_falloff_active, sync_paint_tool_ui, sync_river_status, terrain_brush,
+    sync_falloff_active, sync_manual_river_authoring_ui, sync_paint_tool_ui, sync_river_status,
+    sync_detach_tributary_ui,
+    terrain_brush, RIVERS_READ_ONLY_MSG,
 };
 use crate::canvas::{clamp_zoom, current_hex_size_px, hex_layout, map_layout, schedule_redraw};
 use crate::dom::{
@@ -30,6 +32,7 @@ use crate::wizard::{
 };
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::stamp_delta;
+use mapkeeper_core::river_detach::tributary_at_cell;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -168,6 +171,34 @@ pub fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
             // Hydro brush paints elevation-driven hydro; Inspect opens the
             // author profile panel (unchanged behavior).
             let brush = state.borrow().brush.clone();
+            if state.borrow().rivers_read_only && river_brush(&brush) {
+                set_text("river-status", RIVERS_READ_ONLY_MSG);
+                return;
+            }
+            if matches!(brush, Brush::RiverPin) {
+                let mut s = state.borrow_mut();
+                if let Some(source) = s.river_pin_source {
+                    let mouth = (q, r);
+                    s.river_pin_source = None;
+                    drop(s);
+                    wasm_bindgen_futures::spawn_local(post_river_pin(state.clone(), source, mouth));
+                } else if let Some(index) = s.map_bounds.index_of(Axial::new(q, r)) {
+                    if let Some(id) = tributary_at_cell(&s.rivers, index) {
+                        s.active_river_id = Some(id);
+                        s.river_pin_source = None;
+                        drop(s);
+                        sync_river_status(&state.borrow());
+                        sync_detach_tributary_ui(&state.borrow());
+                    } else {
+                        s.river_pin_source = Some((q, r));
+                        set_text("river-status", "Pin: now click mouth cell");
+                    }
+                } else {
+                    s.river_pin_source = Some((q, r));
+                    set_text("river-status", "Pin: now click mouth cell");
+                }
+                return;
+            }
             if matches!(brush, Brush::River) {
                 wasm_bindgen_futures::spawn_local(post_river_append(state.clone(), q, r));
                 return;
@@ -840,7 +871,9 @@ pub fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                         let brush = {
                             let mut s = state.borrow_mut();
                             clear_pointer_interaction(&mut s);
-                            if !river_brush(&s.brush) {
+                            if s.rivers_read_only {
+                                s.brush = Brush::Inspect;
+                            } else if !river_brush(&s.brush) {
                                 s.brush = s.last_river_brush.clone();
                             }
                             s.hover_cell = None;
@@ -848,6 +881,7 @@ pub fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                         };
                         sync_paint_tool_ui(&brush);
                         sync_river_status(&state.borrow());
+                        sync_manual_river_authoring_ui(&state.borrow());
                         if brush_paints(&brush) {
                             schedule_redraw(state.clone());
                         }
@@ -858,6 +892,10 @@ pub fn attach_dock_click(state: Rc<RefCell<AppState>>) {
             }
 
             if let Ok(Some(button)) = target.closest("[data-river-action]") {
+                if state.borrow().rivers_read_only {
+                    set_text("river-status", RIVERS_READ_ONLY_MSG);
+                    return;
+                }
                 let Some(action) = button.get_attribute("data-river-action") else {
                     return;
                 };
@@ -868,6 +906,9 @@ pub fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                     }
                     "undo" => {
                         wasm_bindgen_futures::spawn_local(post_river_pop(state.clone()));
+                    }
+                    "detach" => {
+                        wasm_bindgen_futures::spawn_local(post_river_detach(state.clone()));
                     }
                     _ => {}
                 }
@@ -886,13 +927,35 @@ pub fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                 "water" => Brush::SetWater,
                 "raise" => Brush::Raise,
                 "lower" => Brush::Lower,
-                "river" => Brush::River,
-                "river-erase" => Brush::RiverErase,
+                "river-pin" => {
+                    if state.borrow().rivers_read_only {
+                        set_text("river-status", RIVERS_READ_ONLY_MSG);
+                        return;
+                    }
+                    Brush::RiverPin
+                }
+                "river" => {
+                    if state.borrow().rivers_read_only {
+                        set_text("river-status", RIVERS_READ_ONLY_MSG);
+                        return;
+                    }
+                    Brush::River
+                }
+                "river-erase" => {
+                    if state.borrow().rivers_read_only {
+                        set_text("river-status", RIVERS_READ_ONLY_MSG);
+                        return;
+                    }
+                    Brush::RiverErase
+                }
                 _ => return,
             };
             {
                 let mut s = state.borrow_mut();
                 apply_paint_brush(&mut s, brush.clone());
+                if matches!(brush, Brush::RiverPin) {
+                    s.river_pin_source = None;
+                }
                 if matches!(brush, Brush::Raise | Brush::Lower) {
                     apply_elevation_brush_intent(&mut s);
                 }

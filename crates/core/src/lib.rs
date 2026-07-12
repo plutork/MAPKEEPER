@@ -11,6 +11,8 @@ pub mod map_preset;
 pub mod profile;
 pub mod projects;
 pub mod rivers;
+pub mod river_pin;
+pub mod river_detach;
 pub mod world;
 
 pub mod worldgen;

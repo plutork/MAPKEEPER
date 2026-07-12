@@ -1526,7 +1526,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         let closure = Closure::<dyn FnMut()>::new(move || {
             let density =
                 active_attr_in_group("wiz-river-densities", "data-wiz-river-density", "balanced");
-            set_wizard_status("Generating rivers…");
+            set_wizard_status("Rebuilding rivers…");
             wasm_bindgen_futures::spawn_local(post_river_generate(
                 state.clone(),
                 "wizard-status",

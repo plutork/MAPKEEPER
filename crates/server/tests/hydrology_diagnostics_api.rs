@@ -49,6 +49,8 @@ async fn diagnostics_report_missing_snapshot_without_reading_legacy_catalog() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["snapshot_active"], false);
+    assert_eq!(json["precip_input_state"], "missing");
+    assert_eq!(json["deterministic"], true);
     assert_eq!(json["generated_river_count"], 0);
     assert_eq!(json["river_id_matches_snapshot"], false);
 }

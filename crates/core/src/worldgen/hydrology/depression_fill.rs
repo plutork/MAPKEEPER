@@ -3,14 +3,11 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
-use crate::climate::PRECIPITATION_LAYER_ID;
 use crate::hex::MapBounds;
 use crate::hydro::{DEFAULT_LAND_ELEVATION, SEA_LEVEL};
 use crate::layer::DenseLayer;
 
-use super::types::{DepressionAnalysis, ProvisionalDrainage};
-
-const FALLBACK_LAND_RUNOFF: u64 = 90;
+use super::types::{DepressionAnalysis, PrecipInputState, ProvisionalDrainage, terrain_runoff};
 
 /// Build routing surface and geometric basin/spill metadata from elevation.
 pub fn analyze_depressions(elevation: &DenseLayer, bounds: &MapBounds) -> DepressionAnalysis {
@@ -110,20 +107,13 @@ pub fn provisional_drainage(
     analysis: &DepressionAnalysis,
     precipitation: Option<&DenseLayer>,
     bounds: &MapBounds,
-    use_climate: bool,
+    precip_state: PrecipInputState,
 ) -> ProvisionalDrainage {
     let n = bounds.len();
     let mut accumulated_runoff = vec![0u64; n];
     for index in 0..n {
         if analysis.original_heights[index] > SEA_LEVEL {
-            accumulated_runoff[index] = if use_climate {
-                precipitation
-                    .filter(|layer| layer.layer_id == PRECIPITATION_LAYER_ID)
-                    .map(|layer| layer.int_or(index, 0).max(0) as u64)
-                    .unwrap_or(0)
-            } else {
-                FALLBACK_LAND_RUNOFF
-            };
+            accumulated_runoff[index] = terrain_runoff(index, precipitation, precip_state);
         }
     }
 
@@ -437,7 +427,7 @@ mod tests {
         let center = (bounds.height / 2 * bounds.width + bounds.width / 2) as usize;
         elevation.set(center, DenseState::Value(LayerValue::Int(4)));
         let analysis = analyze_depressions(&elevation, &bounds);
-        let drainage = provisional_drainage(&analysis, None, &bounds, false);
+        let drainage = provisional_drainage(&analysis, None, &bounds, PrecipInputState::Missing);
 
         assert!(
             drainage.basin_supply.values().any(|&supply| supply > 1),

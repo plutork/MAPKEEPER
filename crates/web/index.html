@@ -830,22 +830,31 @@
             <button class="swatch active" type="button" data-editor-river-density="balanced">Balanced</button>
             <button class="swatch" type="button" data-editor-river-density="many">Many</button>
           </div>
-          <button id="generate-rivers" class="swatch" type="button">Generate rivers</button>
+          <p class="dock-note">Rebuilds from current elevation, lakes, and climate. Same inputs → same river network.</p>
+          <button id="generate-rivers" class="swatch" type="button">Rebuild rivers</button>
           <p id="water-gen-status" class="dock-note"></p>
           <p class="dock-note">Gen diagnostics (copy into /fix reports)</p>
           <pre id="water-gen-diagnostics" class="water-gen-diagnostics"></pre>
-          <p class="pane-label">Manual rivers</p>
+          <div id="manual-rivers-authoring">
+          <p class="pane-label">Manual rivers (legacy)</p>
           <p class="dock-note">Click each hex in order — neighbor-only chain. Straight stroke overlay (v1).</p>
           <div class="swatch-grid">
+            <button class="swatch" data-brush="river-pin" type="button"><span class="dot" style="background:#6eb5ff"></span>Pin river</button>
             <button class="swatch" data-brush="river" type="button"><span class="dot" style="background:#4da6ff"></span>Draw river</button>
             <button class="swatch" data-brush="river-erase" type="button"><span class="dot" style="background:#c44"></span>Erase river</button>
           </div>
+          <p class="dock-note">Pin: click source, then mouth. Draw: neighbor chain click-by-click.</p>
           <div class="row">
             <button class="swatch" data-river-action="new" type="button">New river</button>
             <button class="swatch" data-river-action="undo" type="button">Undo step</button>
+            <button class="swatch" id="detach-tributary" data-river-action="detach" type="button" disabled>Detach tributary</button>
           </div>
-          <p id="river-status" class="dock-note">New river on next click · 0 river(s) on map</p>
           <p class="dock-note">Erase removes the whole river on any of its cells.</p>
+          <p class="dock-note">Pin: click tributary to select, then Detach. Or pin a new mouth off the stem.</p>
+          </div>
+          <p id="manual-rivers-readonly-note" class="dock-note hidden">Generated rivers are read-only. Use <strong>Rebuild rivers</strong> to rebuild from current lakes and climate.</p>
+          <p id="river-migration-warning" class="dock-note hidden"></p>
+          <p id="river-status" class="dock-note">0 named rivers · 0 physical segments · 0 channel cells</p>
         </div>
         <div class="drawer-pane" data-drawer="view">
           <p class="pane-label">View</p>
@@ -1106,7 +1115,7 @@
           <button id="wiz-water-back" class="wiz-action-btn warn" type="button">Back</button>
         </div>
         <h2>Water</h2>
-        <p class="wiz-hint">Generate lakes before rivers.</p>
+        <p class="wiz-hint">Generate lakes before rivers. Lake seed affects tie-break ordering only.</p>
         <section class="wiz-section">
           <p class="wiz-label">1. Lake density</p>
           <div class="wiz-btn-row" id="wiz-lake-densities">
@@ -1126,9 +1135,9 @@
             <button class="wiz-style-btn" type="button" data-wiz-river-density="many">Many</button>
           </div>
           <div class="wiz-btn-row">
-            <button id="wiz-water-generate" class="wiz-action-btn" type="button">Generate rivers</button>
+            <button id="wiz-water-generate" class="wiz-action-btn" type="button">Rebuild rivers</button>
           </div>
-          <p class="wiz-hint">Regenerate replaces auto-generated water. Manual river edits stay available in the editor.</p>
+          <p class="wiz-hint">Rebuild from current terrain and lakes. Same inputs → same river network — change elevation, lakes, or climate first for a different result. Manual river drawing is not available for generated hydrology.</p>
         </section>
         <section class="wiz-section">
           <p class="wiz-label">Diagnostics</p>

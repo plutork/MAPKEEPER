@@ -396,6 +396,8 @@ pub(crate) enum Brush {
     Lower,
     /// river-overlay-layer-v1: chain-click polyline brush.
     River,
+    /// Legacy manual pin: source then mouth (track 2).
+    RiverPin,
     RiverErase,
 }
 
@@ -411,14 +413,28 @@ pub(crate) struct AppState {
     pub(crate) last_river_brush: Brush,
     /// Active river chain id (`None` = next click starts a new river).
     pub(crate) active_river_id: Option<u32>,
+    /// Pin brush: first click stores source until mouth is placed.
+    pub(crate) river_pin_source: Option<(i32, i32)>,
     /// River catalog mirror (river-overlay-layer-v1).
     pub(crate) rivers: RiverCatalog,
     /// Hydrology v2 draw-only topology projection.
     pub(crate) river_render_paths: RiverRenderPaths,
+    /// Generated hydrology snapshot active — manual river catalog writes disabled.
+    pub(crate) rivers_read_only: bool,
+    /// Physical segment count from active snapshot (if any).
+    pub(crate) channel_segment_count: Option<usize>,
+    /// Channel terrain cell count from active snapshot (if any).
+    pub(crate) channel_cell_count: Option<usize>,
+    /// Author-facing named rivers (stable ids; separate from physical segments).
+    pub(crate) named_rivers: Vec<mapkeeper_core::worldgen::hydrology::NamedRiverBinding>,
+    /// Last name migration / rebind report from active snapshot.
+    pub(crate) name_migration: Vec<mapkeeper_core::worldgen::hydrology::NameMigrationReport>,
     /// Lake catalog mirror (hydrology-lake-domain-v1).
     pub(crate) lakes: LakeCatalog,
     /// Precipitation layer exists on disk (probe on world open).
     pub(crate) precip_layer_present: Option<bool>,
+    /// Classified precip usability: missing | invalid_or_empty | valid.
+    pub(crate) precip_input_state: Option<String>,
     /// Last lakes/rivers generate — copy-paste diagnostics for /fix.
     pub(crate) water_gen_trace: WaterGenTrace,
     pub(crate) selected: Option<(i32, i32)>,

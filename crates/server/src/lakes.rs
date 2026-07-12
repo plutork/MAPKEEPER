@@ -9,7 +9,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use mapkeeper_core::lakes::{validate_catalog, LakeCatalog, LakeError};
 use mapkeeper_core::layer::ELEVATION_LAYER_ID;
-use mapkeeper_core::worldgen::hydrology::{analyze_depressions, generate_lakes, LakeDensity};
+use mapkeeper_core::worldgen::hydrology::{
+    analyze_depressions, classify_precip_input, generate_lakes, LakeDensity,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
@@ -64,6 +66,9 @@ struct LakesGenerateResponse {
     #[serde(flatten)]
     catalog: LakeCatalog,
     rivers_cleared: bool,
+    precip_input_state: &'static str,
+    /// `seed` affects lake tie-break ordering only — not depression topology.
+    seed_role: &'static str,
 }
 
 async fn generate_lakes_handler(
@@ -81,6 +86,7 @@ async fn generate_lakes_handler(
     let bounds = world_io::map_bounds(&active.path);
     let elevation = world_io::read_dense_layer(&active.path, ELEVATION_LAYER_ID, &bounds);
     let precipitation = world_io::read_optional_precip_layer(&active.path, &bounds);
+    let precip_state = classify_precip_input(&elevation, precipitation.as_ref());
     let analysis = analyze_depressions(&elevation, &bounds);
     let density = input
         .density
@@ -102,6 +108,8 @@ async fn generate_lakes_handler(
     Json(LakesGenerateResponse {
         catalog,
         rivers_cleared: true,
+        precip_input_state: precip_state.id(),
+        seed_role: "tie_break_only",
     })
     .into_response()
 }

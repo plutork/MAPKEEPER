@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::{hydro_from_elevation, HydroKind};
+use mapkeeper_core::worldgen::hydrology::river_ribbon_polygon;
 
 use crate::brush::{
     brush_preview_uses_circle, effective_paint_radius, paint_stamp_cells, river_brush,
@@ -174,80 +175,203 @@ pub(crate) fn draw_lakes(
     }
 }
 
-/// Hydrology v2 render projection: connected center-to-center strokes + flow chevrons.
+/// Hydrology v2 render projection: variable-width polygons (LOD) or thin strokes + chevrons.
 pub(crate) fn draw_rivers(
     state: &AppState,
     ctx: &CanvasRenderingContext2d,
     size: f64,
     ox: f64,
     oy: f64,
+    viewport: (i32, i32, i32, i32),
+    visible_cells: usize,
 ) {
     let render = &state.river_render_paths;
     if render.paths.is_empty() && render.mouth_extensions.is_empty() {
         return;
     }
-    ctx.set_stroke_style_str("#4da6ff");
-    ctx.set_fill_style_str("#4da6ff");
-    ctx.set_line_width(2.0);
-    ctx.set_line_cap("round");
-    ctx.set_line_join("round");
     let bounds = state.map_bounds;
+    let use_polygon = overlays_lod_ok(visible_cells, state.zoom);
     let mut flow_edges: Vec<(f64, f64, f64, f64)> = Vec::new();
-    // hydrology-river-rendering: physical topology stays in core.
-    for path in &render.paths {
-        if path.len() == 1 {
-            let Some(cell) = bounds.from_index(path[0]) else {
+    ctx.set_fill_style_str("rgba(77, 166, 255, 0.88)");
+    ctx.set_stroke_style_str("#4da6ff");
+    if use_polygon {
+        for path in &render.paths {
+            if !path_intersects_viewport(path, bounds, viewport) {
                 continue;
-            };
-            let (x, y) = cell.to_pixel(size);
-            ctx.begin_path();
-            let _ = ctx.arc(
-                ox + x,
-                oy + y,
-                (size * 0.12).clamp(2.0, 6.0),
-                0.0,
-                std::f64::consts::TAU,
-            );
-            ctx.fill();
-            continue;
-        }
-        ctx.begin_path();
-        let mut started = false;
-        let mut prev: Option<(f64, f64)> = None;
-        for &idx in path {
-            let Some(cell) = bounds.from_index(idx) else {
-                continue;
-            };
-            let (x, y) = cell.to_pixel(size);
-            let (cx, cy) = (ox + x, oy + y);
-            if let Some((px, py)) = prev {
-                ctx.line_to(cx, cy);
-                flow_edges.push((px, py, cx, cy));
-            } else {
-                ctx.move_to(cx, cy);
-                started = true;
             }
-            prev = Some((cx, cy));
+            collect_flow_edges(path, bounds, size, ox, oy, &mut flow_edges);
+            if path.len() == 1 {
+                draw_river_node_dot(ctx, bounds, path[0], size, ox, oy);
+                continue;
+            }
+            let centers = path_centers(path, bounds, size, ox, oy);
+            if centers.len() < 2 {
+                continue;
+            }
+            let polygon = river_ribbon_polygon(&centers, size, 4);
+            if polygon.len() < 3 {
+                continue;
+            }
+            ctx.begin_path();
+            ctx.move_to(polygon[0].0, polygon[0].1);
+            for point in &polygon[1..] {
+                ctx.line_to(point.0, point.1);
+            }
+            ctx.close_path();
+            ctx.fill();
         }
-        if started {
-            ctx.stroke();
+    } else {
+        ctx.set_line_width(2.0);
+        ctx.set_line_cap("round");
+        ctx.set_line_join("round");
+        for path in &render.paths {
+            if !path_intersects_viewport(path, bounds, viewport) {
+                continue;
+            }
+            if path.len() == 1 {
+                draw_river_node_dot(ctx, bounds, path[0], size, ox, oy);
+                continue;
+            }
+            ctx.begin_path();
+            let mut started = false;
+            let mut prev: Option<(f64, f64)> = None;
+            for &idx in path {
+                let Some(cell) = bounds.from_index(idx) else {
+                    continue;
+                };
+                let (x, y) = cell.to_pixel(size);
+                let (cx, cy) = (ox + x, oy + y);
+                if let Some((px, py)) = prev {
+                    ctx.line_to(cx, cy);
+                    flow_edges.push((px, py, cx, cy));
+                } else {
+                    ctx.move_to(cx, cy);
+                    started = true;
+                }
+                prev = Some((cx, cy));
+            }
+            if started {
+                ctx.stroke();
+            }
         }
     }
+    ctx.set_line_width(2.0);
+    ctx.set_line_cap("round");
     for &[from_idx, to_idx] in &render.mouth_extensions {
+        if !mouth_extension_visible(from_idx, to_idx, bounds, viewport) {
+            continue;
+        }
         let Some((from_x, from_y, to_x, to_y)) =
             edge_centers(bounds, from_idx, to_idx, size, ox, oy)
         else {
             continue;
         };
-        ctx.begin_path();
-        ctx.move_to(from_x, from_y);
-        ctx.line_to(to_x, to_y);
-        ctx.stroke();
+        if use_polygon {
+            let centers = [(from_x, from_y), (to_x, to_y)];
+            let polygon = river_ribbon_polygon(&centers, size, 2);
+            if polygon.len() >= 3 {
+                ctx.begin_path();
+                ctx.move_to(polygon[0].0, polygon[0].1);
+                for point in &polygon[1..] {
+                    ctx.line_to(point.0, point.1);
+                }
+                ctx.close_path();
+                ctx.fill();
+            }
+        } else {
+            ctx.begin_path();
+            ctx.move_to(from_x, from_y);
+            ctx.line_to(to_x, to_y);
+            ctx.stroke();
+        }
         flow_edges.push((from_x, from_y, to_x, to_y));
     }
+    ctx.set_fill_style_str("#4da6ff");
     for (x0, y0, x1, y1) in flow_edges {
         draw_flow_chevron(ctx, x0, y0, x1, y1, size);
     }
+}
+
+fn path_intersects_viewport(
+    path: &[usize],
+    bounds: MapBounds,
+    (q_min, q_max, r_min, r_max): (i32, i32, i32, i32),
+) -> bool {
+    path.iter().any(|&idx| {
+        bounds
+            .from_index(idx)
+            .is_some_and(|cell| cell.q >= q_min && cell.q <= q_max && cell.r >= r_min && cell.r <= r_max)
+    })
+}
+
+fn mouth_extension_visible(
+    from_idx: usize,
+    to_idx: usize,
+    bounds: MapBounds,
+    viewport: (i32, i32, i32, i32),
+) -> bool {
+    path_intersects_viewport(&[from_idx, to_idx], bounds, viewport)
+}
+
+fn path_centers(
+    path: &[usize],
+    bounds: MapBounds,
+    size: f64,
+    ox: f64,
+    oy: f64,
+) -> Vec<(f64, f64)> {
+    path.iter()
+        .filter_map(|&idx| bounds.from_index(idx))
+        .map(|cell| {
+            let (x, y) = cell.to_pixel(size);
+            (ox + x, oy + y)
+        })
+        .collect()
+}
+
+fn collect_flow_edges(
+    path: &[usize],
+    bounds: MapBounds,
+    size: f64,
+    ox: f64,
+    oy: f64,
+    out: &mut Vec<(f64, f64, f64, f64)>,
+) {
+    let mut prev: Option<(f64, f64)> = None;
+    for &idx in path {
+        let Some(cell) = bounds.from_index(idx) else {
+            continue;
+        };
+        let (x, y) = cell.to_pixel(size);
+        let point = (ox + x, oy + y);
+        if let Some((px, py)) = prev {
+            out.push((px, py, point.0, point.1));
+        }
+        prev = Some(point);
+    }
+}
+
+fn draw_river_node_dot(
+    ctx: &CanvasRenderingContext2d,
+    bounds: MapBounds,
+    idx: usize,
+    size: f64,
+    ox: f64,
+    oy: f64,
+) {
+    let Some(cell) = bounds.from_index(idx) else {
+        return;
+    };
+    let (x, y) = cell.to_pixel(size);
+    ctx.begin_path();
+    let _ = ctx.arc(
+        ox + x,
+        oy + y,
+        (size * 0.14).clamp(2.0, 8.0),
+        0.0,
+        std::f64::consts::TAU,
+    );
+    ctx.fill();
 }
 
 fn edge_centers(
@@ -516,7 +640,15 @@ pub(crate) fn redraw(state: &AppState) -> usize {
     );
     draw_preview_boundary(state, &ctx, size, ox, oy);
     draw_lakes(state, &ctx, size, ox, oy);
-    draw_rivers(state, &ctx, size, ox, oy);
+    draw_rivers(
+        state,
+        &ctx,
+        size,
+        ox,
+        oy,
+        (q_min, q_max, r_min, r_max),
+        visible_cells,
+    );
     set_text("toggle-grid", grid_lines_toggle_label(state.show_grid));
     set_text(
         "toggle-color-mode",

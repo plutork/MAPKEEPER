@@ -2,13 +2,13 @@
 
 use std::collections::HashSet;
 
-use crate::climate::PRECIPITATION_LAYER_ID;
 use crate::hex::MapBounds;
 use crate::hydro::{DEFAULT_LAND_ELEVATION, SEA_LEVEL};
 use crate::lakes::{Lake, LakeCatalog, LAKE_CATALOG_SCHEMA_VERSION};
 use crate::layer::DenseLayer;
 use crate::worldgen::hydrology::depression_fill::provisional_drainage;
-use crate::worldgen::hydrology::types::{DepressionAnalysis, LakeDensity};
+use crate::worldgen::hydrology::terminal_routing::{classify_basin_terminal, SpillTerminal};
+use crate::worldgen::hydrology::types::{classify_precip_input, DepressionAnalysis, LakeDensity, PrecipInputState};
 
 /// Generate a lake catalog from depression analysis + climate inputs.
 pub fn generate_lakes(
@@ -24,16 +24,14 @@ pub fn generate_lakes(
         return LakeCatalog::default();
     }
 
-    let use_climate = precipitation
-        .map(|p| p.layer_id == PRECIPITATION_LAYER_ID && land_precip_samples(p, elevation, n) > 0)
-        .unwrap_or(false);
+    let precip_state = classify_precip_input(elevation, precipitation);
 
     let depression_basins = collect_depression_basins(analysis);
     if depression_basins.is_empty() {
         return LakeCatalog::default();
     }
 
-    let provisional = provisional_drainage(analysis, precipitation, bounds, use_climate);
+    let provisional = provisional_drainage(analysis, precipitation, bounds, precip_state);
 
     let land_cells = land_cell_count(elevation, n);
     let max_lake_cells = max_lake_cell_budget(land_cells, density);
@@ -48,7 +46,12 @@ pub fn generate_lakes(
             }
             let supply = provisional.basin_supply.get(&bid).copied().unwrap_or(0);
             let outlet = analysis.spill_cell.get(&bid).copied();
-            let endorheic = !spill_reaches_sea(outlet, analysis, bounds);
+            let terminal = classify_basin_terminal(bid, analysis);
+            let (endorheic, outlet) = match terminal {
+                SpillTerminal::Ocean => (false, outlet),
+                SpillTerminal::Endorheic => (true, outlet),
+                SpillTerminal::Cycle | SpillTerminal::Unresolved => return None,
+            };
             let fill_volume = cells
                 .iter()
                 .map(|&cell| analysis.fill_depth[cell].max(0) as u64)
@@ -147,35 +150,6 @@ fn basin_hierarchy_depth(bid: u32, analysis: &DepressionAnalysis) -> u32 {
     depth
 }
 
-fn spill_reaches_sea(
-    spill: Option<usize>,
-    analysis: &DepressionAnalysis,
-    bounds: &MapBounds,
-) -> bool {
-    let Some(spill) = spill else {
-        return false;
-    };
-    neighbor_indices(spill, bounds)
-        .iter()
-        .any(|&n| analysis.conditioned_heights[n] <= SEA_LEVEL)
-}
-
-fn neighbor_indices(index: usize, bounds: &MapBounds) -> Vec<usize> {
-    bounds
-        .from_index(index)
-        .into_iter()
-        .flat_map(|cell| cell.neighbors())
-        .filter_map(|n| bounds.index_of(n))
-        .collect()
-}
-
-fn land_precip_samples(precip: &DenseLayer, elevation: &DenseLayer, n: usize) -> u32 {
-    (0..n)
-        .filter(|&i| elevation.int_or(i, DEFAULT_LAND_ELEVATION) > SEA_LEVEL)
-        .filter(|&i| precip.int_or(i, 0) > 0)
-        .count() as u32
-}
-
 fn land_cell_count(elevation: &DenseLayer, n: usize) -> usize {
     (0..n)
         .filter(|&i| elevation.int_or(i, DEFAULT_LAND_ELEVATION) > SEA_LEVEL)
@@ -217,9 +191,9 @@ pub fn lake_outflow_supply(
     precipitation: Option<&DenseLayer>,
     _elevation: &DenseLayer,
     bounds: &MapBounds,
-    use_climate: bool,
+    precip_state: PrecipInputState,
 ) -> u64 {
-    let provisional = provisional_drainage(analysis, precipitation, bounds, use_climate);
+    let provisional = provisional_drainage(analysis, precipitation, bounds, precip_state);
     let mut basins = HashSet::new();
     for &c in &lake.cells {
         let bid = analysis.basin_id[c];
@@ -241,8 +215,10 @@ pub fn lake_acceptance_stats(catalog: &LakeCatalog) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::climate::PRECIPITATION_LAYER_ID;
     use crate::hex::Axial;
     use crate::layer::{DenseLayer, DenseState, LayerValue};
+    use crate::worldgen::hydrology::terminal_routing::{classify_basin_terminal, SpillTerminal};
     use crate::worldgen::hydrology::analyze_depressions;
 
     fn set_elev(layer: &mut DenseLayer, bounds: &MapBounds, q: i32, r: i32, v: i32) {
@@ -466,27 +442,84 @@ mod tests {
     }
 
     #[test]
-    fn endorheic_when_spill_not_to_sea() {
-        let bounds = MapBounds::new(9, 9);
-        let mut elev = DenseLayer::new_integer("elevation", bounds.len());
-        island_with_pit(&bounds, &mut elev, 4);
+    fn catalog_outlet_matches_terminal_routing() {
+        let (bounds, elev, wet, _) = wet_dry_pair();
         let analysis = analyze_depressions(&elev, &bounds);
-        let mut precip = DenseLayer::new_integer(PRECIPITATION_LAYER_ID, bounds.len());
-        for i in 0..bounds.len() {
-            if elev.int_or(i, 0) > SEA_LEVEL {
-                set_precip(&mut precip, i, 250);
-            }
-        }
         let catalog = generate_lakes(
             &analysis,
             &elev,
-            Some(&precip),
+            Some(&wet),
             &bounds,
             LakeDensity::LakeRich,
             1,
         );
-        if let Some(lake) = catalog.lakes.first() {
-            assert!(lake.endorheic || lake.outlet_cell.is_some());
+        for lake in &catalog.lakes {
+            if lake.endorheic {
+                assert!(lake.outlet_cell.is_none());
+            } else {
+                assert!(lake.outlet_cell.is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn lake_chain_drains_through_downstream_basin() {
+        use crate::lakes::{Lake, LakeCatalog};
+        use crate::worldgen::hydrology::{build_drainage_graph, DrainageNode, DrainageNodeId};
+
+        let analysis = mock_terminal_chain_analysis();
+        assert_eq!(
+            classify_basin_terminal(1, &analysis),
+            SpillTerminal::Ocean
+        );
+        let bounds = MapBounds::new(3, 2);
+        let catalog = LakeCatalog {
+            schema_version: 1,
+            next_id: 3,
+            lakes: vec![
+                Lake {
+                    id: 1,
+                    cells: vec![1, 2],
+                    outlet_cell: Some(2),
+                    endorheic: false,
+                    name: None,
+                },
+                Lake {
+                    id: 2,
+                    cells: vec![3, 4],
+                    outlet_cell: Some(4),
+                    endorheic: false,
+                    name: None,
+                },
+            ],
+        };
+        let graph = build_drainage_graph(&analysis, &catalog, &bounds).unwrap();
+        let upstream = graph
+            .nodes
+            .iter()
+            .position(|node| matches!(node, DrainageNode::Lake(1)))
+            .expect("upstream lake node");
+        let downstream = graph
+            .nodes
+            .iter()
+            .position(|node| matches!(node, DrainageNode::Lake(2)))
+            .expect("downstream lake node");
+        assert_eq!(graph.receiver[upstream], Some(DrainageNodeId(downstream)));
+    }
+
+    fn mock_terminal_chain_analysis() -> DepressionAnalysis {
+        use std::collections::HashMap;
+
+        DepressionAnalysis {
+            original_heights: vec![0, 20, 20, 18, 16, 0],
+            conditioned_heights: vec![0, 20, 20, 18, 16, 0],
+            flood_rank: vec![0; 6],
+            provisional_receiver: vec![None, Some(2), Some(3), Some(4), Some(5), None],
+            fill_depth: vec![0, 2, 2, 2, 2, 0],
+            basin_id: vec![0, 1, 1, 2, 2, 0],
+            spill_cell: HashMap::from([(1, 2), (2, 4)]),
+            spill_elevation: HashMap::new(),
+            basin_parent: HashMap::from([(1, Some(2)), (2, None)]),
         }
     }
 }
