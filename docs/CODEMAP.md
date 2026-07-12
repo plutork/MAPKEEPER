@@ -642,19 +642,19 @@ Symbols include public modules/types/functions and impl blocks.
 - L95: `fn` `draw_elevation_label`
 
 ### `crates/web/src/home.rs`
-- L27: `fn` `render_project_list`
-- L143: `fn` `refresh_suggested_path`
-- L227: `fn` `attach_preset_warn_handlers`
-- L248: `fn` `attach_create_click`
-- L302: `fn` `attach_build_start_click`
-- L380: `fn` `attach_new_id_input`
-- L389: `fn` `attach_new_path_input`
-- L398: `fn` `attach_generate_id_input`
-- L407: `fn` `attach_generate_path_input`
-- L416: `fn` `attach_browse_folder_click`
-- L459: `fn` `attach_first_world_handlers`
-- L512: `fn` `attach_post_finish_note_dismiss`
-- L520: `fn` `attach_project_list_click`
+- L35: `fn` `render_project_list`
+- L151: `fn` `refresh_suggested_path`
+- L235: `fn` `attach_preset_warn_handlers`
+- L256: `fn` `attach_create_click`
+- L310: `fn` `attach_build_start_click`
+- L388: `fn` `attach_new_id_input`
+- L397: `fn` `attach_new_path_input`
+- L406: `fn` `attach_generate_id_input`
+- L415: `fn` `attach_generate_path_input`
+- L424: `fn` `attach_browse_folder_click`
+- L467: `fn` `attach_first_world_handlers`
+- L520: `fn` `attach_post_finish_note_dismiss`
+- L528: `fn` `attach_project_list_click`
 
 ### `crates/web/src/lib.rs`
 - L54: `fn` `perf_emit`

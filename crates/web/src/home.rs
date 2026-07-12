@@ -4,6 +4,8 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use mapkeeper_core::build_state::BUILD_STEP_WATER;
+
 use crate::api::{
     load_elevation, load_geology, load_map, load_rivers, persist_build_draft, refresh_projects,
 };
@@ -23,6 +25,12 @@ use crate::wizard::{
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Element, HtmlElement};
+
+fn resume_step(raw: Option<&str>) -> u32 {
+    raw.and_then(|step| step.parse::<u32>().ok())
+        .unwrap_or(1)
+        .clamp(1, BUILD_STEP_WATER)
+}
 
 pub(crate) fn render_project_list(projects: &[ProjectStatus], state: &Rc<RefCell<AppState>>) {
     let document = document();
@@ -617,11 +625,7 @@ pub fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                 return;
             };
             let resume_wizard = button.get_attribute("data-build-draft").as_deref() == Some("1");
-            let resume_step = button
-                .get_attribute("data-build-step")
-                .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(1)
-                .clamp(1, 4);
+            let resume_step = resume_step(button.get_attribute("data-build-step").as_deref());
 
             let state = state.clone();
             set_text("home-status", "Opening…");
@@ -732,4 +736,16 @@ pub fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
         .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
         .expect("attaching project-list handler");
     closure.forget();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_later_wizard_steps_when_resuming_a_draft() {
+        assert_eq!(resume_step(Some("6")), BUILD_STEP_WATER);
+        assert_eq!(resume_step(Some("99")), BUILD_STEP_WATER);
+        assert_eq!(resume_step(None), 1);
+    }
 }

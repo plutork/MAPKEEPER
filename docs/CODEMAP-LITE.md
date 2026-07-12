@@ -50,7 +50,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Desktop launch defaults (maximized on startup) -> `crates/desktop/src/lib.rs` (`desktop-maximized-default-launch`)
 - Data contracts and fixtures -> `schemas/`, `fixtures/`
 - River dogfood fixture worlds (fixed 14×8 elevation presets; not author Small) -> `fixtures/worlds/` (`river-dogfood-fixture-worlds`; maintainer/CI — no Home UI per D-59)
-- Build wizard draft state (`[build]` in `mapkeeper.toml`, steps 1–4 + `scheme`, read/write/clear/normalize) -> `crates/core/src/build_state.rs` (`home-build-draft-v1`, D-59, D-69, D-71)
+- Build wizard draft state (`[build]` in `mapkeeper.toml`, steps 1–6 + `scheme`, read/write/clear/normalize; Home resumes saved step) -> `crates/core/src/build_state.rs`, `crates/web/src/home.rs` (`home-build-draft-v1`, D-59, D-69, D-71)
 - Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, `PUT /api/build/bounds`, list `build_draft`/`build_step`) -> `crates/server/src/projects.rs`, `crates/server/src/build.rs` (D-59, D-69, D-71)
 - Build wizard step-1–4 API (`PUT /api/build/bounds` preset rewrite + Geo reset; `POST /api/build/land-mask/generate` returns seed identity JSON; land-mask cells; geology/elevation/climate generate) -> `crates/server/src/build.rs` (`wizard-merge-size-grid`, `world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`, D-68/D-69/D-71)
 - World Build Wizard shell (D-57 + D-59 draft resume + D-71 size+grid one screen): Home **Build World**, fullscreen overlay, Save Draft / wizard resume + Home footer version label -> `crates/web/index.html`, `crates/web/src/wizard.rs`, `crates/web/src/home.rs`
