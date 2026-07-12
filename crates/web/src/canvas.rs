@@ -192,6 +192,7 @@ pub(crate) fn draw_rivers(
     ctx.set_line_cap("round");
     ctx.set_line_join("round");
     let bounds = state.map_bounds;
+    let mut flow_edges: Vec<(f64, f64, f64, f64)> = Vec::new();
     // hydrology-river-rendering: physical topology stays in core.
     for path in &render.paths {
         if path.len() == 1 {
@@ -221,7 +222,7 @@ pub(crate) fn draw_rivers(
             let (cx, cy) = (ox + x, oy + y);
             if let Some((px, py)) = prev {
                 ctx.line_to(cx, cy);
-                draw_flow_chevron(ctx, px, py, cx, cy, size);
+                flow_edges.push((px, py, cx, cy));
             } else {
                 ctx.move_to(cx, cy);
                 started = true;
@@ -242,7 +243,10 @@ pub(crate) fn draw_rivers(
         ctx.move_to(from_x, from_y);
         ctx.line_to(to_x, to_y);
         ctx.stroke();
-        draw_flow_chevron(ctx, from_x, from_y, to_x, to_y, size);
+        flow_edges.push((from_x, from_y, to_x, to_y));
+    }
+    for (x0, y0, x1, y1) in flow_edges {
+        draw_flow_chevron(ctx, x0, y0, x1, y1, size);
     }
 }
 
@@ -269,7 +273,8 @@ fn draw_flow_chevron(
     y1: f64,
     size: f64,
 ) {
-    let mid_t = 0.65;
+    // Midpoint between hex centers sits on the shared edge (D-103).
+    let mid_t = 0.5;
     let mx = x0 + (x1 - x0) * mid_t;
     let my = y0 + (y1 - y0) * mid_t;
     let angle = (y1 - y0).atan2(x1 - x0);
