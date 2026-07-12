@@ -553,6 +553,7 @@ pub(crate) fn persist_lakes(
         restore_file(&catalog_path, backup_catalog)?;
         return Err(err);
     }
+    invalidate_hydrology_snapshot(world_path)?;
     Ok(())
 }
 
@@ -722,6 +723,22 @@ mod persist_lakes_tests {
         let mut elevation = read_dense_layer(world, ELEVATION_LAYER_ID, &bounds);
         elevation.set(0, DenseState::Value(LayerValue::Int(SEA_LEVEL + 1)));
         write_dense_layer(world, &elevation).unwrap();
+
+        assert_eq!(read_current_hydrology_snapshot(world).unwrap(), None);
+    }
+
+    #[test]
+    fn lake_catalog_write_invalidates_hydrology_snapshot() {
+        let _lock = HYDROLOGY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        let snapshot = snapshot(world, &bounds, 1);
+        persist_hydrology_snapshot(world, &snapshot).unwrap();
+
+        persist_lakes(world, &LakeCatalog::default(), &bounds).unwrap();
 
         assert_eq!(read_current_hydrology_snapshot(world).unwrap(), None);
     }

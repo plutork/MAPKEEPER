@@ -530,8 +530,8 @@ Symbols include public modules/types/functions and impl blocks.
 - L512: `fn` `read_lake_catalog`
 - L519: `fn` `write_lake_catalog`
 - L542: `fn` `persist_lakes`
-- L560: `fn` `clear_rivers`
-- L565: `fn` `persist_lake_generation`
+- L561: `fn` `clear_rivers`
+- L566: `fn` `persist_lake_generation`
 
 ### `crates/web/src/api.rs`
 - L571: `fn` `schedule_paint_flush`
