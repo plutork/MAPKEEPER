@@ -5,6 +5,8 @@
 # Usage (from repo root or this folder): powershell -File crates/web/build.ps1
 
 $ErrorActionPreference = "Stop"
+# D-97: same as CI — rustc warnings fail the build.
+$env:RUSTFLAGS = "-Dwarnings"
 # repo root is two levels up: crates/web -> crates -> root (workspace Cargo.toml lives there)
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $dist = Join-Path $PSScriptRoot "dist"

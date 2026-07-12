@@ -6,7 +6,10 @@ Set-Location $Root
 
 Write-Host "mapkeeper update (Windows)"
 Write-Host "repo: $Root"
+Write-Host "Build policy: warnings are errors (D-97, same as CI)."
 Write-Host ""
+
+$env:RUSTFLAGS = "-Dwarnings"
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host "git not found."

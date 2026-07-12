@@ -25,7 +25,10 @@ function Get-WasmBindgenPin {
 Write-Host "mapkeeper setup (Windows) - first-time workspace bootstrap"
 Write-Host "repo: $Root"
 Write-Host "Not a system-wide app install. No git pull. Asks before heavy changes."
+Write-Host "Build policy: warnings are errors (D-97, same as CI)."
 Write-Host ""
+
+$env:RUSTFLAGS = "-Dwarnings"
 
 if ($env:OS -ne "Windows_NT") {
     Write-Host "This script is for Windows only."
