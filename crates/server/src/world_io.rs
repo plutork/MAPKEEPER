@@ -420,9 +420,20 @@ pub(crate) fn persist_rivers(
     catalog: &RiverCatalog,
     bounds: &MapBounds,
 ) -> Result<(), String> {
+    let catalog_path = rivers_file_path(world_path);
+    let layer_path = layer_file_path(world_path, RIVER_ID_LAYER_ID);
+    let backup_catalog = std::fs::read_to_string(&catalog_path).ok();
+    let backup_layer = std::fs::read_to_string(&layer_path).ok();
+
     write_river_catalog(world_path, catalog)?;
     let layer = sync_river_id_layer(catalog, bounds);
-    write_dense_layer(world_path, &layer)
+    if let Err(err) = write_dense_layer(world_path, &layer) {
+        restore_file(&catalog_path, backup_catalog)?;
+        restore_file(&layer_path, backup_layer)?;
+        return Err(err);
+    }
+    invalidate_hydrology_snapshot(world_path)?;
+    Ok(())
 }
 
 pub(crate) fn lakes_file_path(world_path: &Path) -> PathBuf {
@@ -803,5 +814,200 @@ mod persist_lakes_tests {
         std::fs::write(layer_file_path(world, ELEVATION_LAYER_ID), "changed").unwrap();
 
         assert!(read_current_hydrology_snapshot(world).is_err());
+    }
+}
+
+#[cfg(test)]
+mod persist_rivers_tests {
+    use super::*;
+    use mapkeeper_core::hydro::SEA_LEVEL;
+    use mapkeeper_core::layer::{DenseState, LayerValue};
+    use mapkeeper_core::lakes::LakeCatalog;
+    use mapkeeper_core::rivers::{sync_river_id_layer, River, RiverCatalog};
+    use mapkeeper_core::worldgen::hydrology::{
+        analyze_depressions, build_channel_graph, build_drainage_graph, ChannelPolicy,
+        HydrologySnapshot, PrecipInputState,
+    };
+    use std::sync::atomic::Ordering;
+    use tempfile::tempdir;
+
+    fn seed_world(path: &Path) -> MapBounds {
+        std::fs::create_dir_all(path.join("map/layers")).unwrap();
+        rewrite_world_bounds(path, MapPreset::Small, false).unwrap()
+    }
+
+    fn snapshot(world: &Path, bounds: &MapBounds, seed: u64) -> HydrologySnapshot {
+        let mut elevation = DenseLayer::new_integer(ELEVATION_LAYER_ID, bounds.len());
+        for cell in 0..bounds.len() {
+            let height = if cell < bounds.width as usize {
+                SEA_LEVEL
+            } else {
+                SEA_LEVEL + 20
+            };
+            elevation.set(cell, DenseState::Value(LayerValue::Int(height)));
+        }
+        write_dense_layer(world, &elevation).unwrap();
+        let analysis = analyze_depressions(&elevation, bounds);
+        let drainage = build_drainage_graph(&analysis, &LakeCatalog::default(), bounds).unwrap();
+        let channels =
+            build_channel_graph(
+                &drainage,
+                &analysis,
+                None,
+                PrecipInputState::Missing,
+                ChannelPolicy::default(),
+            )
+            .unwrap();
+        let (base_revision, fingerprint) = hydrology_base_fingerprint(world);
+        HydrologySnapshot::new(
+            base_revision,
+            fingerprint,
+            "hydrology-v2".to_string(),
+            "channel-v1".to_string(),
+            seed,
+            drainage,
+            channels,
+        )
+    }
+
+    #[test]
+    fn persist_rivers_matches_sync_layer() {
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        let mut catalog = RiverCatalog::default();
+        catalog.rivers.push(River {
+            id: 1,
+            cells: vec![2, 3],
+            source: 2,
+            mouth: 3,
+            parent: 1,
+            basin: 1,
+            name: None,
+        });
+        catalog.next_id = 2;
+        persist_rivers(world, &catalog, &bounds).unwrap();
+        assert_eq!(read_river_catalog(world), catalog);
+        assert_eq!(
+            read_dense_layer(world, RIVER_ID_LAYER_ID, &bounds),
+            sync_river_id_layer(&catalog, &bounds)
+        );
+    }
+
+    #[test]
+    fn persist_rivers_create_update_and_clear() {
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+
+        let empty = RiverCatalog::default();
+        persist_rivers(world, &empty, &bounds).unwrap();
+        assert_eq!(read_river_catalog(world), empty);
+
+        let mut created = RiverCatalog::default();
+        created.rivers.push(River {
+            id: 1,
+            cells: vec![4, 5],
+            source: 4,
+            mouth: 5,
+            parent: 1,
+            basin: 1,
+            name: None,
+        });
+        created.next_id = 2;
+        persist_rivers(world, &created, &bounds).unwrap();
+        assert_eq!(read_river_catalog(world), created);
+
+        let mut updated = created.clone();
+        updated.rivers[0].cells = vec![4, 5, 6];
+        updated.rivers[0].mouth = 6;
+        persist_rivers(world, &updated, &bounds).unwrap();
+        assert_eq!(read_river_catalog(world), updated);
+
+        clear_rivers(world, &bounds).unwrap();
+        assert_eq!(read_river_catalog(world), RiverCatalog::default());
+        assert_eq!(
+            read_dense_layer(world, RIVER_ID_LAYER_ID, &bounds),
+            sync_river_id_layer(&RiverCatalog::default(), &bounds)
+        );
+    }
+
+    #[test]
+    fn rollback_catalog_and_layer_when_layer_write_fails() {
+        let _lock = super::failpoint_lock();
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        let mut initial = RiverCatalog::default();
+        initial.rivers.push(River {
+            id: 1,
+            cells: vec![2, 3],
+            source: 2,
+            mouth: 3,
+            parent: 1,
+            basin: 1,
+            name: None,
+        });
+        initial.next_id = 2;
+        persist_rivers(world, &initial, &bounds).unwrap();
+        let before_catalog = std::fs::read_to_string(rivers_file_path(world)).unwrap();
+        let before_layer =
+            std::fs::read_to_string(layer_file_path(world, RIVER_ID_LAYER_ID)).unwrap();
+
+        let mut next = RiverCatalog::default();
+        next.rivers.push(River {
+            id: 1,
+            cells: vec![5, 6],
+            source: 5,
+            mouth: 6,
+            parent: 1,
+            basin: 1,
+            name: None,
+        });
+        next.next_id = 2;
+
+        SIMULATE_LAYER_WRITE_FAILURE.store(true, Ordering::SeqCst);
+        let err = persist_rivers(world, &next, &bounds).unwrap_err();
+        SIMULATE_LAYER_WRITE_FAILURE.store(false, Ordering::SeqCst);
+        assert!(err.contains("simulated"));
+
+        assert_eq!(
+            std::fs::read_to_string(rivers_file_path(world)).unwrap(),
+            before_catalog
+        );
+        assert_eq!(
+            std::fs::read_to_string(layer_file_path(world, RIVER_ID_LAYER_ID)).unwrap(),
+            before_layer
+        );
+        assert_eq!(read_river_catalog(world), initial);
+        assert_eq!(
+            read_dense_layer(world, RIVER_ID_LAYER_ID, &bounds),
+            sync_river_id_layer(&initial, &bounds)
+        );
+    }
+
+    #[test]
+    fn river_catalog_write_invalidates_hydrology_snapshot() {
+        let _lock = super::failpoint_lock();
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        let snap = snapshot(world, &bounds, 1);
+        persist_hydrology_snapshot(world, &snap).unwrap();
+
+        let mut catalog = RiverCatalog::default();
+        catalog.rivers.push(River {
+            id: 1,
+            cells: vec![1, 2],
+            source: 1,
+            mouth: 2,
+            parent: 1,
+            basin: 1,
+            name: None,
+        });
+        catalog.next_id = 2;
+        persist_rivers(world, &catalog, &bounds).unwrap();
+
+        assert_eq!(read_current_hydrology_snapshot(world).unwrap(), None);
     }
 }

@@ -9,13 +9,12 @@ use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::lakes::{Lake, LakeCatalog};
 use mapkeeper_core::layer::{DenseState, LayerValue, Bounds, MapManifest};
 use mapkeeper_core::map_preset::MapPreset;
-use mapkeeper_core::rivers::{sync_river_id_layer, River, RiverCatalog};
+use mapkeeper_core::rivers::{River, RiverCatalog};
 use tempfile::tempdir;
 
 use crate::world_io::{
     failpoint_lock, persist_lake_generation, persist_rivers, read_dense_layer, read_lake_catalog,
     read_river_catalog, rewrite_world_bounds, write_dense_layer, SIMULATE_CLEAR_RIVERS_FAILURE,
-    SIMULATE_LAYER_WRITE_FAILURE,
 };
 
 fn seed_world(path: &std::path::Path, world_id: &str) -> MapBounds {
@@ -82,68 +81,6 @@ fn direct_parallel_dense_layer_rmw_can_lose_updates() {
         (v3 == 30 && v4 == 0) || (v3 == 0 && v4 == 40) || (v3 == 30 && v4 == 40),
         "unexpected parallel RMW outcome: cell3={v3}, cell4={v4}"
     );
-}
-
-#[test]
-fn persist_rivers_leaves_catalog_ahead_of_layer_on_layer_failpoint() {
-    let _lock = failpoint_lock();
-    let dir = tempdir().unwrap();
-    let world = dir.path();
-    let bounds = seed_world(world, "rivers-fp");
-
-    let mut catalog = RiverCatalog::default();
-    catalog.rivers.push(River {
-        id: 1,
-        cells: vec![5, 6],
-        source: 5,
-        mouth: 6,
-        parent: 1,
-        basin: 1,
-        name: None,
-    });
-    catalog.next_id = 2;
-
-    SIMULATE_LAYER_WRITE_FAILURE.store(true, Ordering::SeqCst);
-    let err = persist_rivers(world, &catalog, &bounds).unwrap_err();
-    SIMULATE_LAYER_WRITE_FAILURE.store(false, Ordering::SeqCst);
-    assert!(err.contains("simulated"));
-
-    let on_disk = read_river_catalog(world);
-    assert_eq!(on_disk.rivers.len(), 1, "catalog written before layer");
-    let layer = read_dense_layer(world, mapkeeper_core::layer::RIVER_ID_LAYER_ID, &bounds);
-    let synced = sync_river_id_layer(&on_disk, &bounds);
-    assert_ne!(
-        layer, synced,
-        "river_id layer not synced with catalog — known partial-write defect"
-    );
-}
-
-#[test]
-#[ignore = "future transactional-io: rollback catalog when river_id layer write fails"]
-fn persist_rivers_rolls_back_catalog_on_layer_failure() {
-    let _lock = failpoint_lock();
-    let dir = tempdir().unwrap();
-    let world = dir.path();
-    let bounds = seed_world(world, "rivers-fp-future");
-    let before = read_river_catalog(world);
-
-    let mut catalog = RiverCatalog::default();
-    catalog.rivers.push(River {
-        id: 1,
-        cells: vec![1],
-        source: 1,
-        mouth: 1,
-        parent: 1,
-        basin: 1,
-        name: None,
-    });
-    catalog.next_id = 2;
-
-    SIMULATE_LAYER_WRITE_FAILURE.store(true, Ordering::SeqCst);
-    let _ = persist_rivers(world, &catalog, &bounds).unwrap_err();
-    SIMULATE_LAYER_WRITE_FAILURE.store(false, Ordering::SeqCst);
-
-    assert_eq!(read_river_catalog(world), before);
 }
 
 #[test]

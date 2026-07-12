@@ -628,18 +628,18 @@ Symbols include public modules/types/functions and impl blocks.
 - L402: `fn` `read_river_catalog`
 - L409: `fn` `write_river_catalog`
 - L418: `fn` `persist_rivers`
-- L428: `fn` `lakes_file_path`
-- L432: `fn` `hydrology_snapshot_path`
-- L438: `fn` `hydrology_base_fingerprint`
-- L466: `fn` `persist_hydrology_snapshot`
-- L519: `fn` `read_current_hydrology_snapshot`
-- L534: `fn` `invalidate_hydrology_snapshot`
-- L542: `fn` `read_lake_catalog`
-- L549: `fn` `write_lake_catalog`
-- L572: `fn` `persist_lakes`
-- L591: `fn` `clear_rivers`
-- L597: `fn` `persist_lake_generation`
-- L624: `fn` `failpoint_lock`
+- L439: `fn` `lakes_file_path`
+- L443: `fn` `hydrology_snapshot_path`
+- L449: `fn` `hydrology_base_fingerprint`
+- L477: `fn` `persist_hydrology_snapshot`
+- L530: `fn` `read_current_hydrology_snapshot`
+- L545: `fn` `invalidate_hydrology_snapshot`
+- L553: `fn` `read_lake_catalog`
+- L560: `fn` `write_lake_catalog`
+- L583: `fn` `persist_lakes`
+- L602: `fn` `clear_rivers`
+- L608: `fn` `persist_lake_generation`
+- L635: `fn` `failpoint_lock`
 
 ### `crates/server/src/world_write_characterization.rs`
 - _(no indexed symbols)_
