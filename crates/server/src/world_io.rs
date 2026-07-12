@@ -600,6 +600,10 @@ pub(crate) fn persist_lake_generation(
     bounds: &MapBounds,
 ) -> Result<(), String> {
     persist_lakes(world_path, catalog, bounds)?;
+    #[cfg(test)]
+    if SIMULATE_CLEAR_RIVERS_FAILURE.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("simulated clear rivers failure".to_string());
+    }
     clear_rivers(world_path, bounds)
 }
 
@@ -609,6 +613,19 @@ pub(crate) static SIMULATE_LAYER_WRITE_FAILURE: std::sync::atomic::AtomicBool =
 #[cfg(test)]
 pub(crate) static SIMULATE_HYDROLOGY_ACTIVATION_FAILURE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+#[cfg(test)]
+pub(crate) static SIMULATE_CLEAR_RIVERS_FAILURE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// Serializes failpoint tests — global `SIMULATE_*` flags are process-wide.
+#[cfg(test)]
+pub(crate) static FAILPOINT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn failpoint_lock() -> std::sync::MutexGuard<'static, ()> {
+    FAILPOINT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[cfg(test)]
 mod persist_lakes_tests {
@@ -623,8 +640,6 @@ mod persist_lakes_tests {
     };
     use std::sync::atomic::Ordering;
     use tempfile::tempdir;
-
-    static HYDROLOGY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn seed_world(path: &Path) -> MapBounds {
         std::fs::create_dir_all(path.join("map/layers")).unwrap();
@@ -700,9 +715,7 @@ mod persist_lakes_tests {
 
     #[test]
     fn rollback_catalog_when_layer_write_fails() {
-        let _lock = HYDROLOGY_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _lock = super::failpoint_lock();
         let dir = tempdir().unwrap();
         let world = dir.path();
         let bounds = seed_world(world);
@@ -732,9 +745,7 @@ mod persist_lakes_tests {
 
     #[test]
     fn hydrology_snapshot_activation_keeps_prior_bundle_on_failure() {
-        let _lock = HYDROLOGY_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _lock = super::failpoint_lock();
         let dir = tempdir().unwrap();
         let world = dir.path();
         let bounds = seed_world(world);
@@ -752,9 +763,7 @@ mod persist_lakes_tests {
 
     #[test]
     fn base_layer_write_invalidates_hydrology_snapshot() {
-        let _lock = HYDROLOGY_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _lock = super::failpoint_lock();
         let dir = tempdir().unwrap();
         let world = dir.path();
         let bounds = seed_world(world);
@@ -770,9 +779,7 @@ mod persist_lakes_tests {
 
     #[test]
     fn lake_catalog_write_invalidates_hydrology_snapshot() {
-        let _lock = HYDROLOGY_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _lock = super::failpoint_lock();
         let dir = tempdir().unwrap();
         let world = dir.path();
         let bounds = seed_world(world);
@@ -786,9 +793,7 @@ mod persist_lakes_tests {
 
     #[test]
     fn mismatched_base_fingerprint_is_not_current_hydrology() {
-        let _lock = HYDROLOGY_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _lock = super::failpoint_lock();
         let dir = tempdir().unwrap();
         let world = dir.path();
         let bounds = seed_world(world);

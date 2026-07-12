@@ -62,6 +62,9 @@ pub fn read_build(world_path: &Path) -> Option<BuildSection> {
 }
 
 pub fn write_build_draft(world_path: &Path, step: u32) -> Result<(), String> {
+    if build_draft_failpoint_active() {
+        return Err("simulated build draft write failure".to_string());
+    }
     let path = world_path.join("mapkeeper.toml");
     let raw = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mut doc: MapkeeperToml = toml::from_str(&raw).map_err(|e| e.to_string())?;
@@ -72,6 +75,16 @@ pub fn write_build_draft(world_path: &Path, step: u32) -> Result<(), String> {
     });
     let out = toml::to_string_pretty(&doc).map_err(|e| e.to_string())?;
     std::fs::write(&path, out).map_err(|e| e.to_string())
+}
+
+fn build_draft_failpoint_active() -> bool {
+    #[cfg(test)]
+    if SIMULATE_BUILD_DRAFT_WRITE_FAILURE.load(std::sync::atomic::Ordering::SeqCst) {
+        return true;
+    }
+    std::env::var("MAPKEEPER_FAILPOINT")
+        .map(|v| v == "build_draft")
+        .unwrap_or(false)
 }
 
 pub fn clear_build(world_path: &Path) -> Result<(), String> {
@@ -92,6 +105,11 @@ pub fn manifest_toml_with_build(world_id: &str, draft: bool) -> String {
         crate::world::manifest_toml(world_id)
     }
 }
+
+/// Test-only failpoint for build lifecycle characterization (agent-reliability).
+#[cfg(test)]
+pub static SIMULATE_BUILD_DRAFT_WRITE_FAILURE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(test)]
 mod tests {

@@ -23,6 +23,8 @@ mod layers;
 mod projects;
 mod rivers;
 mod state;
+#[cfg(test)]
+mod world_write_characterization;
 mod world_io;
 
 use std::net::SocketAddr;
