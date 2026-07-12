@@ -95,6 +95,17 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+if (Ask-Yes "Enable pre-push checks (scripts/check.ps1 - tests + codemap drift)?") {
+    & git config core.hooksPath .githooks
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Could not set core.hooksPath — enable manually: git config core.hooksPath .githooks"
+    } else {
+        Write-Host "Git hooks enabled (.githooks/pre-push)."
+    }
+} else {
+    Write-Host "Skipped hook install. Before push run: .\scripts\check.ps1"
+}
+
 Write-Host "Building desktop crate..."
 cargo build -p mapkeeper-desktop
 if ($LASTEXITCODE -ne 0) {

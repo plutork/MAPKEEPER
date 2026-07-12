@@ -1,0 +1,4 @@
+#!/bin/sh
+# Block push when local checks fail (same gates as CI subset).
+root="$(git rev-parse --show-toplevel)"
+exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root/scripts/check.ps1"

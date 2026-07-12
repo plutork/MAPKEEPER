@@ -36,6 +36,14 @@ if ($LASTEXITCODE -ne 0) {
 $after = (& git rev-parse --short HEAD).Trim()
 Write-Host "After:  $after"
 
+Write-Host "Running pre-build checks (tests + codemap drift)..."
+powershell -File (Join-Path $Root "scripts\check.ps1")
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Checks failed - fix before update/rebuild."
+    Write-Host "Codemap stale?  python scripts/gen_codemap.py  then  git add docs/CODEMAP.md"
+    exit $LASTEXITCODE
+}
+
 Write-Host "Rebuilding web UI..."
 powershell -File (Join-Path $Root "crates\web\build.ps1")
 if ($LASTEXITCODE -ne 0) {

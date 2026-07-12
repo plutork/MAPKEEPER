@@ -80,6 +80,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Full symbol codemap (generated): `docs/CODEMAP.md`
 - Codemap generator script: `scripts/gen_codemap.py`
 - Codemap drift CI guard: `scripts/check_codemap_drift.py` (regen `CODEMAP.md` + validate `CODEMAP-LITE.md` paths)
+- Local pre-push checks (tests + codemap drift): `scripts/check.ps1` (`.githooks/pre-push` after `setup.ps1`)
 - Alpha Windows bootstrap/launch/update: `setup.ps1`, `run.ps1` (D-86 pull-in-run), `update.ps1`; troubleshooting: `.cursor/commands/doctor.md`
 - Core boundary entry: `crates/core/src/lib.rs` (facade; worldgen under `worldgen/`, legacy top-level re-exports for non-hydrology adapters)
 - River pin pathfind + catalog upsert: `crates/core/src/river_pin.rs` (`rivers-pin-source-mouth-v1`, D-55)

@@ -67,6 +67,21 @@ Explicit update on a **clean** tree (rebuild only, no launch):
 .\update.ps1
 ```
 
+Before `git push` (or automatically via hook after `.\setup.ps1`):
+
+```powershell
+.\scripts\check.ps1
+```
+
+Runs `cargo test --workspace --exclude mapkeeper-desktop` with `RUSTFLAGS=-Dwarnings` and codemap drift check (same subset as CI). If `CODEMAP.md` is stale:
+
+```powershell
+python scripts/gen_codemap.py
+git add docs/CODEMAP.md
+```
+
+Enable repo hook manually: `git config core.hooksPath .githooks`
+
 Requires: Rust (MSVC), `wasm32-unknown-unknown`, WebView2, and Visual Studio Build Tools (C++ workload). Prefer `.\setup.ps1` for first-time checks. If setup fails, use Cursor **`/doctor`** (interactive; no silent MSVC install).
 
 ## NSIS installer (Later — not alpha path)
