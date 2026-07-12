@@ -2,16 +2,18 @@
 
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
+
 use crate::hex::MapBounds;
 use crate::hydro::SEA_LEVEL;
 use crate::lakes::LakeCatalog;
 
 use super::types::DepressionAnalysis;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DrainageNodeId(pub usize);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DrainageNode {
     TerrainCell(usize),
     Lake(u32),
@@ -19,7 +21,7 @@ pub enum DrainageNode {
     EndorheicSink,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DrainageGraph {
     pub nodes: Vec<DrainageNode>,
     pub receiver: Vec<Option<DrainageNodeId>>,

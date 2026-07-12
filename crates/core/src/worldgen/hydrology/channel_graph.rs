@@ -2,6 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
+
 use crate::climate::PRECIPITATION_LAYER_ID;
 use crate::hydro::SEA_LEVEL;
 use crate::layer::DenseLayer;
@@ -9,7 +11,7 @@ use crate::layer::DenseLayer;
 use super::drainage_graph::{DrainageGraph, DrainageNode, DrainageNodeId};
 use super::types::DepressionAnalysis;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChannelPolicy {
     pub min_flow: u64,
     pub min_contributing_area: u32,
@@ -24,14 +26,14 @@ impl Default for ChannelPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HydrologyFlow {
     pub local_runoff: Vec<u64>,
     pub accumulated_flow: Vec<u64>,
     pub contributing_area: Vec<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RiverGraphNodeKind {
     Source,
     Confluence,
@@ -40,7 +42,7 @@ pub enum RiverGraphNodeKind {
     Mouth,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RiverGraphNode {
     pub id: u32,
     pub kind: RiverGraphNodeKind,
@@ -48,7 +50,7 @@ pub struct RiverGraphNode {
     pub terrain_cell: Option<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PhysicalSegment {
     pub id: u32,
     pub from_node: u32,
@@ -57,7 +59,7 @@ pub struct PhysicalSegment {
     pub cells: Vec<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RiverGraph {
     pub nodes: Vec<RiverGraphNode>,
     pub segments: Vec<PhysicalSegment>,
@@ -66,7 +68,7 @@ pub struct RiverGraph {
     pub channel_node_id: Vec<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChannelGraph {
     pub flow: HydrologyFlow,
     pub river_graph: RiverGraph,

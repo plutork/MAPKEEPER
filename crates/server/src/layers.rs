@@ -11,6 +11,7 @@ use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::hex::Axial;
 use mapkeeper_core::layer::{LayerCellWrite, WireCellState};
 use mapkeeper_core::profile::CellProfile;
+use mapkeeper_core::worldgen::hydrology::is_derived_hydrology_layer_id;
 use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
@@ -198,6 +199,13 @@ async fn put_layer_batch(
     if updates.is_empty() {
         return StatusCode::NO_CONTENT.into_response();
     }
+    if is_derived_hydrology_layer_id(&layer_id) {
+        return (
+            StatusCode::FORBIDDEN,
+            "derived Hydrology v2 layers are activated only as a snapshot",
+        )
+            .into_response();
+    }
     let bounds = world_io::map_bounds(&active.path);
     let mut dense = world_io::read_dense_layer(&active.path, &layer_id, &bounds);
     for item in updates {
@@ -231,6 +239,13 @@ async fn put_layer_cell(
     let Some(index) = bounds.index_of(Axial::new(q, r)) else {
         return (StatusCode::BAD_REQUEST, "cell out of map bounds").into_response();
     };
+    if is_derived_hydrology_layer_id(&layer_id) {
+        return (
+            StatusCode::FORBIDDEN,
+            "derived Hydrology v2 layers are activated only as a snapshot",
+        )
+            .into_response();
+    }
     let mut dense = world_io::read_dense_layer(&active.path, &layer_id, &bounds);
     let Some(resolved) = new_state.to_dense(dense.value_type) else {
         return (
@@ -244,4 +259,31 @@ async fn put_layer_cell(
         return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
     }
     Json(WireCellState::from_dense(dense.state(index))).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mapkeeper_core::worldgen::hydrology::CHANNEL_NODE_LAYER_ID;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn generic_writes_reject_derived_hydrology_layers() {
+        let dir = tempdir().unwrap();
+        let state = Arc::new(Mutex::new(AppState {
+            active: Some(crate::state::ActiveWorld {
+                path: dir.path().to_path_buf(),
+                id: "test".to_string(),
+            }),
+        }));
+        let response = put_layer_cell(
+            State(state),
+            AxPath((CHANNEL_NODE_LAYER_ID.to_string(), 0, 0)),
+            Json(WireCellState::None),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
 }

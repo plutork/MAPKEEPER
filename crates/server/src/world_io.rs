@@ -7,15 +7,16 @@ use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::climate::{ICE_LAYER_ID, PRECIPITATION_LAYER_ID, TEMPERATURE_LAYER_ID};
 use mapkeeper_core::geology::GEOLOGY_LAYER_ID;
 use mapkeeper_core::hex::MapBounds;
+use mapkeeper_core::lakes::{sync_lake_id_layer, LakeCatalog, LAKE_CATALOG_FILE};
 use mapkeeper_core::land_mask::LAND_MASK_LAYER_ID;
 use mapkeeper_core::layer::Bounds;
 use mapkeeper_core::layer::{
     DenseLayer, MapManifest, ValueType, ELEVATION_LAYER_ID, LAKE_ID_LAYER_ID, RIVER_ID_LAYER_ID,
 };
-use mapkeeper_core::lakes::{sync_lake_id_layer, LakeCatalog, LAKE_CATALOG_FILE};
 use mapkeeper_core::map_preset::{legacy_default_bounds, MapPreset};
 use mapkeeper_core::projects::{projects_file_path, ProjectEntry, ProjectsFile};
 use mapkeeper_core::rivers::{sync_river_id_layer, RiverCatalog, RIVER_CATALOG_FILE};
+use mapkeeper_core::worldgen::hydrology::{HydrologySnapshot, HYDROLOGY_SNAPSHOT_FILE};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -354,7 +355,11 @@ pub(crate) fn write_dense_layer(world_path: &Path, layer: &DenseLayer) -> Result
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let body = layer.to_json_pretty().map_err(|e| e.to_string())?;
-    std::fs::write(&path, body).map_err(|e| e.to_string())
+    std::fs::write(&path, body).map_err(|e| e.to_string())?;
+    if is_hydrology_base_input_layer(&layer.layer_id) {
+        invalidate_hydrology_snapshot(world_path)?;
+    }
+    Ok(())
 }
 pub(crate) fn rivers_file_path(world_path: &Path) -> PathBuf {
     world_path.join("map").join(RIVER_CATALOG_FILE)
@@ -396,6 +401,107 @@ pub(crate) fn persist_generated_rivers(
 
 pub(crate) fn lakes_file_path(world_path: &Path) -> PathBuf {
     world_path.join("map").join(LAKE_CATALOG_FILE)
+}
+
+pub(crate) fn hydrology_snapshot_path(world_path: &Path) -> PathBuf {
+    world_path.join("map").join(HYDROLOGY_SNAPSHOT_FILE)
+}
+
+/// Stable fingerprint/revision of all base inputs owned outside Hydrology v2.
+#[allow(dead_code)] // Snapshot activation endpoint follows in the next slice.
+pub(crate) fn hydrology_base_fingerprint(world_path: &Path) -> (u64, String) {
+    const INPUTS: &[&str] = &[
+        LAND_MASK_LAYER_ID,
+        ELEVATION_LAYER_ID,
+        LAKE_ID_LAYER_ID,
+        PRECIPITATION_LAYER_ID,
+    ];
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for layer_id in INPUTS {
+        for byte in layer_id.bytes().chain([0u8]).chain(
+            std::fs::read(layer_file_path(world_path, layer_id))
+                .unwrap_or_default()
+                .into_iter(),
+        ) {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100_0000_01b3);
+        }
+    }
+    (hash, format!("{hash:016x}"))
+}
+
+fn is_hydrology_base_input_layer(layer_id: &str) -> bool {
+    matches!(
+        layer_id,
+        LAND_MASK_LAYER_ID | ELEVATION_LAYER_ID | LAKE_ID_LAYER_ID | PRECIPITATION_LAYER_ID
+    )
+}
+
+/// Atomically activate one complete v2 hydrology bundle. The previous bundle
+/// is restored if staging or activation fails.
+#[allow(dead_code)] // Snapshot activation endpoint follows in the next slice.
+pub(crate) fn persist_hydrology_snapshot(
+    world_path: &Path,
+    snapshot: &HydrologySnapshot,
+) -> Result<(), String> {
+    let (base_revision, fingerprint) = hydrology_base_fingerprint(world_path);
+    snapshot
+        .validate_current(base_revision, &fingerprint)
+        .map_err(|err| format!("refusing stale hydrology snapshot: {err:?}"))?;
+    let path = hydrology_snapshot_path(world_path);
+    let parent = path.parent().ok_or("hydrology snapshot has no parent")?;
+    std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    let staged = path.with_extension("json.staged");
+    let backup = path.with_extension("json.previous");
+    let body = snapshot.to_json_pretty().map_err(|err| err.to_string())?;
+    std::fs::write(&staged, body).map_err(|err| err.to_string())?;
+    #[cfg(test)]
+    if SIMULATE_HYDROLOGY_ACTIVATION_FAILURE.load(std::sync::atomic::Ordering::SeqCst) {
+        let _ = std::fs::remove_file(&staged);
+        return Err("simulated hydrology activation failure".to_string());
+    }
+    if backup.exists() {
+        std::fs::remove_file(&backup).map_err(|err| err.to_string())?;
+    }
+    let had_active = path.exists();
+    if had_active {
+        std::fs::rename(&path, &backup).map_err(|err| err.to_string())?;
+    }
+    if let Err(err) = std::fs::rename(&staged, &path) {
+        if had_active {
+            let _ = std::fs::rename(&backup, &path);
+        }
+        let _ = std::fs::remove_file(&staged);
+        return Err(err.to_string());
+    }
+    if had_active {
+        std::fs::remove_file(&backup).map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+#[allow(dead_code)] // Renderer/catalog cutover reads this in the next slice.
+pub(crate) fn read_current_hydrology_snapshot(
+    world_path: &Path,
+) -> Result<Option<HydrologySnapshot>, String> {
+    let path = hydrology_snapshot_path(world_path);
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Ok(None);
+    };
+    let snapshot = HydrologySnapshot::from_json(&raw).map_err(|err| err.to_string())?;
+    let (base_revision, fingerprint) = hydrology_base_fingerprint(world_path);
+    snapshot
+        .validate_current(base_revision, &fingerprint)
+        .map_err(|err| format!("stale hydrology snapshot: {err:?}"))?;
+    Ok(Some(snapshot))
+}
+
+pub(crate) fn invalidate_hydrology_snapshot(world_path: &Path) -> Result<(), String> {
+    let path = hydrology_snapshot_path(world_path);
+    if path.exists() {
+        std::fs::remove_file(path).map_err(|err| err.to_string())?;
+    }
+    Ok(())
 }
 
 pub(crate) fn read_lake_catalog(world_path: &Path) -> LakeCatalog {
@@ -463,18 +569,56 @@ pub(crate) fn persist_lake_generation(
 #[cfg(test)]
 pub(crate) static SIMULATE_LAYER_WRITE_FAILURE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+#[cfg(test)]
+pub(crate) static SIMULATE_HYDROLOGY_ACTIVATION_FAILURE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(test)]
 mod persist_lakes_tests {
     use super::*;
+    use mapkeeper_core::hydro::SEA_LEVEL;
     use mapkeeper_core::lakes::Lake;
+    use mapkeeper_core::layer::{DenseState, LayerValue};
     use mapkeeper_core::map_preset::MapPreset;
+    use mapkeeper_core::worldgen::hydrology::{
+        analyze_depressions, build_channel_graph, build_drainage_graph, ChannelPolicy,
+        HydrologySnapshot,
+    };
     use std::sync::atomic::Ordering;
     use tempfile::tempdir;
+
+    static HYDROLOGY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn seed_world(path: &Path) -> MapBounds {
         std::fs::create_dir_all(path.join("map/layers")).unwrap();
         rewrite_world_bounds(path, MapPreset::Small, false).unwrap()
+    }
+
+    fn snapshot(world: &Path, bounds: &MapBounds, seed: u64) -> HydrologySnapshot {
+        let mut elevation = DenseLayer::new_integer(ELEVATION_LAYER_ID, bounds.len());
+        for cell in 0..bounds.len() {
+            let height = if cell < bounds.width as usize {
+                SEA_LEVEL
+            } else {
+                SEA_LEVEL + 20
+            };
+            elevation.set(cell, DenseState::Value(LayerValue::Int(height)));
+        }
+        write_dense_layer(world, &elevation).unwrap();
+        let analysis = analyze_depressions(&elevation, bounds);
+        let drainage = build_drainage_graph(&analysis, &LakeCatalog::default(), bounds).unwrap();
+        let channels =
+            build_channel_graph(&drainage, &analysis, None, ChannelPolicy::default()).unwrap();
+        let (base_revision, fingerprint) = hydrology_base_fingerprint(world);
+        HydrologySnapshot::new(
+            base_revision,
+            fingerprint,
+            "hydrology-v2".to_string(),
+            "channel-v1".to_string(),
+            seed,
+            drainage,
+            channels,
+        )
     }
 
     #[test]
@@ -537,5 +681,59 @@ mod persist_lakes_tests {
         assert_eq!(after_catalog, before_catalog);
         let layer = read_dense_layer(world, LAKE_ID_LAYER_ID, &bounds);
         assert_eq!(layer, sync_lake_id_layer(&initial, &bounds));
+    }
+
+    #[test]
+    fn hydrology_snapshot_activation_keeps_prior_bundle_on_failure() {
+        let _lock = HYDROLOGY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        let first = snapshot(world, &bounds, 1);
+        persist_hydrology_snapshot(world, &first).unwrap();
+
+        let mut second = first.clone();
+        second.effective_seed = 2;
+        SIMULATE_HYDROLOGY_ACTIVATION_FAILURE.store(true, Ordering::SeqCst);
+        assert!(persist_hydrology_snapshot(world, &second).is_err());
+        SIMULATE_HYDROLOGY_ACTIVATION_FAILURE.store(false, Ordering::SeqCst);
+
+        assert_eq!(read_current_hydrology_snapshot(world).unwrap(), Some(first));
+    }
+
+    #[test]
+    fn base_layer_write_invalidates_hydrology_snapshot() {
+        let _lock = HYDROLOGY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        let snapshot = snapshot(world, &bounds, 1);
+        persist_hydrology_snapshot(world, &snapshot).unwrap();
+
+        let mut elevation = read_dense_layer(world, ELEVATION_LAYER_ID, &bounds);
+        elevation.set(0, DenseState::Value(LayerValue::Int(SEA_LEVEL + 1)));
+        write_dense_layer(world, &elevation).unwrap();
+
+        assert_eq!(read_current_hydrology_snapshot(world).unwrap(), None);
+    }
+
+    #[test]
+    fn mismatched_base_fingerprint_is_not_current_hydrology() {
+        let _lock = HYDROLOGY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        let snapshot = snapshot(world, &bounds, 1);
+        persist_hydrology_snapshot(world, &snapshot).unwrap();
+
+        std::fs::write(layer_file_path(world, ELEVATION_LAYER_ID), "changed").unwrap();
+
+        assert!(read_current_hydrology_snapshot(world).is_err());
     }
 }

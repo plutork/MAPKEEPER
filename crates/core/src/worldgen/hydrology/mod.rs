@@ -7,6 +7,7 @@ pub mod drainage_graph;
 pub mod lakes;
 pub mod river_flux;
 pub mod river_validate;
+pub mod snapshot;
 pub mod types;
 
 pub use channel_graph::{
@@ -27,5 +28,10 @@ pub use river_validate::{
     classify_terminal, enforce_strict_generated_catalog, mouth_diagnostics,
     prune_invalid_river_trees, validate_catalog, validate_generated_catalog_strict,
     would_assign_parent_cycle, RiverTerminal, RiverValidationContext, RiverValidationReport,
+};
+pub use snapshot::{
+    is_derived_hydrology_layer_id, HydrologySnapshot, HydrologySnapshotError,
+    CHANNEL_NODE_LAYER_ID, CHANNEL_SEGMENT_LAYER_ID, HYDROLOGY_SNAPSHOT_FILE,
+    HYDROLOGY_SNAPSHOT_SCHEMA_VERSION,
 };
 pub use types::{DepressionAnalysis, LakeDensity, ProvisionalDrainage, RiverDensity};
