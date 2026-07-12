@@ -162,12 +162,14 @@ pub(crate) const RIVERS_READ_ONLY_MSG: &str =
     "Generated rivers are read-only — use Rebuild rivers to rebuild.";
 
 pub(crate) fn channel_topology_counts(state: &AppState) -> (usize, usize) {
+    let (legacy_rivers, legacy_cells) = (
+        state.rivers.rivers.len(),
+        state.rivers.rivers.iter().map(|r| r.cells.len()).sum(),
+    );
     let segments = state
         .channel_segment_count
-        .unwrap_or_else(|| state.rivers.rivers.len());
-    let cells = state.channel_cell_count.unwrap_or_else(|| {
-        state.rivers.rivers.iter().map(|r| r.cells.len()).sum()
-    });
+        .unwrap_or(legacy_rivers);
+    let cells = state.channel_cell_count.unwrap_or(legacy_cells);
     (segments, cells)
 }
 
@@ -366,6 +368,8 @@ pub(crate) fn reset_view_on_world_open(s: &mut AppState) {
     s.channel_cell_count = None;
     s.named_rivers.clear();
     s.name_migration.clear();
+    s.rivers_compatibility_projection = false;
+    s.precip_source = None;
     s.wizard_accepted = false;
     s.wizard_edit_mode = false;
     deactivate_paint_brush(s);

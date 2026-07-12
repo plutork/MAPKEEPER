@@ -298,6 +298,7 @@ fn apply_rivers_response(s: &mut AppState, body: RiversResponse) {
     s.channel_cell_count = body.channel_cell_count;
     s.named_rivers = body.named_rivers;
     s.name_migration = body.name_migration;
+    s.rivers_compatibility_projection = body.compatibility_projection;
     s.active_river_id = None;
     if body.read_only && river_brush(&s.brush) {
         deactivate_paint_brush(s);
@@ -650,6 +651,8 @@ pub(crate) async fn post_lake_generate(
             s.channel_cell_count = None;
             s.named_rivers.clear();
             s.name_migration.clear();
+            s.rivers_compatibility_projection = false;
+            s.precip_source = None;
             s.active_river_id = None;
             sync_river_status(&s);
             sync_manual_river_authoring_ui(&s);
@@ -779,22 +782,24 @@ pub(crate) async fn post_river_generate(
                 action: "generate_rivers".into(),
                 request: req_line,
                 result: format!(
-                    "named_rivers={named_n} segments={segments} channel_cells={channel_cells} migration_ambiguous={ambiguous} deterministic={} fingerprint={} regenerate_nonce_ignored={} name_migration_ambiguous={} precip={} density={density_note} lakes_in_catalog={lake_n}",
+                    "named_rivers={named_n} segments={segments} channel_cells={channel_cells} migration_ambiguous={ambiguous} deterministic={} fingerprint={} regenerate_nonce_ignored={} name_migration_ambiguous={} precip={} precip_source={} density={density_note} lakes_in_catalog={lake_n}",
                     body.deterministic,
                     body.input_fingerprint,
                     body.regenerate_nonce_ignored,
                     body.name_migration_ambiguous_count,
-                    body.precip_input_state
+                    body.precip_input_state,
+                    body.precip_source
                 ),
                 error: String::new(),
             },
         );
         s.precip_input_state = Some(body.precip_input_state.clone());
+        s.precip_source = Some(body.precip_source.clone());
     }
-    let source_note = match body.precip_input_state.as_str() {
-        "valid" => "from climate precipitation",
-        "invalid_or_empty" => "uniform fallback (invalid/empty precipitation layer)",
-        _ => "uniform fallback (no precipitation layer)",
+    let source_note = match body.precip_source.as_str() {
+        "climate" => "from climate precipitation",
+        "uniform_fallback" => "uniform fallback runoff",
+        other => other,
     };
     let density_note = if body.river_density.is_empty() {
         river_density.as_str()

@@ -435,6 +435,10 @@ pub(crate) struct AppState {
     pub(crate) precip_layer_present: Option<bool>,
     /// Classified precip usability: missing | invalid_or_empty | valid.
     pub(crate) precip_input_state: Option<String>,
+    /// Last generate API `precip_source` (climate | uniform_fallback).
+    pub(crate) precip_source: Option<String>,
+    /// Active rivers payload is legacy compatibility projection (not snapshot truth).
+    pub(crate) rivers_compatibility_projection: bool,
     /// Last lakes/rivers generate — copy-paste diagnostics for /fix.
     pub(crate) water_gen_trace: WaterGenTrace,
     pub(crate) selected: Option<(i32, i32)>,

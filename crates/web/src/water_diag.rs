@@ -4,7 +4,6 @@ use mapkeeper_core::hex::MapBounds;
 use mapkeeper_core::hydro::SEA_LEVEL;
 use mapkeeper_core::lakes::LakeCatalog;
 use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue};
-use mapkeeper_core::rivers::RiverCatalog;
 
 use crate::brush::channel_topology_counts;
 use crate::dom::set_water_diagnostics;
@@ -15,12 +14,6 @@ pub(crate) fn lake_catalog_stats(catalog: &LakeCatalog) -> (usize, usize, usize)
     let cells: usize = catalog.lakes.iter().map(|l| l.cells.len()).sum();
     let endorheic = catalog.lakes.iter().filter(|l| l.endorheic).count();
     (lakes, cells, endorheic)
-}
-
-pub(crate) fn river_catalog_stats(catalog: &RiverCatalog) -> (usize, usize) {
-    let rivers = catalog.rivers.len();
-    let path_cells: usize = catalog.rivers.iter().map(|r| r.cells.len()).sum();
-    (rivers, path_cells)
 }
 
 fn land_cell_count(elevation: &DenseLayer, bounds: MapBounds) -> usize {
@@ -69,6 +62,9 @@ pub(crate) fn format_water_diagnostics(state: &AppState) -> String {
         "lakes: {lake_n} · {lake_cells} cells · endorheic {endorheic} · next_id {}\n",
         state.lakes.next_id
     ));
+    if state.rivers_compatibility_projection {
+        out.push_str("rivers catalog: compatibility projection\n");
+    }
     out.push_str(&format_channel_topology_line(
         segments,
         channel_cells,
@@ -100,6 +96,9 @@ pub(crate) fn format_water_diagnostics(state: &AppState) -> String {
         }
     }
     out.push_str(&format!("precip input: {precip}\n"));
+    if let Some(source) = &state.precip_source {
+        out.push_str(&format!("precip source: {source}\n"));
+    }
     out.push('\n');
     out.push_str("=== last action ===\n");
     let trace = &state.water_gen_trace;

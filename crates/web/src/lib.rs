@@ -80,6 +80,8 @@ pub fn start() {
         lakes: LakeCatalog::default(),
         precip_layer_present: None,
         precip_input_state: None,
+        precip_source: None,
+        rivers_compatibility_projection: false,
         water_gen_trace: WaterGenTrace::default(),
         selected: None,
         map_bounds: initial_bounds,
