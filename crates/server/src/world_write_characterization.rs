@@ -1,21 +1,15 @@
 //! In-crate characterization: failpoints + direct FS-level RMW (no HTTP).
 
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
 use mapkeeper_core::build_state::{read_build, write_build_draft, BUILD_STEP_SIZE};
 use mapkeeper_core::hex::{Axial, MapBounds};
-use mapkeeper_core::lakes::{Lake, LakeCatalog};
-use mapkeeper_core::layer::{DenseState, LayerValue, Bounds, MapManifest};
+use mapkeeper_core::layer::{Bounds, MapManifest};
 use mapkeeper_core::map_preset::MapPreset;
-use mapkeeper_core::rivers::{River, RiverCatalog};
 use tempfile::tempdir;
 
-use crate::world_io::{
-    failpoint_lock, persist_lake_generation, persist_rivers, read_dense_layer, read_lake_catalog,
-    read_river_catalog, rewrite_world_bounds, write_dense_layer, SIMULATE_CLEAR_RIVERS_FAILURE,
-};
+use crate::world_io::{read_dense_layer, rewrite_world_bounds, write_dense_layer};
 
 fn seed_world(path: &std::path::Path, world_id: &str) -> MapBounds {
     let bounds = MapBounds::new(14, 8);
@@ -57,7 +51,9 @@ fn direct_parallel_dense_layer_rmw_can_lose_updates() {
         b1.wait();
         let mut layer = read_dense_layer(&w1, "elevation", &bounds);
         let i = bounds.index_of(Axial::new(3, 0)).unwrap();
-        layer.set(i, DenseState::Value(LayerValue::Int(30)));
+        layer.set(i, mapkeeper_core::layer::DenseState::Value(
+            mapkeeper_core::layer::LayerValue::Int(30),
+        ));
         write_dense_layer(&w1, &layer).unwrap();
     });
 
@@ -67,7 +63,9 @@ fn direct_parallel_dense_layer_rmw_can_lose_updates() {
         b2.wait();
         let mut layer = read_dense_layer(&w2, "elevation", &bounds);
         let i = bounds.index_of(Axial::new(4, 0)).unwrap();
-        layer.set(i, DenseState::Value(LayerValue::Int(40)));
+        layer.set(i, mapkeeper_core::layer::DenseState::Value(
+            mapkeeper_core::layer::LayerValue::Int(40),
+        ));
         write_dense_layer(&w2, &layer).unwrap();
     });
 
@@ -81,75 +79,6 @@ fn direct_parallel_dense_layer_rmw_can_lose_updates() {
         (v3 == 30 && v4 == 0) || (v3 == 0 && v4 == 40) || (v3 == 30 && v4 == 40),
         "unexpected parallel RMW outcome: cell3={v3}, cell4={v4}"
     );
-}
-
-#[test]
-fn persist_lake_generation_leaves_new_lakes_when_clear_rivers_fails() {
-    let _lock = failpoint_lock();
-    let dir = tempdir().unwrap();
-    let world = dir.path();
-    let bounds = seed_world(world, "lake-gen-fp");
-
-    let mut rivers = RiverCatalog::default();
-    rivers.rivers.push(River {
-        id: 1,
-        cells: vec![2, 3],
-        source: 2,
-        mouth: 3,
-        parent: 1,
-        basin: 1,
-        name: None,
-    });
-    rivers.next_id = 2;
-    persist_rivers(world, &rivers, &bounds).unwrap();
-
-    let mut lakes = LakeCatalog::default();
-    lakes.lakes.push(Lake {
-        id: 1,
-        cells: vec![7],
-        outlet_cell: None,
-        endorheic: false,
-        name: None,
-    });
-    lakes.next_id = 2;
-
-    SIMULATE_CLEAR_RIVERS_FAILURE.store(true, Ordering::SeqCst);
-    let err = persist_lake_generation(world, &lakes, &bounds).unwrap_err();
-    SIMULATE_CLEAR_RIVERS_FAILURE.store(false, Ordering::SeqCst);
-    assert!(err.contains("simulated"));
-
-    assert_eq!(read_lake_catalog(world).lakes.len(), 1, "lakes committed");
-    assert_eq!(
-        read_river_catalog(world).rivers.len(),
-        1,
-        "rivers not cleared — known partial water-bundle defect"
-    );
-}
-
-#[test]
-#[ignore = "future transactional-io: lake generation commits as one water bundle or full rollback"]
-fn persist_lake_generation_rolls_back_lakes_when_clear_rivers_fails() {
-    let _lock = failpoint_lock();
-    let dir = tempdir().unwrap();
-    let world = dir.path();
-    let bounds = seed_world(world, "lake-gen-fp-future");
-    let lakes_before = read_lake_catalog(world);
-
-    let mut lakes = LakeCatalog::default();
-    lakes.lakes.push(Lake {
-        id: 1,
-        cells: vec![1],
-        outlet_cell: None,
-        endorheic: false,
-        name: None,
-    });
-    lakes.next_id = 2;
-
-    SIMULATE_CLEAR_RIVERS_FAILURE.store(true, Ordering::SeqCst);
-    let _ = persist_lake_generation(world, &lakes, &bounds).unwrap_err();
-    SIMULATE_CLEAR_RIVERS_FAILURE.store(false, Ordering::SeqCst);
-
-    assert_eq!(read_lake_catalog(world), lakes_before);
 }
 
 #[test]

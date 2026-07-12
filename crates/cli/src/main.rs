@@ -18,7 +18,7 @@ use mapkeeper_core::hydro::{
     filled_elevation_layer, hydro_from_elevation, DEFAULT_LAND_ELEVATION, ELEVATION_LAYER_ID,
     OCEAN_ELEVATION,
 };
-use mapkeeper_core::lakes::{LakeCatalog, LAKE_CATALOG_FILE};
+use mapkeeper_core::lakes::LakeCatalog;
 use mapkeeper_core::layer::{
     Bounds, DenseLayer, DenseState, LayerValue, MapManifest, ValueType, RIVER_ID_LAYER_ID,
     TERRAIN_LAYER_ID,
@@ -31,6 +31,7 @@ use mapkeeper_core::world;
 use mapkeeper_core::worldgen::hydrology::{
     analyze_depressions, generate_lakes, HydrologySnapshot, LakeDensity, HYDROLOGY_SNAPSHOT_FILE,
 };
+use mapkeeper_server::world_io;
 use serde::Deserialize;
 
 #[derive(Parser)]
@@ -831,15 +832,8 @@ fn legacy_river_mutation_unavailable() -> Result<()> {
     bail!("legacy river editing and generation were removed; use the mapkeeper desktop editor")
 }
 
-fn lakes_file_path(world: &Path) -> PathBuf {
-    world.join("map").join(LAKE_CATALOG_FILE)
-}
-
 fn read_lake_catalog(world: &Path) -> LakeCatalog {
-    fs::read_to_string(lakes_file_path(world))
-        .ok()
-        .and_then(|raw| LakeCatalog::from_json(&raw).ok())
-        .unwrap_or_default()
+    world_io::read_lake_catalog(world)
 }
 
 fn cmd_lakes_list(world: &Path) -> Result<()> {
@@ -856,30 +850,6 @@ fn read_optional_precip_layer(world: &Path, bounds: &MapBounds) -> Option<DenseL
     Some(read_dense_layer(world, PRECIPITATION_LAYER_ID, bounds))
 }
 
-fn persist_lake_generation(world: &Path, catalog: &LakeCatalog, bounds: &MapBounds) -> Result<()> {
-    write_lake_catalog(world, catalog)?;
-    let layer = mapkeeper_core::lakes::sync_lake_id_layer(catalog, bounds);
-    write_dense_layer(world, &layer)?;
-    let snapshot_path = world.join("map").join(HYDROLOGY_SNAPSHOT_FILE);
-    if snapshot_path.exists() {
-        fs::remove_file(snapshot_path)?;
-    }
-    write_dense_layer(
-        world,
-        &DenseLayer::new_integer(RIVER_ID_LAYER_ID, bounds.len()),
-    )?;
-    Ok(())
-}
-
-fn write_lake_catalog(world: &Path, catalog: &LakeCatalog) -> Result<()> {
-    let path = lakes_file_path(world);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, catalog.to_json_pretty()?)?;
-    Ok(())
-}
-
 fn cmd_lakes_generate(world: &Path, density: &str, seed: u64) -> Result<()> {
     let bounds = read_bounds(world);
     let elevation = read_elevation_dense(world, &bounds);
@@ -894,7 +864,8 @@ fn cmd_lakes_generate(world: &Path, density: &str, seed: u64) -> Result<()> {
         density,
         seed,
     );
-    persist_lake_generation(world, &catalog, &bounds)?;
+    world_io::persist_lake_generation(world, &catalog, &bounds)
+        .map_err(|err| anyhow::anyhow!(err))?;
     eprintln!("lakes generate: cleared rivers (lake regen invalidation)");
     println!("{}", catalog.to_json_pretty()?);
     Ok(())

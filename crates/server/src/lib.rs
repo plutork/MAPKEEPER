@@ -25,7 +25,7 @@ mod rivers;
 mod state;
 #[cfg(test)]
 mod world_write_characterization;
-mod world_io;
+pub mod world_io;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

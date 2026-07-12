@@ -436,7 +436,7 @@ pub(crate) fn persist_rivers(
     Ok(())
 }
 
-pub(crate) fn lakes_file_path(world_path: &Path) -> PathBuf {
+pub fn lakes_file_path(world_path: &Path) -> PathBuf {
     world_path.join("map").join(LAKE_CATALOG_FILE)
 }
 
@@ -550,7 +550,7 @@ pub(crate) fn invalidate_hydrology_snapshot(world_path: &Path) -> Result<(), Str
     Ok(())
 }
 
-pub(crate) fn read_lake_catalog(world_path: &Path) -> LakeCatalog {
+pub fn read_lake_catalog(world_path: &Path) -> LakeCatalog {
     std::fs::read_to_string(lakes_file_path(world_path))
         .ok()
         .and_then(|raw| LakeCatalog::from_json(&raw).ok())
@@ -579,6 +579,49 @@ fn restore_file(path: &Path, backup: Option<String>) -> Result<(), String> {
     }
 }
 
+/// Files touched by lake generation (lakes + river clear + hydrology invalidation).
+struct WaterBundleBackup {
+    lakes_catalog: Option<String>,
+    lake_id_layer: Option<String>,
+    rivers_catalog: Option<String>,
+    river_id_layer: Option<String>,
+    named_rivers: Option<String>,
+    hydrology_snapshot: Option<String>,
+}
+
+fn backup_water_bundle(world_path: &Path) -> WaterBundleBackup {
+    WaterBundleBackup {
+        lakes_catalog: std::fs::read_to_string(lakes_file_path(world_path)).ok(),
+        lake_id_layer: std::fs::read_to_string(layer_file_path(world_path, LAKE_ID_LAYER_ID)).ok(),
+        rivers_catalog: std::fs::read_to_string(rivers_file_path(world_path)).ok(),
+        river_id_layer: std::fs::read_to_string(layer_file_path(world_path, RIVER_ID_LAYER_ID)).ok(),
+        named_rivers: std::fs::read_to_string(named_rivers_file_path(world_path)).ok(),
+        hydrology_snapshot: std::fs::read_to_string(hydrology_snapshot_path(world_path)).ok(),
+    }
+}
+
+fn restore_water_bundle(world_path: &Path, backup: &WaterBundleBackup) -> Result<(), String> {
+    restore_file(&lakes_file_path(world_path), backup.lakes_catalog.clone())?;
+    restore_file(
+        &layer_file_path(world_path, LAKE_ID_LAYER_ID),
+        backup.lake_id_layer.clone(),
+    )?;
+    restore_file(&rivers_file_path(world_path), backup.rivers_catalog.clone())?;
+    restore_file(
+        &layer_file_path(world_path, RIVER_ID_LAYER_ID),
+        backup.river_id_layer.clone(),
+    )?;
+    restore_file(
+        &named_rivers_file_path(world_path),
+        backup.named_rivers.clone(),
+    )?;
+    restore_file(
+        &hydrology_snapshot_path(world_path),
+        backup.hydrology_snapshot.clone(),
+    )?;
+    Ok(())
+}
+
 /// Write `lakes.json` then derive `lake_id` layer. Rolls back catalog on layer failure.
 pub(crate) fn persist_lakes(
     world_path: &Path,
@@ -605,17 +648,29 @@ pub(crate) fn clear_rivers(world_path: &Path, bounds: &MapBounds) -> Result<(), 
 }
 
 /// Persist lakes then clear rivers (lake regen invalidates river mouths).
-pub(crate) fn persist_lake_generation(
+/// Rolls back the full water bundle on any failure.
+pub fn persist_lake_generation(
     world_path: &Path,
     catalog: &LakeCatalog,
     bounds: &MapBounds,
 ) -> Result<(), String> {
-    persist_lakes(world_path, catalog, bounds)?;
-    #[cfg(test)]
-    if SIMULATE_CLEAR_RIVERS_FAILURE.load(std::sync::atomic::Ordering::SeqCst) {
-        return Err("simulated clear rivers failure".to_string());
+    let backup = backup_water_bundle(world_path);
+    let result = (|| -> Result<(), String> {
+        write_lake_catalog(world_path, catalog)?;
+        let lake_layer = sync_lake_id_layer(catalog, bounds);
+        write_dense_layer(world_path, &lake_layer)?;
+        #[cfg(test)]
+        if SIMULATE_CLEAR_RIVERS_FAILURE.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("simulated clear rivers failure".to_string());
+        }
+        clear_rivers(world_path, bounds)?;
+        Ok(())
+    })();
+    if let Err(err) = result {
+        restore_water_bundle(world_path, &backup)?;
+        return Err(err);
     }
-    clear_rivers(world_path, bounds)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1009,5 +1064,181 @@ mod persist_rivers_tests {
         persist_rivers(world, &catalog, &bounds).unwrap();
 
         assert_eq!(read_current_hydrology_snapshot(world).unwrap(), None);
+    }
+}
+
+#[cfg(test)]
+mod persist_lake_generation_tests {
+    use super::*;
+    use mapkeeper_core::lakes::Lake;
+    use mapkeeper_core::map_preset::MapPreset;
+    use mapkeeper_core::rivers::{River, RiverCatalog};
+    use mapkeeper_core::hydro::SEA_LEVEL;
+    use mapkeeper_core::layer::{DenseState, LayerValue};
+    use mapkeeper_core::worldgen::hydrology::{
+        analyze_depressions, build_channel_graph, build_drainage_graph, ChannelPolicy,
+        HydrologySnapshot, NamedRiverBinding, NamedRiverStore, PrecipInputState,
+    };
+    use std::collections::BTreeMap;
+    use std::sync::atomic::Ordering;
+    use tempfile::tempdir;
+
+    fn seed_world(path: &Path) -> MapBounds {
+        std::fs::create_dir_all(path.join("map/layers")).unwrap();
+        rewrite_world_bounds(path, MapPreset::Small, false).unwrap()
+    }
+
+    fn water_bundle_bytes(world: &Path) -> BTreeMap<&'static str, Option<Vec<u8>>> {
+        let entries = [
+            ("lakes.json", lakes_file_path(world)),
+            ("lake_id", layer_file_path(world, LAKE_ID_LAYER_ID)),
+            ("rivers.json", rivers_file_path(world)),
+            ("river_id", layer_file_path(world, RIVER_ID_LAYER_ID)),
+            ("named-rivers", named_rivers_file_path(world)),
+            ("hydrology", hydrology_snapshot_path(world)),
+        ];
+        entries
+            .into_iter()
+            .map(|(key, path)| (key, std::fs::read(&path).ok()))
+            .collect()
+    }
+
+    fn sample_lakes() -> LakeCatalog {
+        let mut lakes = LakeCatalog::default();
+        lakes.lakes.push(Lake {
+            id: 1,
+            cells: vec![7],
+            outlet_cell: None,
+            endorheic: false,
+            name: None,
+        });
+        lakes.next_id = 2;
+        lakes
+    }
+
+    fn seed_rivers(world: &Path, bounds: &MapBounds) {
+        let mut rivers = RiverCatalog::default();
+        rivers.rivers.push(River {
+            id: 1,
+            cells: vec![2, 3],
+            source: 2,
+            mouth: 3,
+            parent: 1,
+            basin: 1,
+            name: None,
+        });
+        rivers.next_id = 2;
+        persist_rivers(world, &rivers, bounds).unwrap();
+    }
+
+    #[test]
+    fn rollback_full_water_bundle_when_clear_rivers_fails() {
+        let _lock = super::failpoint_lock();
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        seed_rivers(world, &bounds);
+        let before = water_bundle_bytes(world);
+
+        SIMULATE_CLEAR_RIVERS_FAILURE.store(true, Ordering::SeqCst);
+        let err = persist_lake_generation(world, &sample_lakes(), &bounds).unwrap_err();
+        SIMULATE_CLEAR_RIVERS_FAILURE.store(false, Ordering::SeqCst);
+        assert!(err.contains("simulated"));
+
+        assert_eq!(water_bundle_bytes(world), before);
+    }
+
+    #[test]
+    fn succeeds_when_prior_water_files_missing() {
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        assert!(!lakes_file_path(world).exists());
+        assert!(!rivers_file_path(world).exists());
+        assert!(!named_rivers_file_path(world).exists());
+        assert!(!hydrology_snapshot_path(world).exists());
+
+        persist_lake_generation(world, &sample_lakes(), &bounds).unwrap();
+
+        assert_eq!(read_lake_catalog(world), sample_lakes());
+        assert_eq!(read_river_catalog(world), RiverCatalog::default());
+        assert!(!named_rivers_file_path(world).exists());
+        assert!(!hydrology_snapshot_path(world).exists());
+    }
+
+    #[test]
+    fn rollback_when_prior_water_files_missing_and_failpoint_fires() {
+        let _lock = super::failpoint_lock();
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        let before = water_bundle_bytes(world);
+
+        SIMULATE_CLEAR_RIVERS_FAILURE.store(true, Ordering::SeqCst);
+        let _ = persist_lake_generation(world, &sample_lakes(), &bounds).unwrap_err();
+        SIMULATE_CLEAR_RIVERS_FAILURE.store(false, Ordering::SeqCst);
+
+        assert_eq!(water_bundle_bytes(world), before);
+    }
+
+    fn hydrology_snapshot_fixture(world: &Path, bounds: &MapBounds) -> HydrologySnapshot {
+        let mut elevation = DenseLayer::new_integer(ELEVATION_LAYER_ID, bounds.len());
+        for cell in 0..bounds.len() {
+            let height = if cell < bounds.width as usize {
+                SEA_LEVEL
+            } else {
+                SEA_LEVEL + 20
+            };
+            elevation.set(cell, DenseState::Value(LayerValue::Int(height)));
+        }
+        write_dense_layer(world, &elevation).unwrap();
+        let analysis = analyze_depressions(&elevation, bounds);
+        let drainage = build_drainage_graph(&analysis, &LakeCatalog::default(), bounds).unwrap();
+        let channels =
+            build_channel_graph(
+                &drainage,
+                &analysis,
+                None,
+                PrecipInputState::Missing,
+                ChannelPolicy::default(),
+            )
+            .unwrap();
+        let (base_revision, fingerprint) = hydrology_base_fingerprint(world);
+        HydrologySnapshot::new(
+            base_revision,
+            fingerprint,
+            "hydrology-v2".to_string(),
+            "channel-v1".to_string(),
+            9,
+            drainage,
+            channels,
+        )
+    }
+
+    #[test]
+    fn rollback_restores_named_rivers_and_hydrology_snapshot() {
+        let _lock = super::failpoint_lock();
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world);
+        seed_rivers(world, &bounds);
+        let mut store = NamedRiverStore::default();
+        store.rivers.push(NamedRiverBinding {
+            id: 1,
+            name: "Test".to_string(),
+            segment_ids: vec![1],
+        });
+        write_named_river_store(world, &store).unwrap();
+        let snap = hydrology_snapshot_fixture(world, &bounds);
+        persist_hydrology_snapshot(world, &snap).unwrap();
+        let before = water_bundle_bytes(world);
+
+        SIMULATE_CLEAR_RIVERS_FAILURE.store(true, Ordering::SeqCst);
+        let _ = persist_lake_generation(world, &sample_lakes(), &bounds).unwrap_err();
+        SIMULATE_CLEAR_RIVERS_FAILURE.store(false, Ordering::SeqCst);
+
+        assert_eq!(water_bundle_bytes(world), before);
+        assert_eq!(read_named_river_store(world), store);
+        assert!(read_current_hydrology_snapshot(world).unwrap().is_some());
     }
 }

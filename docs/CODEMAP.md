@@ -574,6 +574,7 @@ Symbols include public modules/types/functions and impl blocks.
 - L45: `fn` `routes`
 
 ### `crates/server/src/lib.rs`
+- L28: `module` `world_io`
 - L43: `struct` `ServerConfig`
 - L57: `fn` `bounds_response`
 - L66: `fn` `build_router`
@@ -636,10 +637,10 @@ Symbols include public modules/types/functions and impl blocks.
 - L545: `fn` `invalidate_hydrology_snapshot`
 - L553: `fn` `read_lake_catalog`
 - L560: `fn` `write_lake_catalog`
-- L583: `fn` `persist_lakes`
-- L602: `fn` `clear_rivers`
-- L608: `fn` `persist_lake_generation`
-- L635: `fn` `failpoint_lock`
+- L626: `fn` `persist_lakes`
+- L645: `fn` `clear_rivers`
+- L652: `fn` `persist_lake_generation`
+- L690: `fn` `failpoint_lock`
 
 ### `crates/server/src/world_write_characterization.rs`
 - _(no indexed symbols)_
