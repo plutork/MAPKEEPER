@@ -1,0 +1,6 @@
+# integrity regression fixture — rivers.json vs river_id layer mismatch
+
+[world]
+id = "fixture-integrity-river-mismatch"
+name = "fixture-integrity-river-mismatch"
+version = "0.1.0"

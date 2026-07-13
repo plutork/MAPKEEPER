@@ -243,6 +243,8 @@ pub(crate) struct MapBoundsResponse {
 pub(crate) struct MapResponse {
     #[allow(dead_code)]
     pub(crate) world_id: String,
+    #[serde(default)]
+    pub(crate) revision: u64,
     pub(crate) bounds: MapBoundsResponse,
     pub(crate) legacy_map: bool,
     pub(crate) cells: Vec<CellSummary>,
@@ -471,11 +473,19 @@ pub(crate) struct AppState {
     pub(crate) pending_paints: HashMap<(i32, i32), i32>,
     pub(crate) paint_flush_scheduled: bool,
     pub(crate) paint_flush_in_flight: bool,
+    /// Autosave stopped after conflict or permanent error (agent-reliability web-revision-retry).
+    pub(crate) paint_autosave_blocked: bool,
+    pub(crate) paint_retry_attempts: u32,
+    pub(crate) paint_rebased_after_conflict: bool,
     pub(crate) hover_cell: Option<(i32, i32)>,
     /// Draw hex-cell borders over fills.
     pub(crate) show_grid: bool,
     pub(crate) suppress_next_click: bool,
     pub(crate) legacy_map: bool,
+    /// Explicit scope for map/build/water API (`X-World-Id`).
+    pub(crate) scoped_world_id: Option<String>,
+    /// Coarse optimistic-concurrency token from `GET /api/map` (agent-reliability map-revision).
+    pub(crate) map_revision: u64,
     pub(crate) default_worlds_root: Option<String>,
     pub(crate) path_touched: bool,
     pub(crate) build_path_touched: bool,
@@ -504,6 +514,8 @@ pub(crate) struct AppState {
     pub(crate) pending_wizard_stamps: HashMap<(i32, i32), bool>,
     pub(crate) wizard_stamp_flush_scheduled: bool,
     pub(crate) wizard_stamp_flush_in_flight: bool,
+    pub(crate) wizard_stamp_retry_attempts: u32,
+    pub(crate) wizard_stamp_autosave_blocked: bool,
     /// Hex distance throttle between drag stamp centers.
     pub(crate) wizard_stamp_last_center: Option<(i32, i32)>,
     /// Build wizard step: 1 size · 2 land · 3 tectonics · 4 elevation · 5 climate · 6 water (D-71/D-90/D-91).

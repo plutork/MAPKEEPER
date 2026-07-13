@@ -32,6 +32,8 @@ PS1_CONSOLE = (
     ROOT / "setup.ps1",
     ROOT / "update.ps1",
     ROOT / "crates" / "web" / "build.ps1",
+    ROOT / "scripts" / "check.ps1",
+    ROOT / "scripts" / "smoke-headless.ps1",
 )
 
 WEB_SRC = ROOT / "crates" / "web" / "src"

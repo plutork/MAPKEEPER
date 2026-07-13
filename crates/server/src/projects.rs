@@ -1,7 +1,7 @@
 //! Launcher projects API + fixture worlds import (D-96 S1).
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -14,7 +14,7 @@ use mapkeeper_core::projects::ProjectEntry;
 use mapkeeper_core::world;
 use serde::{Deserialize, Serialize};
 
-use crate::state::{ActiveWorld, AppState};
+use crate::state::{ActiveWorld, ServerState};
 use crate::world_io;
 
 #[derive(Serialize)]
@@ -108,7 +108,7 @@ fn list_fixture_worlds() -> FixtureWorldsResponse {
     }
 }
 
-pub(crate) fn routes() -> Router<Arc<Mutex<AppState>>> {
+pub(crate) fn routes() -> Router<Arc<ServerState>> {
     Router::new()
         .route("/api/projects", get(list_projects).post(create_project))
         .route("/api/projects/open", axum::routing::post(open_project))
@@ -122,7 +122,7 @@ pub(crate) fn routes() -> Router<Arc<Mutex<AppState>>> {
         )
 }
 
-async fn list_projects(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
+async fn list_projects(State(server): State<Arc<ServerState>>) -> impl IntoResponse {
     let file = world_io::load_projects();
     let projects = file
         .projects
@@ -151,7 +151,7 @@ async fn list_projects(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoRe
             }
         })
         .collect();
-    let active = state.lock().unwrap().active.as_ref().map(|a| ProjectEntry {
+    let active = server.app.lock().unwrap().active.as_ref().map(|a| ProjectEntry {
         id: a.id.clone(),
         path: a.path.display().to_string(),
     });
@@ -164,7 +164,7 @@ async fn list_projects(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoRe
 }
 
 async fn create_project(
-    State(state): State<Arc<Mutex<AppState>>>,
+    State(server): State<Arc<ServerState>>,
     Json(input): Json<CreateProjectInput>,
 ) -> impl IntoResponse {
     if !world::is_valid_world_id(&input.id) {
@@ -183,6 +183,7 @@ async fn create_project(
         )
             .into_response();
     }
+    let _write = server.world_locks.acquire_write(&input.id).await;
     if let Err(err) = std::fs::create_dir_all(&path) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
@@ -219,6 +220,7 @@ async fn create_project(
     }
 
     let mut file = world_io::load_projects();
+    file.projects.retain(|entry| entry.id != input.id);
     file.upsert(ProjectEntry {
         id: input.id.clone(),
         path: path.display().to_string(),
@@ -227,7 +229,7 @@ async fn create_project(
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
-    state.lock().unwrap().active = Some(ActiveWorld {
+    server.app.lock().unwrap().active = Some(ActiveWorld {
         path: path.clone(),
         id: input.id.clone(),
     });
@@ -239,7 +241,7 @@ async fn create_project(
 }
 
 async fn open_project(
-    State(state): State<Arc<Mutex<AppState>>>,
+    State(server): State<Arc<ServerState>>,
     Json(input): Json<OpenProjectInput>,
 ) -> impl IntoResponse {
     let path = world_io::normalize_world_path(Path::new(&input.path));
@@ -249,6 +251,7 @@ async fn open_project(
     };
 
     let mut file = world_io::load_projects();
+    file.projects.retain(|entry| entry.id != id);
     file.upsert(ProjectEntry {
         id: id.clone(),
         path: path.display().to_string(),
@@ -257,7 +260,7 @@ async fn open_project(
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
-    state.lock().unwrap().active = Some(ActiveWorld {
+    server.app.lock().unwrap().active = Some(ActiveWorld {
         path: path.clone(),
         id: id.clone(),
     });
@@ -273,9 +276,14 @@ async fn list_fixture_worlds_handler() -> impl IntoResponse {
 }
 
 async fn open_fixture_world(
-    State(state): State<Arc<Mutex<AppState>>>,
+    State(server): State<Arc<ServerState>>,
     Json(input): Json<OpenFixtureInput>,
 ) -> impl IntoResponse {
+    let src_id = match world_io::read_fixture_manifest_id(&input.slug) {
+        Ok(id) => id,
+        Err(err) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
+    };
+    let _write = server.world_locks.acquire_write(&src_id).await;
     let path = match world_io::import_fixture_world(&input.slug) {
         Ok(path) => path,
         Err(err) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
@@ -286,6 +294,7 @@ async fn open_fixture_world(
     };
 
     let mut file = world_io::load_projects();
+    file.projects.retain(|entry| entry.id != id);
     file.upsert(ProjectEntry {
         id: id.clone(),
         path: path.display().to_string(),
@@ -294,7 +303,7 @@ async fn open_fixture_world(
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
-    state.lock().unwrap().active = Some(ActiveWorld {
+    server.app.lock().unwrap().active = Some(ActiveWorld {
         path: path.clone(),
         id: id.clone(),
     });
@@ -306,7 +315,7 @@ async fn open_fixture_world(
 }
 
 async fn forget_project(
-    State(state): State<Arc<Mutex<AppState>>>,
+    State(server): State<Arc<ServerState>>,
     Json(input): Json<ForgetProjectInput>,
 ) -> impl IntoResponse {
     let forget_key = world_io::path_cmp_key(Path::new(&input.path));
@@ -323,7 +332,7 @@ async fn forget_project(
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
-    let mut app = state.lock().unwrap();
+    let mut app = server.app.lock().unwrap();
     if let Some(active) = app.active.as_ref() {
         if world_io::path_cmp_key(&active.path) == forget_key {
             app.active = None;
@@ -333,7 +342,7 @@ async fn forget_project(
 }
 
 async fn delete_project(
-    State(state): State<Arc<Mutex<AppState>>>,
+    State(server): State<Arc<ServerState>>,
     Json(input): Json<DeleteProjectInput>,
 ) -> impl IntoResponse {
     let target = world_io::normalize_world_path(Path::new(&input.path));
@@ -346,6 +355,11 @@ async fn delete_project(
         )
             .into_response();
     }
+    let id = match world_io::read_manifest_id(&target) {
+        Ok(id) => id,
+        Err(err) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
+    };
+    let _write = server.world_locks.acquire_write(&id).await;
 
     if let Err(err) = std::fs::remove_dir_all(&target) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
@@ -358,7 +372,7 @@ async fn delete_project(
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
-    let mut app = state.lock().unwrap();
+    let mut app = server.app.lock().unwrap();
     if let Some(active) = app.active.as_ref() {
         if world_io::path_cmp_key(&active.path) == target_key {
             app.active = None;
@@ -367,7 +381,7 @@ async fn delete_project(
     StatusCode::NO_CONTENT.into_response()
 }
 
-async fn close_project(State(state): State<Arc<Mutex<AppState>>>) -> impl IntoResponse {
-    state.lock().unwrap().active = None;
+async fn close_project(State(server): State<Arc<ServerState>>) -> impl IntoResponse {
+    server.app.lock().unwrap().active = None;
     StatusCode::NO_CONTENT
 }

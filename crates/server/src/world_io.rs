@@ -1,5 +1,7 @@
 //! World filesystem, manifest, bounds, and layer I/O helpers (D-96 S0).
 
+use crate::world_transaction::{CommitError, WorldMutationPlan};
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -41,7 +43,11 @@ pub(crate) fn read_manifest_id(world_path: &Path) -> Result<String> {
             manifest_path.display()
         )
     })?;
-    let manifest: Manifest = toml::from_str(&raw).context("parsing mapkeeper.toml")?;
+    parse_manifest_id_from_str(&raw).context("parsing mapkeeper.toml")
+}
+
+pub(crate) fn parse_manifest_id_from_str(raw: &str) -> Result<String> {
+    let manifest: Manifest = toml::from_str(raw).map_err(|e| anyhow::anyhow!(e))?;
     Ok(manifest.world.id)
 }
 
@@ -272,6 +278,17 @@ pub(crate) fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn read_fixture_manifest_id(slug: &str) -> Result<String> {
+    if !is_valid_fixture_slug(slug) {
+        anyhow::bail!("invalid fixture slug");
+    }
+    let root = fixture_worlds_root().context(
+        "fixture worlds not found (run from MAPKEEPER repo or set MAPKEEPER_FIXTURE_WORLDS)",
+    )?;
+    let src = root.join(slug);
+    read_manifest_id(&src)
+}
+
 pub(crate) fn import_fixture_world(slug: &str) -> Result<PathBuf> {
     if !is_valid_fixture_slug(slug) {
         anyhow::bail!("invalid fixture slug");
@@ -350,16 +367,7 @@ pub(crate) fn read_dense_layer(
 }
 
 pub(crate) fn write_dense_layer(world_path: &Path, layer: &DenseLayer) -> Result<(), String> {
-    #[cfg(test)]
-    {
-        let attempt = LAYER_WRITE_ATTEMPT.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-        let fail_on = SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.load(std::sync::atomic::Ordering::SeqCst);
-        if SIMULATE_LAYER_WRITE_FAILURE.load(std::sync::atomic::Ordering::SeqCst)
-            || (fail_on > 0 && attempt >= fail_on)
-        {
-            return Err("simulated layer write failure".to_string());
-        }
-    }
+    maybe_simulate_layer_write_failure()?;
     let path = layer_file_path(world_path, &layer.layer_id);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -369,6 +377,24 @@ pub(crate) fn write_dense_layer(world_path: &Path, layer: &DenseLayer) -> Result
     if is_hydrology_base_input_layer(&layer.layer_id) {
         invalidate_hydrology_snapshot(world_path)?;
     }
+    Ok(())
+}
+
+/// Test failpoint hook shared by direct layer writes and txn commit.
+#[cfg(test)]
+pub(crate) fn maybe_simulate_layer_write_failure() -> Result<(), String> {
+    let attempt = LAYER_WRITE_ATTEMPT.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let fail_on = SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.load(std::sync::atomic::Ordering::SeqCst);
+    if SIMULATE_LAYER_WRITE_FAILURE.load(std::sync::atomic::Ordering::SeqCst)
+        || (fail_on > 0 && attempt >= fail_on)
+    {
+        return Err("simulated layer write failure".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(test))]
+pub(crate) fn maybe_simulate_layer_write_failure() -> Result<(), String> {
     Ok(())
 }
 pub(crate) fn rivers_file_path(world_path: &Path) -> PathBuf {
@@ -398,14 +424,6 @@ pub(crate) fn write_named_river_store(
     std::fs::write(&path, body).map_err(|e| e.to_string())
 }
 
-pub(crate) fn clear_named_rivers(world_path: &Path) -> Result<(), String> {
-    let path = named_rivers_file_path(world_path);
-    if path.exists() {
-        std::fs::remove_file(path).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
 pub(crate) fn read_river_catalog(world_path: &Path) -> RiverCatalog {
     std::fs::read_to_string(rivers_file_path(world_path))
         .ok()
@@ -413,34 +431,34 @@ pub(crate) fn read_river_catalog(world_path: &Path) -> RiverCatalog {
         .unwrap_or_default()
 }
 
-pub(crate) fn write_river_catalog(world_path: &Path, catalog: &RiverCatalog) -> Result<(), String> {
-    let path = rivers_file_path(world_path);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let body = catalog.to_json_pretty().map_err(|e| e.to_string())?;
-    std::fs::write(&path, body).map_err(|e| e.to_string())
-}
-
 pub(crate) fn persist_rivers(
     world_path: &Path,
     catalog: &RiverCatalog,
     bounds: &MapBounds,
-) -> Result<(), String> {
+    base_revision: Option<u64>,
+) -> Result<u64, CommitError> {
     let catalog_path = rivers_file_path(world_path);
     let layer_path = layer_file_path(world_path, RIVER_ID_LAYER_ID);
-    let backup_catalog = std::fs::read_to_string(&catalog_path).ok();
-    let backup_layer = std::fs::read_to_string(&layer_path).ok();
+    let catalog_body = catalog.to_json_pretty().map_err(|e| CommitError::Op(e.to_string()))?;
+    let layer_body = sync_river_id_layer(catalog, bounds)
+        .to_json_pretty()
+        .map_err(|e| CommitError::Op(e.to_string()))?;
 
-    write_river_catalog(world_path, catalog)?;
-    let layer = sync_river_id_layer(catalog, bounds);
-    if let Err(err) = write_dense_layer(world_path, &layer) {
-        restore_file(&catalog_path, backup_catalog)?;
-        restore_file(&layer_path, backup_layer)?;
-        return Err(err);
-    }
-    invalidate_hydrology_snapshot(world_path)?;
-    Ok(())
+    let mut plan = WorldMutationPlan::begin(world_path).map_err(CommitError::Op)?;
+    plan.stage_write(&catalog_path, catalog_body.into_bytes())
+        .map_err(CommitError::Op)?;
+    plan.stage_write(&layer_path, layer_body.into_bytes())
+        .map_err(CommitError::Op)?;
+    plan.validate_staged(|p| {
+        if p.staged_target_count() < 2 {
+            return Err("rivers bundle requires catalog and layer".to_string());
+        }
+        Ok(())
+    })
+    .map_err(CommitError::Op)?;
+    plan.post_commit_invalidate_hydrology();
+    let (_, revision) = plan.commit(base_revision)?;
+    Ok(revision)
 }
 
 pub fn lakes_file_path(world_path: &Path) -> PathBuf {
@@ -564,6 +582,7 @@ pub fn read_lake_catalog(world_path: &Path) -> LakeCatalog {
         .unwrap_or_default()
 }
 
+#[allow(dead_code)]
 pub(crate) fn write_lake_catalog(world_path: &Path, catalog: &LakeCatalog) -> Result<(), String> {
     let path = lakes_file_path(world_path);
     if let Some(parent) = path.parent() {
@@ -663,24 +682,23 @@ pub(crate) fn persist_land_mask_bundle(
     world_path: &Path,
     mask: &DenseLayer,
     elevation: &DenseLayer,
-) -> Result<(), String> {
+    base_revision: Option<u64>,
+) -> Result<u64, CommitError> {
     #[cfg(test)]
     reset_layer_write_attempts();
-    let paths = [
-        layer_file_path(world_path, LAND_MASK_LAYER_ID),
-        layer_file_path(world_path, ELEVATION_LAYER_ID),
-    ];
-    let backup = backup_files(&paths);
-    let result = (|| -> Result<(), String> {
-        write_dense_layer(world_path, mask)?;
-        write_dense_layer(world_path, elevation)?;
-        Ok(())
-    })();
-    if let Err(err) = result {
-        restore_files_bundle(&backup)?;
-        return Err(err);
-    }
-    Ok(())
+    let mask_path = layer_file_path(world_path, LAND_MASK_LAYER_ID);
+    let elevation_path = layer_file_path(world_path, ELEVATION_LAYER_ID);
+    let mask_body = mask.to_json_pretty().map_err(|e| CommitError::Op(e.to_string()))?;
+    let elevation_body = elevation.to_json_pretty().map_err(|e| CommitError::Op(e.to_string()))?;
+
+    let mut plan = WorldMutationPlan::begin(world_path).map_err(CommitError::Op)?;
+    plan.stage_write(&mask_path, mask_body.into_bytes())
+        .map_err(CommitError::Op)?;
+    plan.stage_write(&elevation_path, elevation_body.into_bytes())
+        .map_err(CommitError::Op)?;
+    plan.post_commit_invalidate_hydrology();
+    let (_, revision) = plan.commit(base_revision)?;
+    Ok(revision)
 }
 
 pub(crate) fn persist_climate_layers_bundle(
@@ -688,94 +706,67 @@ pub(crate) fn persist_climate_layers_bundle(
     temperature: &DenseLayer,
     precipitation: &DenseLayer,
     ice: &DenseLayer,
-) -> Result<(), String> {
+    base_revision: Option<u64>,
+) -> Result<u64, CommitError> {
     #[cfg(test)]
     reset_layer_write_attempts();
-    let paths = [
-        layer_file_path(world_path, TEMPERATURE_LAYER_ID),
-        layer_file_path(world_path, PRECIPITATION_LAYER_ID),
-        layer_file_path(world_path, ICE_LAYER_ID),
-    ];
-    let backup = backup_files(&paths);
-    let result = (|| -> Result<(), String> {
-        write_dense_layer(world_path, temperature)?;
-        write_dense_layer(world_path, precipitation)?;
-        write_dense_layer(world_path, ice)?;
-        Ok(())
-    })();
-    if let Err(err) = result {
-        restore_files_bundle(&backup)?;
-        return Err(err);
-    }
-    Ok(())
+    let temp_path = layer_file_path(world_path, TEMPERATURE_LAYER_ID);
+    let precip_path = layer_file_path(world_path, PRECIPITATION_LAYER_ID);
+    let ice_path = layer_file_path(world_path, ICE_LAYER_ID);
+    let temp_body = temperature.to_json_pretty().map_err(|e| CommitError::Op(e.to_string()))?;
+    let precip_body = precipitation.to_json_pretty().map_err(|e| CommitError::Op(e.to_string()))?;
+    let ice_body = ice.to_json_pretty().map_err(|e| CommitError::Op(e.to_string()))?;
+
+    let mut plan = WorldMutationPlan::begin(world_path).map_err(CommitError::Op)?;
+    plan.stage_write(&temp_path, temp_body.into_bytes())
+        .map_err(CommitError::Op)?;
+    plan.stage_write(&precip_path, precip_body.into_bytes())
+        .map_err(CommitError::Op)?;
+    plan.stage_write(&ice_path, ice_body.into_bytes())
+        .map_err(CommitError::Op)?;
+    plan.post_commit_invalidate_hydrology();
+    let (_, revision) = plan.commit(base_revision)?;
+    Ok(revision)
 }
 
-/// Files touched by lake generation (lakes + river clear + hydrology invalidation).
-struct WaterBundleBackup {
-    lakes_catalog: Option<String>,
-    lake_id_layer: Option<String>,
-    rivers_catalog: Option<String>,
-    river_id_layer: Option<String>,
-    named_rivers: Option<String>,
-    hydrology_snapshot: Option<String>,
-}
-
-fn backup_water_bundle(world_path: &Path) -> WaterBundleBackup {
-    WaterBundleBackup {
-        lakes_catalog: std::fs::read_to_string(lakes_file_path(world_path)).ok(),
-        lake_id_layer: std::fs::read_to_string(layer_file_path(world_path, LAKE_ID_LAYER_ID)).ok(),
-        rivers_catalog: std::fs::read_to_string(rivers_file_path(world_path)).ok(),
-        river_id_layer: std::fs::read_to_string(layer_file_path(world_path, RIVER_ID_LAYER_ID)).ok(),
-        named_rivers: std::fs::read_to_string(named_rivers_file_path(world_path)).ok(),
-        hydrology_snapshot: std::fs::read_to_string(hydrology_snapshot_path(world_path)).ok(),
-    }
-}
-
-fn restore_water_bundle(world_path: &Path, backup: &WaterBundleBackup) -> Result<(), String> {
-    restore_file(&lakes_file_path(world_path), backup.lakes_catalog.clone())?;
-    restore_file(
-        &layer_file_path(world_path, LAKE_ID_LAYER_ID),
-        backup.lake_id_layer.clone(),
-    )?;
-    restore_file(&rivers_file_path(world_path), backup.rivers_catalog.clone())?;
-    restore_file(
-        &layer_file_path(world_path, RIVER_ID_LAYER_ID),
-        backup.river_id_layer.clone(),
-    )?;
-    restore_file(
-        &named_rivers_file_path(world_path),
-        backup.named_rivers.clone(),
-    )?;
-    restore_file(
-        &hydrology_snapshot_path(world_path),
-        backup.hydrology_snapshot.clone(),
-    )?;
-    Ok(())
-}
-
-/// Write `lakes.json` then derive `lake_id` layer. Rolls back catalog on layer failure.
+/// Write `lakes.json` then derive `lake_id` layer via transactional bundle.
 pub(crate) fn persist_lakes(
     world_path: &Path,
     catalog: &LakeCatalog,
     bounds: &MapBounds,
-) -> Result<(), String> {
+    base_revision: Option<u64>,
+) -> Result<u64, CommitError> {
     let catalog_path = lakes_file_path(world_path);
-    let backup_catalog = std::fs::read_to_string(&catalog_path).ok();
+    let layer_path = layer_file_path(world_path, LAKE_ID_LAYER_ID);
+    let catalog_body = catalog.to_json_pretty().map_err(|e| CommitError::Op(e.to_string()))?;
+    let layer_body = sync_lake_id_layer(catalog, bounds)
+        .to_json_pretty()
+        .map_err(|e| CommitError::Op(e.to_string()))?;
 
-    write_lake_catalog(world_path, catalog)?;
-    let layer = sync_lake_id_layer(catalog, bounds);
-    if let Err(err) = write_dense_layer(world_path, &layer) {
-        restore_file(&catalog_path, backup_catalog)?;
-        return Err(err);
-    }
-    invalidate_hydrology_snapshot(world_path)?;
-    Ok(())
+    let mut plan = WorldMutationPlan::begin(world_path).map_err(CommitError::Op)?;
+    plan.stage_write(&catalog_path, catalog_body.into_bytes())
+        .map_err(CommitError::Op)?;
+    plan.stage_write(&layer_path, layer_body.into_bytes())
+        .map_err(CommitError::Op)?;
+    plan.post_commit_invalidate_hydrology();
+    let (_, revision) = plan.commit(base_revision)?;
+    Ok(revision)
 }
 
 /// Replace rivers with an empty catalog + zero `river_id` layer.
-pub(crate) fn clear_rivers(world_path: &Path, bounds: &MapBounds) -> Result<(), String> {
-    clear_named_rivers(world_path)?;
-    persist_rivers(world_path, &RiverCatalog::default(), bounds)
+#[cfg(test)]
+pub(crate) fn clear_rivers(world_path: &Path, bounds: &MapBounds) -> Result<u64, CommitError> {
+    clear_named_rivers(world_path).map_err(CommitError::Op)?;
+    persist_rivers(world_path, &RiverCatalog::default(), bounds, current_base_revision(world_path))
+}
+
+#[cfg(test)]
+fn clear_named_rivers(world_path: &Path) -> Result<(), String> {
+    let path = named_rivers_file_path(world_path);
+    if path.exists() {
+        std::fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Persist lakes then clear rivers (lake regen invalidates river mouths).
@@ -784,24 +775,44 @@ pub fn persist_lake_generation(
     world_path: &Path,
     catalog: &LakeCatalog,
     bounds: &MapBounds,
-) -> Result<(), String> {
-    let backup = backup_water_bundle(world_path);
-    let result = (|| -> Result<(), String> {
-        write_lake_catalog(world_path, catalog)?;
-        let lake_layer = sync_lake_id_layer(catalog, bounds);
-        write_dense_layer(world_path, &lake_layer)?;
-        #[cfg(test)]
-        if SIMULATE_CLEAR_RIVERS_FAILURE.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err("simulated clear rivers failure".to_string());
-        }
-        clear_rivers(world_path, bounds)?;
-        Ok(())
-    })();
-    if let Err(err) = result {
-        restore_water_bundle(world_path, &backup)?;
-        return Err(err);
+    base_revision: Option<u64>,
+) -> Result<u64, CommitError> {
+    let empty_rivers = RiverCatalog::default();
+    let lake_layer = sync_lake_id_layer(catalog, bounds);
+    let river_layer = sync_river_id_layer(&empty_rivers, bounds);
+    let lakes_body = catalog.to_json_pretty().map_err(|e| CommitError::Op(e.to_string()))?;
+    let lake_layer_body = lake_layer.to_json_pretty().map_err(|e| CommitError::Op(e.to_string()))?;
+    let rivers_body = empty_rivers.to_json_pretty().map_err(|e| CommitError::Op(e.to_string()))?;
+    let river_layer_body = river_layer
+        .to_json_pretty()
+        .map_err(|e| CommitError::Op(e.to_string()))?;
+
+    let mut plan = WorldMutationPlan::begin(world_path).map_err(CommitError::Op)?;
+    plan.stage_write(&lakes_file_path(world_path), lakes_body.into_bytes())
+        .map_err(CommitError::Op)?;
+    plan.stage_write(
+        &layer_file_path(world_path, LAKE_ID_LAYER_ID),
+        lake_layer_body.into_bytes(),
+    )
+    .map_err(CommitError::Op)?;
+    plan.stage_write(&rivers_file_path(world_path), rivers_body.into_bytes())
+        .map_err(CommitError::Op)?;
+    plan.stage_write(
+        &layer_file_path(world_path, RIVER_ID_LAYER_ID),
+        river_layer_body.into_bytes(),
+    )
+    .map_err(CommitError::Op)?;
+    plan.stage_delete(&named_rivers_file_path(world_path))
+        .map_err(CommitError::Op)?;
+    plan.stage_delete(&hydrology_snapshot_path(world_path))
+        .map_err(CommitError::Op)?;
+
+    #[cfg(test)]
+    if SIMULATE_CLEAR_RIVERS_FAILURE.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(CommitError::Op("simulated clear rivers failure".to_string()));
     }
-    Ok(())
+    let (_, revision) = plan.commit(base_revision)?;
+    Ok(revision)
 }
 
 #[cfg(test)]
@@ -825,20 +836,48 @@ pub(crate) static SIMULATE_HYDROLOGY_ACTIVATION_FAILURE: std::sync::atomic::Atom
 pub(crate) static SIMULATE_CLEAR_RIVERS_FAILURE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 /// Serializes failpoint tests — global `SIMULATE_*` flags are process-wide.
-#[cfg(test)]
 pub(crate) static FAILPOINT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-#[cfg(test)]
 pub(crate) fn failpoint_lock() -> std::sync::MutexGuard<'static, ()> {
     let guard = FAILPOINT_TEST_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    SIMULATE_LAYER_WRITE_FAILURE.store(false, std::sync::atomic::Ordering::SeqCst);
-    SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.store(0, std::sync::atomic::Ordering::SeqCst);
-    LAYER_WRITE_ATTEMPT.store(0, std::sync::atomic::Ordering::SeqCst);
-    SIMULATE_CLEAR_RIVERS_FAILURE.store(false, std::sync::atomic::Ordering::SeqCst);
-    SIMULATE_HYDROLOGY_ACTIVATION_FAILURE.store(false, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(test)]
+    {
+        SIMULATE_LAYER_WRITE_FAILURE.store(false, std::sync::atomic::Ordering::SeqCst);
+        SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.store(0, std::sync::atomic::Ordering::SeqCst);
+        LAYER_WRITE_ATTEMPT.store(0, std::sync::atomic::Ordering::SeqCst);
+        SIMULATE_CLEAR_RIVERS_FAILURE.store(false, std::sync::atomic::Ordering::SeqCst);
+        SIMULATE_HYDROLOGY_ACTIVATION_FAILURE.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
     guard
+}
+
+#[cfg(test)]
+fn write_test_mapkeeper_toml(world_path: &Path) {
+    let path = world_path.join("mapkeeper.toml");
+    if path.exists() {
+        return;
+    }
+    std::fs::write(
+        &path,
+        mapkeeper_core::build_state::manifest_toml_with_build("test-world", false),
+    )
+    .unwrap();
+}
+
+#[cfg(test)]
+fn commit_op_err(result: Result<u64, CommitError>) -> String {
+    match result {
+        Err(CommitError::Op(message)) => message,
+        Err(other) => panic!("expected op error, got {other:?}"),
+        Ok(_) => panic!("expected error"),
+    }
+}
+
+#[cfg(test)]
+fn current_base_revision(world: &Path) -> Option<u64> {
+    Some(crate::world_revision::read_world_revision(world).unwrap_or(0))
 }
 
 #[cfg(test)]
@@ -857,7 +896,9 @@ mod persist_lakes_tests {
 
     fn seed_world(path: &Path) -> MapBounds {
         std::fs::create_dir_all(path.join("map/layers")).unwrap();
-        rewrite_world_bounds(path, MapPreset::Small, false).unwrap()
+        let bounds = rewrite_world_bounds(path, MapPreset::Small, false).unwrap();
+        write_test_mapkeeper_toml(path);
+        bounds
     }
 
     fn snapshot(world: &Path, bounds: &MapBounds, seed: u64) -> HydrologySnapshot {
@@ -908,7 +949,7 @@ mod persist_lakes_tests {
             endorheic: false,
             name: None,
         });
-        persist_lakes(world, &catalog, &bounds).unwrap();
+        persist_lakes(world, &catalog, &bounds, current_base_revision(world)).unwrap();
         let read = read_lake_catalog(world);
         assert_eq!(read, catalog);
         let on_disk = read_dense_layer(world, LAKE_ID_LAYER_ID, &bounds);
@@ -923,7 +964,7 @@ mod persist_lakes_tests {
         let world = dir.path();
         let bounds = seed_world(world);
         let catalog = LakeCatalog::default();
-        persist_lakes(world, &catalog, &bounds).unwrap();
+        persist_lakes(world, &catalog, &bounds, current_base_revision(world)).unwrap();
         assert_eq!(read_lake_catalog(world), catalog);
         let layer = read_dense_layer(world, LAKE_ID_LAYER_ID, &bounds);
         assert_eq!(layer.int_or(0, -1), 0);
@@ -936,7 +977,7 @@ mod persist_lakes_tests {
         let world = dir.path();
         let bounds = seed_world(world);
         let initial = LakeCatalog::default();
-        persist_lakes(world, &initial, &bounds).unwrap();
+        persist_lakes(world, &initial, &bounds, current_base_revision(world)).unwrap();
         let before_catalog = std::fs::read_to_string(lakes_file_path(world)).unwrap();
 
         let mut next = LakeCatalog::default();
@@ -949,7 +990,7 @@ mod persist_lakes_tests {
         });
 
         SIMULATE_LAYER_WRITE_FAILURE.store(true, Ordering::SeqCst);
-        let err = persist_lakes(world, &next, &bounds).unwrap_err();
+        let err = commit_op_err(persist_lakes(world, &next, &bounds, current_base_revision(world)));
         SIMULATE_LAYER_WRITE_FAILURE.store(false, Ordering::SeqCst);
         assert!(err.contains("simulated"));
 
@@ -993,6 +1034,19 @@ mod persist_lakes_tests {
         assert_eq!(read_current_hydrology_snapshot(world).unwrap(), None);
     }
 
+    fn sample_lakes() -> LakeCatalog {
+        let mut lakes = LakeCatalog::default();
+        lakes.lakes.push(Lake {
+            id: 1,
+            cells: vec![7],
+            outlet_cell: None,
+            endorheic: false,
+            name: None,
+        });
+        lakes.next_id = 2;
+        lakes
+    }
+
     #[test]
     fn lake_catalog_write_invalidates_hydrology_snapshot() {
         let _lock = super::failpoint_lock();
@@ -1001,8 +1055,9 @@ mod persist_lakes_tests {
         let bounds = seed_world(world);
         let snapshot = snapshot(world, &bounds, 1);
         persist_hydrology_snapshot(world, &snapshot).unwrap();
+        clear_rivers(world, &bounds).unwrap();
 
-        persist_lakes(world, &LakeCatalog::default(), &bounds).unwrap();
+        persist_lakes(world, &sample_lakes(), &bounds, current_base_revision(world)).unwrap();
 
         assert_eq!(read_current_hydrology_snapshot(world).unwrap(), None);
     }
@@ -1038,7 +1093,9 @@ mod persist_rivers_tests {
 
     fn seed_world(path: &Path) -> MapBounds {
         std::fs::create_dir_all(path.join("map/layers")).unwrap();
-        rewrite_world_bounds(path, MapPreset::Small, false).unwrap()
+        let bounds = rewrite_world_bounds(path, MapPreset::Small, false).unwrap();
+        write_test_mapkeeper_toml(path);
+        bounds
     }
 
     fn snapshot(world: &Path, bounds: &MapBounds, seed: u64) -> HydrologySnapshot {
@@ -1092,7 +1149,7 @@ mod persist_rivers_tests {
             name: None,
         });
         catalog.next_id = 2;
-        persist_rivers(world, &catalog, &bounds).unwrap();
+        persist_rivers(world, &catalog, &bounds, current_base_revision(world)).unwrap();
         assert_eq!(read_river_catalog(world), catalog);
         assert_eq!(
             read_dense_layer(world, RIVER_ID_LAYER_ID, &bounds),
@@ -1108,7 +1165,7 @@ mod persist_rivers_tests {
         let bounds = seed_world(world);
 
         let empty = RiverCatalog::default();
-        persist_rivers(world, &empty, &bounds).unwrap();
+        persist_rivers(world, &empty, &bounds, current_base_revision(world)).unwrap();
         assert_eq!(read_river_catalog(world), empty);
 
         let mut created = RiverCatalog::default();
@@ -1122,13 +1179,13 @@ mod persist_rivers_tests {
             name: None,
         });
         created.next_id = 2;
-        persist_rivers(world, &created, &bounds).unwrap();
+        persist_rivers(world, &created, &bounds, current_base_revision(world)).unwrap();
         assert_eq!(read_river_catalog(world), created);
 
         let mut updated = created.clone();
         updated.rivers[0].cells = vec![4, 5, 6];
         updated.rivers[0].mouth = 6;
-        persist_rivers(world, &updated, &bounds).unwrap();
+        persist_rivers(world, &updated, &bounds, current_base_revision(world)).unwrap();
         assert_eq!(read_river_catalog(world), updated);
 
         clear_rivers(world, &bounds).unwrap();
@@ -1156,7 +1213,7 @@ mod persist_rivers_tests {
             name: None,
         });
         initial.next_id = 2;
-        persist_rivers(world, &initial, &bounds).unwrap();
+        persist_rivers(world, &initial, &bounds, current_base_revision(world)).unwrap();
         let before_catalog = std::fs::read_to_string(rivers_file_path(world)).unwrap();
         let before_layer =
             std::fs::read_to_string(layer_file_path(world, RIVER_ID_LAYER_ID)).unwrap();
@@ -1174,7 +1231,7 @@ mod persist_rivers_tests {
         next.next_id = 2;
 
         SIMULATE_LAYER_WRITE_FAILURE.store(true, Ordering::SeqCst);
-        let err = persist_rivers(world, &next, &bounds).unwrap_err();
+        let err = commit_op_err(persist_rivers(world, &next, &bounds, current_base_revision(world)));
         SIMULATE_LAYER_WRITE_FAILURE.store(false, Ordering::SeqCst);
         assert!(err.contains("simulated"));
 
@@ -1213,7 +1270,7 @@ mod persist_rivers_tests {
             name: None,
         });
         catalog.next_id = 2;
-        persist_rivers(world, &catalog, &bounds).unwrap();
+        persist_rivers(world, &catalog, &bounds, current_base_revision(world)).unwrap();
 
         assert_eq!(read_current_hydrology_snapshot(world).unwrap(), None);
     }
@@ -1237,7 +1294,9 @@ mod persist_lake_generation_tests {
 
     fn seed_world(path: &Path) -> MapBounds {
         std::fs::create_dir_all(path.join("map/layers")).unwrap();
-        rewrite_world_bounds(path, MapPreset::Small, false).unwrap()
+        let bounds = rewrite_world_bounds(path, MapPreset::Small, false).unwrap();
+        write_test_mapkeeper_toml(path);
+        bounds
     }
 
     fn water_bundle_bytes(world: &Path) -> BTreeMap<&'static str, Option<Vec<u8>>> {
@@ -1280,7 +1339,7 @@ mod persist_lake_generation_tests {
             name: None,
         });
         rivers.next_id = 2;
-        persist_rivers(world, &rivers, bounds).unwrap();
+        persist_rivers(world, &rivers, bounds, current_base_revision(world)).unwrap();
     }
 
     #[test]
@@ -1293,7 +1352,7 @@ mod persist_lake_generation_tests {
         let before = water_bundle_bytes(world);
 
         SIMULATE_CLEAR_RIVERS_FAILURE.store(true, Ordering::SeqCst);
-        let err = persist_lake_generation(world, &sample_lakes(), &bounds).unwrap_err();
+        let err = commit_op_err(persist_lake_generation(world, &sample_lakes(), &bounds, current_base_revision(world)));
         SIMULATE_CLEAR_RIVERS_FAILURE.store(false, Ordering::SeqCst);
         assert!(err.contains("simulated"));
 
@@ -1311,7 +1370,7 @@ mod persist_lake_generation_tests {
         assert!(!named_rivers_file_path(world).exists());
         assert!(!hydrology_snapshot_path(world).exists());
 
-        persist_lake_generation(world, &sample_lakes(), &bounds).unwrap();
+        persist_lake_generation(world, &sample_lakes(), &bounds, current_base_revision(world)).unwrap();
 
         assert_eq!(read_lake_catalog(world), sample_lakes());
         assert_eq!(read_river_catalog(world), RiverCatalog::default());
@@ -1328,7 +1387,7 @@ mod persist_lake_generation_tests {
         let before = water_bundle_bytes(world);
 
         SIMULATE_CLEAR_RIVERS_FAILURE.store(true, Ordering::SeqCst);
-        let _ = persist_lake_generation(world, &sample_lakes(), &bounds).unwrap_err();
+        let _ = commit_op_err(persist_lake_generation(world, &sample_lakes(), &bounds, current_base_revision(world)));
         SIMULATE_CLEAR_RIVERS_FAILURE.store(false, Ordering::SeqCst);
 
         assert_eq!(water_bundle_bytes(world), before);
@@ -1387,7 +1446,7 @@ mod persist_lake_generation_tests {
         let before = water_bundle_bytes(world);
 
         SIMULATE_CLEAR_RIVERS_FAILURE.store(true, Ordering::SeqCst);
-        let _ = persist_lake_generation(world, &sample_lakes(), &bounds).unwrap_err();
+        let _ = commit_op_err(persist_lake_generation(world, &sample_lakes(), &bounds, current_base_revision(world)));
         SIMULATE_CLEAR_RIVERS_FAILURE.store(false, Ordering::SeqCst);
 
         assert_eq!(water_bundle_bytes(world), before);
@@ -1491,7 +1550,7 @@ mod build_lifecycle_tests {
         let mask = generate_land_mask(&bounds, LayoutClass::Pangea, ShoreCharacter::Smooth, 1);
         let elevation =
             mapkeeper_core::land_mask::elevation_from_land_mask(&bounds, &mask);
-        persist_land_mask_bundle(world, &mask, &elevation).unwrap();
+        persist_land_mask_bundle(world, &mask, &elevation, current_base_revision(world)).unwrap();
         let paths = [
             layer_file_path(world, LAND_MASK_LAYER_ID),
             layer_file_path(world, ELEVATION_LAYER_ID),
@@ -1502,7 +1561,7 @@ mod build_lifecycle_tests {
         let elevation2 =
             mapkeeper_core::land_mask::elevation_from_land_mask(&bounds, &mask2);
         SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.store(2, Ordering::SeqCst);
-        let err = persist_land_mask_bundle(world, &mask2, &elevation2).unwrap_err();
+        let err = commit_op_err(persist_land_mask_bundle(world, &mask2, &elevation2, current_base_revision(world)));
         SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.store(0, Ordering::SeqCst);
         assert!(err.contains("simulated"));
         assert_eq!(file_bytes(&paths), before);
@@ -1517,7 +1576,7 @@ mod build_lifecycle_tests {
         let mask = generate_land_mask(&bounds, LayoutClass::Pangea, ShoreCharacter::Smooth, 1);
         let elevation =
             mapkeeper_core::land_mask::elevation_from_land_mask(&bounds, &mask);
-        persist_land_mask_bundle(world, &mask, &elevation).unwrap();
+        persist_land_mask_bundle(world, &mask, &elevation, current_base_revision(world)).unwrap();
         let layers = generate_climate_layers(
             &bounds,
             &mask,
@@ -1530,6 +1589,7 @@ mod build_lifecycle_tests {
             &layers.temperature,
             &layers.precipitation,
             &layers.ice,
+            current_base_revision(world),
         )
         .unwrap();
         let paths = [
@@ -1547,13 +1607,13 @@ mod build_lifecycle_tests {
             10,
         );
         SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.store(2, Ordering::SeqCst);
-        let err = persist_climate_layers_bundle(
+        let err = commit_op_err(persist_climate_layers_bundle(
             world,
             &layers2.temperature,
             &layers2.precipitation,
             &layers2.ice,
-        )
-        .unwrap_err();
+            current_base_revision(world),
+        ));
         SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.store(0, Ordering::SeqCst);
         assert!(err.contains("simulated"));
         assert_eq!(file_bytes(&paths), before);

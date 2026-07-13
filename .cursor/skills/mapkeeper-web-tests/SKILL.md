@@ -42,8 +42,9 @@ with sync_playwright() as p:
 
 ## CI
 
-- Run headless in CI; local dev may use headed for debug.
-- Schema/query unit tests separate from Playwright — both required for V0-done (D-12).
+- **Default CI smoke:** `scripts/smoke-headless.ps1` (API only, temp fixture world) — see `tests/README.md`.
+- **Optional UI smoke:** `tests/smoke.mjs` — `chromium.launch({ headless: true })` unless `SMOKE_HEADED=1`.
+- Schema/query unit tests separate from Playwright — both useful for V0-done (D-12).
 
 ## Gate
 

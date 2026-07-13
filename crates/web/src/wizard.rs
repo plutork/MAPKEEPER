@@ -5,11 +5,12 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::api::{
-    flush_pending_paints, load_elevation, load_geology, load_map, persist_build_draft,
-    post_lake_generate, post_river_generate, refresh_projects,
+    ensure_pending_saved_or_discard, flush_pending_paints, handle_mutate_response,
+    load_elevation, load_geology, load_map, persist_build_draft_for, post_lake_generate,
+    post_river_generate, refresh_projects, scoped_mutate_from_state, scoped_request,
 };
-use crate::brush::reset_view_on_world_open;
-use crate::brush::{effective_brush_radius_from_hex_size, paint_stamp_cells};
+use crate::mutate_retry::{classify_http_status, paint_stop_message, wizard_stamp_flush_action, MutateErrorKind, PaintFlushAction};
+use crate::brush::{effective_brush_radius_from_hex_size, paint_stamp_cells, reset_view_on_world_open};
 use crate::canvas::{current_hex_size_px, schedule_redraw};
 use crate::dom::{
     active_attr_in_group, clear_inspect_panel, click_target_element, document,
@@ -84,7 +85,7 @@ async fn apply_wizard_preset_if_needed(
 
 async fn apply_wizard_preset_now(state: Rc<RefCell<AppState>>, preset: &str) -> bool {
     let body = BuildBoundsInput { map_preset: preset };
-    let Ok(resp) = gloo_net::http::Request::put("/api/build/bounds")
+    let Ok(resp) = scoped_mutate_from_state(&state, gloo_net::http::Request::put("/api/build/bounds"))
         .json(&body)
         .expect("serialize bounds")
         .send()
@@ -93,6 +94,7 @@ async fn apply_wizard_preset_now(state: Rc<RefCell<AppState>>, preset: &str) -> 
         set_wizard_status("Could not change map size (network).");
         return false;
     };
+    handle_mutate_response(&state, &resp);
     if !resp.ok() {
         let msg = resp
             .text()
@@ -136,7 +138,7 @@ async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
         2 => 1,
         _ => 1,
     };
-    if !persist_build_draft(to).await {
+    if !persist_build_draft_for(&state, to).await {
         set_wizard_status("Could not go back.");
         return;
     }
@@ -562,7 +564,11 @@ async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
         variant: &layout_class,
         regenerate_nonce: nonce,
     };
-    let Ok(resp) = gloo_net::http::Request::post("/api/build/land-mask/generate")
+    let world_id = state.borrow().scoped_world_id.clone();
+    let Ok(resp) = scoped_request(
+        gloo_net::http::Request::post("/api/build/land-mask/generate"),
+        world_id.as_deref(),
+    )
         .json(&body)
         .expect("serialize wizard generate")
         .send()
@@ -643,7 +649,11 @@ async fn generate_wizard_geology(state: Rc<RefCell<AppState>>) {
         style: &style,
         regenerate_nonce: nonce,
     };
-    let Ok(resp) = gloo_net::http::Request::post("/api/build/geology/generate")
+    let world_id = state.borrow().scoped_world_id.clone();
+    let Ok(resp) = scoped_request(
+        gloo_net::http::Request::post("/api/build/geology/generate"),
+        world_id.as_deref(),
+    )
         .json(&body)
         .expect("serialize geology generate")
         .send()
@@ -679,7 +689,11 @@ async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
         style: &style,
         regenerate_nonce: nonce,
     };
-    let Ok(resp) = gloo_net::http::Request::post("/api/build/elevation/generate")
+    let world_id = state.borrow().scoped_world_id.clone();
+    let Ok(resp) = scoped_request(
+        gloo_net::http::Request::post("/api/build/elevation/generate"),
+        world_id.as_deref(),
+    )
         .json(&body)
         .expect("serialize elevation generate")
         .send()
@@ -710,7 +724,11 @@ async fn generate_wizard_climate(state: Rc<RefCell<AppState>>) {
         style: &style,
         regenerate_nonce: nonce,
     };
-    let Ok(resp) = gloo_net::http::Request::post("/api/build/climate/generate")
+    let world_id = state.borrow().scoped_world_id.clone();
+    let Ok(resp) = scoped_request(
+        gloo_net::http::Request::post("/api/build/climate/generate"),
+        world_id.as_deref(),
+    )
         .json(&body)
         .expect("serialize climate generate")
         .send()
@@ -805,6 +823,11 @@ pub(crate) fn schedule_wizard_stamp_flush(state: Rc<RefCell<AppState>>) {
 }
 
 async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
+    if state.borrow().wizard_stamp_autosave_blocked {
+        set_wizard_status("Land edit blocked — reload world to continue");
+        return;
+    }
+
     let (batch, need_retry) = {
         let mut s = state.borrow_mut();
         s.wizard_stamp_flush_scheduled = false;
@@ -838,7 +861,9 @@ async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
 
     set_wizard_status("Saving edit…");
     let mut failed: Vec<((i32, i32), bool)> = Vec::new();
-    for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
+    let mut stop_scheduling = false;
+
+    'chunks: for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
         let kinds: Vec<&'static str> = chunk
             .iter()
             .map(|(_, land)| if *land { "land" } else { "ocean" })
@@ -848,13 +873,51 @@ async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
             .zip(kinds.iter())
             .map(|(((q, r), _), kind)| WizardLandMaskCellInput { q: *q, r: *r, kind })
             .collect();
-        let sent = gloo_net::http::Request::put("/api/build/land-mask/cells")
+        let mut attempt = state.borrow().wizard_stamp_retry_attempts;
+
+        loop {
+            let sent = scoped_mutate_from_state(
+                &state,
+                gloo_net::http::Request::put("/api/build/land-mask/cells"),
+            )
             .json(&payload)
             .expect("serialize wizard land_mask batch")
             .send()
             .await;
-        if !matches!(sent, Ok(resp) if resp.ok()) {
-            failed.extend(chunk.iter().copied());
+            let kind = match &sent {
+                Err(_) => Some(MutateErrorKind::Network),
+                Ok(resp) if resp.ok() => {
+                    handle_mutate_response(&state, resp);
+                    None
+                }
+                Ok(resp) => Some(classify_http_status(resp.status())),
+            };
+            let action = wizard_stamp_flush_action(kind, attempt);
+            match action {
+                PaintFlushAction::Success => {
+                    state.borrow_mut().wizard_stamp_retry_attempts = 0;
+                    continue 'chunks;
+                }
+                PaintFlushAction::Retry {
+                    next_attempt,
+                    delay_ms,
+                } => {
+                    set_wizard_status(paint_stop_message(action));
+                    state.borrow_mut().wizard_stamp_retry_attempts = next_attempt;
+                    attempt = next_attempt;
+                    TimeoutFuture::new(delay_ms).await;
+                }
+                PaintFlushAction::StopConflict | PaintFlushAction::StopPermanent => {
+                    failed.extend(chunk.iter().copied());
+                    stop_scheduling = true;
+                    if matches!(action, PaintFlushAction::StopConflict) {
+                        state.borrow_mut().wizard_stamp_autosave_blocked = true;
+                    }
+                    set_wizard_status(paint_stop_message(action));
+                    break 'chunks;
+                }
+                PaintFlushAction::ReloadAndRebase => break 'chunks,
+            }
         }
     }
 
@@ -867,9 +930,11 @@ async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
     }
     if state.borrow().pending_wizard_stamps.is_empty() {
         set_wizard_status("Edit saved.");
-    } else {
-        set_wizard_status("Edit save failed — retrying…");
-        schedule_wizard_stamp_flush(state);
+    } else if !stop_scheduling {
+        let attempts = state.borrow().wizard_stamp_retry_attempts;
+        if attempts > 0 && attempts < crate::mutate_retry::MUTATE_MAX_RETRY_ATTEMPTS {
+            schedule_wizard_stamp_flush(state);
+        }
     }
 }
 
@@ -940,7 +1005,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             wasm_bindgen_futures::spawn_local(async move {
                 flush_pending_paints(state.clone()).await;
                 let step = state.borrow().wizard_step.max(2);
-                if persist_build_draft(step).await {
+                if persist_build_draft_for(&state, step).await {
                     set_wizard_status("Draft saved.");
                 } else {
                     set_wizard_status("Could not save draft.");
@@ -1005,7 +1070,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 if !apply_wizard_preset_if_needed(state.clone(), &preset, &pending).await {
                     return;
                 }
-                if !persist_build_draft(2).await {
+                if !persist_build_draft_for(&state, 2).await {
                     set_wizard_status("Could not advance to silhouette.");
                     return;
                 }
@@ -1256,7 +1321,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                if !persist_build_draft(3).await {
+                if !persist_build_draft_for(&state, 3).await {
                     set_wizard_status("Could not advance to tectonics.");
                     return;
                 }
@@ -1345,7 +1410,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             }
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                if !persist_build_draft(4).await {
+                if !persist_build_draft_for(&state, 4).await {
                     set_wizard_status("Could not advance to elevation.");
                     return;
                 }
@@ -1404,7 +1469,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         let closure = Closure::<dyn FnMut()>::new(move || {
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                if !persist_build_draft(5).await {
+                if !persist_build_draft_for(&state, 5).await {
                     set_wizard_status("Could not advance to climate.");
                     return;
                 }
@@ -1463,7 +1528,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         let closure = Closure::<dyn FnMut()>::new(move || {
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                if !persist_build_draft(6).await {
+                if !persist_build_draft_for(&state, 6).await {
                     set_wizard_status("Could not advance to water.");
                     return;
                 }
@@ -1547,7 +1612,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                     status: "complete",
                     step: 6,
                 };
-                let Ok(resp) = gloo_net::http::Request::put("/api/build")
+                let Ok(resp) = scoped_mutate_from_state(&state, gloo_net::http::Request::put("/api/build"))
                     .json(&body)
                     .expect("serialize build complete")
                     .send()
@@ -1556,6 +1621,7 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                     set_wizard_status("Could not finish build.");
                     return;
                 };
+                handle_mutate_response(&state, &resp);
                 if !resp.ok() {
                     set_wizard_status("Could not finish build.");
                     return;
@@ -1618,12 +1684,15 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
 }
 
 pub(crate) async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
+    if !ensure_pending_saved_or_discard(state.clone()).await {
+        return;
+    }
     if document()
         .get_element_by_id("editor")
         .is_some_and(|el| el.class_list().contains("wizard-active"))
     {
         let step = state.borrow().wizard_step.max(2);
-        let _ = persist_build_draft(step).await;
+        let _ = persist_build_draft_for(&state, step).await;
     }
     close_build_wizard();
     let _ = gloo_net::http::Request::post("/api/projects/close")
@@ -1640,7 +1709,15 @@ pub(crate) async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.paint_active = false;
     state_mut.paint_moved = false;
     state_mut.paint_last_cell = None;
+    state_mut.pending_paints.clear();
+    state_mut.paint_autosave_blocked = false;
+    state_mut.paint_retry_attempts = 0;
+    state_mut.paint_rebased_after_conflict = false;
+    state_mut.pending_wizard_stamps.clear();
+    state_mut.wizard_stamp_autosave_blocked = false;
+    state_mut.wizard_stamp_retry_attempts = 0;
     state_mut.show_grid = false;
+    state_mut.scoped_world_id = None;
     reset_view_on_world_open(&mut state_mut);
     state_mut.legacy_map = false;
     state_mut.wizard_accepted = false;

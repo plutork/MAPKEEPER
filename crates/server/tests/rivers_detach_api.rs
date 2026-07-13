@@ -6,7 +6,7 @@ use http_body_util::BodyExt;
 use mapkeeper_core::hex::MapBounds;
 use mapkeeper_core::hydro::SEA_LEVEL;
 use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue, MapManifest};
-use mapkeeper_server::{build_router, ServerConfig};
+use mapkeeper_server::{build_router, ServerConfig, WORLD_BASE_REVISION_HEADER};
 use tempfile::tempdir;
 use tower::ServiceExt;
 
@@ -37,12 +37,18 @@ fn seed_world(world: &std::path::Path) {
     std::fs::write(elevation_path, elevation.to_json_pretty().unwrap()).unwrap();
 }
 
-async fn pin_tributary(app: &axum::Router) -> (u32, u32) {
+fn manifest_revision(world: &std::path::Path) -> u64 {
+    let raw = std::fs::read_to_string(world.join("map/manifest.json")).unwrap();
+    MapManifest::from_json(&raw).unwrap().revision
+}
+
+async fn pin_tributary(app: &axum::Router, world: &std::path::Path) -> (u32, u32) {
     let stem = app
         .clone()
         .oneshot(
             Request::post("/api/rivers/pin")
                 .header("content-type", "application/json")
+                .header(WORLD_BASE_REVISION_HEADER, manifest_revision(world).to_string())
                 .body(Body::from(
                     r#"{"source_q":0,"source_r":0,"mouth_q":3,"mouth_r":0}"#,
                 ))
@@ -58,6 +64,7 @@ async fn pin_tributary(app: &axum::Router) -> (u32, u32) {
         .oneshot(
             Request::post("/api/rivers/pin")
                 .header("content-type", "application/json")
+                .header(WORLD_BASE_REVISION_HEADER, manifest_revision(world).to_string())
                 .body(Body::from(
                     r#"{"source_q":0,"source_r":1,"mouth_q":3,"mouth_r":0}"#,
                 ))
@@ -80,19 +87,20 @@ async fn detach_tributary_truncates_and_resets_parent() {
     seed_world(&world);
     let web_dist = tempdir().unwrap();
     let app = build_router(&ServerConfig {
-        world: Some(world),
+        world: Some(world.clone()),
         port: 0,
         web_dist: web_dist.path().to_path_buf(),
     })
     .unwrap();
 
-    let (stem_id, trib_id) = pin_tributary(&app).await;
+    let (stem_id, trib_id) = pin_tributary(&app, &world).await;
 
     let detach = app
         .clone()
         .oneshot(
             Request::post(format!("/api/rivers/{trib_id}/detach"))
                 .header("content-type", "application/json")
+                .header(WORLD_BASE_REVISION_HEADER, manifest_revision(&world).to_string())
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -136,6 +144,7 @@ async fn detach_rejected_when_hydrology_snapshot_active() {
         .oneshot(
             Request::post("/api/rivers/generate")
                 .header("content-type", "application/json")
+                .header(WORLD_BASE_REVISION_HEADER, manifest_revision(&world).to_string())
                 .body(Body::from(r#"{"river_density":"balanced"}"#))
                 .unwrap(),
         )
@@ -147,6 +156,7 @@ async fn detach_rejected_when_hydrology_snapshot_active() {
         .oneshot(
             Request::post("/api/rivers/1/detach")
                 .header("content-type", "application/json")
+                .header(WORLD_BASE_REVISION_HEADER, manifest_revision(&world).to_string())
                 .body(Body::empty())
                 .unwrap(),
         )

@@ -13,6 +13,10 @@ This is **not** a world lore repo. Worlds live outside this folder (default: `Do
 
 Human guide: [`docs/CURSOR-ALPHA.md`](docs/CURSOR-ALPHA.md).
 
+**External agents / API safety:** [`docs/OPS-INVARIANTS.md`](docs/OPS-INVARIANTS.md) — authoritative artifacts, bundles, invalidation, safe sequences (registry: `schemas/agent_ops_registry.json`).
+
+**Maintainer automation (headless):** `.\setup.ps1 -NonInteractive` · `.\scripts\check.ps1 -Smoke` · `.\scripts\smoke-headless.ps1` — no `Read-Host`; not part of daily `.\run.ps1`.
+
 ## Safety (must follow)
 
 - First time: prefer `.\setup.ps1`. Daily: `.\run.ps1` (no agent required). Optional: `.\update.ps1` for update-only.

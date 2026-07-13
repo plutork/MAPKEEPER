@@ -1,6 +1,10 @@
 # Local CI mirror before push (D-97 + codemap D-32 + global-audit Track A).
 # Parity with ci.yml except Windows-only mapkeeper-desktop build.
-# Usage: .\scripts\check.ps1
+# Usage: .\scripts\check.ps1 [-Smoke]
+param(
+    [switch]$Smoke
+)
+
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
@@ -44,7 +48,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [4/5] codemap drift..."
+Write-Host "check.ps1 [4/6] codemap drift..."
 python (Join-Path $Root "scripts\check_codemap_drift.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -54,7 +58,17 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [5/5] text encoding (mojibake + alpha ps1 ASCII)..."
+Write-Host "check.ps1 [5/6] ops invariants drift..."
+python (Join-Path $Root "scripts\check_ops_invariants_drift.py")
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Fix ops invariants drift:"
+    Write-Host "  python scripts/gen_ops_invariants.py"
+    Write-Host "  git add docs/OPS-INVARIANTS.md schemas/agent_ops_registry.json"
+    exit $LASTEXITCODE
+}
+
+Write-Host "check.ps1 [6/6] text encoding (mojibake + alpha ps1 ASCII)..."
 python (Join-Path $Root "scripts\check_text_encoding.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -63,5 +77,15 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1: OK (CI parity except desktop build)"
+if ($Smoke) {
+    Write-Host "check.ps1 [smoke] headless API smoke (opt-in)..."
+    powershell -File (Join-Path $Root "scripts\smoke-headless.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "Fix smoke: .\scripts\smoke-headless.ps1"
+        exit $LASTEXITCODE
+    }
+}
+
+Write-Host "check.ps1: OK (CI parity except desktop build)$(if ($Smoke) { ' + smoke' } else { '' })"
 exit 0

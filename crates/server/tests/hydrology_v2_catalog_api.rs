@@ -7,9 +7,14 @@ use mapkeeper_core::hex::MapBounds;
 use mapkeeper_core::hydro::SEA_LEVEL;
 use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue, MapManifest};
 use mapkeeper_core::rivers::RiverCatalog;
-use mapkeeper_server::{build_router, ServerConfig};
+use mapkeeper_server::{build_router, ServerConfig, WORLD_BASE_REVISION_HEADER};
 use tempfile::tempdir;
 use tower::ServiceExt;
+
+fn manifest_revision(world: &std::path::Path) -> u64 {
+    let raw = std::fs::read_to_string(world.join("map/manifest.json")).unwrap();
+    MapManifest::from_json(&raw).unwrap().revision
+}
 
 fn seed_world(world: &std::path::Path) {
     std::fs::write(
@@ -205,10 +210,13 @@ async fn double_river_generate_produces_identical_snapshot() {
 
     let post_generate = |nonce: u32| {
         let app = app.clone();
+        let world = world.clone();
         async move {
+            let revision = manifest_revision(&world);
             app.oneshot(
                 Request::post("/api/rivers/generate")
                     .header("content-type", "application/json")
+                    .header(WORLD_BASE_REVISION_HEADER, revision.to_string())
                     .body(Body::from(format!(
                         r#"{{"river_density":"balanced","regenerate_nonce":{nonce}}}"#
                     )))
@@ -314,6 +322,10 @@ async fn named_river_id_differs_from_physical_segment_id() {
         .oneshot(
             Request::post("/api/rivers/generate")
                 .header("content-type", "application/json")
+                .header(
+                    WORLD_BASE_REVISION_HEADER,
+                    manifest_revision(&world).to_string(),
+                )
                 .body(Body::from(r#"{"river_density":"balanced"}"#))
                 .unwrap(),
         )
@@ -335,6 +347,10 @@ async fn named_river_id_differs_from_physical_segment_id() {
         .oneshot(
             Request::post("/api/rivers/generate")
                 .header("content-type", "application/json")
+                .header(
+                    WORLD_BASE_REVISION_HEADER,
+                    manifest_revision(&world).to_string(),
+                )
                 .body(Body::from(r#"{"river_density":"balanced"}"#))
                 .unwrap(),
         )

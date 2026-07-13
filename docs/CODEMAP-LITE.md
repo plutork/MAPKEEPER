@@ -9,10 +9,10 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 ## Task -> first path
 
 - Core rules, ids, geometry, profile model -> `crates/core/src/`
-- **World generation pipeline (D-92)** — dependency order land → coast/plates → geology → elevation → climate → hydrology -> `crates/core/src/worldgen/`
+- **World generation pipeline (D-92)** — dependency order land → coast/plates → geology → elevation → climate → hydrology -> `crates/core/src/worldgen/` · normative index `docs/WORLD-GENERATION-PIPELINE.md`
 - Spatial contract (distance/ring/range/bounds) -> `crates/core/src/hex.rs`
 - Map size presets (Small/Medium/Large/Epic/Grand/World -> hex-rectangle 16:9 W×H; D-73 ladder Small~510…World~100k) -> `crates/core/src/map_preset.rs` (`map-preset--ladder-retune-500`)
-- Map state model (dense layers, unknown/none/value, manifest) -> `crates/core/src/layer.rs`
+- Map state model (dense layers, unknown/none/value, manifest; **`revision` coarse optimistic concurrency** — `docs/MAP-REVISION.md`) -> `crates/core/src/layer.rs`
 - Cell index (`(q,r) <-> linear index`, `MapBounds::index_of`/`from_index`/`len`) -> `crates/core/src/hex.rs`
 - Dense typed-layer model (index-addressed, palette categorical + integer; `read_or_empty`; generic wire `WireCellState`/`LayerCellWrite`) -> `crates/core/src/layer.rs` (`DenseLayer`)
 - Step-3 silhouette model (`land_mask`, six layout classes + growth-plan catalog, seeded layered land growth → cleanup, shore character, inland sea, elevation sync; UI: 6 class cards + recipe-only Regenerate below cards + always-visible gen identity line; Continents balance + Archipelago multi-island enforce, incl. `archipelago_twin_groups` anti-blob retune) -> `crates/core/src/worldgen/land/` (`types`, `catalog`, `generate`, `growth`, `enforce`, `util`, `tests`; D-104 track A split; legacy import `mapkeeper_core::land_mask`)
@@ -43,7 +43,11 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - **Hydrology regeneration contract (Variant A)** — topology deterministic from elevation + lakes + precip + channel policy; `effective_seed` derived from fingerprint+policy; `regenerate_nonce` ignored; API echoes `deterministic` + `input_fingerprint` -> `crates/core/src/worldgen/hydrology/snapshot.rs`, `diagnostics.rs`, `crates/server/src/rivers.rs`, `lakes.rs`, `web/api.rs`, `index.html` (`hydrology-regeneration-contract-v1`, D-101)
 - **Named river domain** — author `NamedRiverBinding` ids separate from `PhysicalSegment.id`; persisted in `map/named-rivers.json`; overlap rebind on regen; multi-segment binding; migration ambiguity in API/UI -> `crates/core/src/worldgen/hydrology/catalog.rs`, `server/world_io.rs`, `server/rivers.rs`, `web/api.rs`, `brush.rs`, `water_diag.rs` (`hydrology-named-river-domain-v1`, D-101)
 - HTTP API, world file I/O, launcher endpoints -> `crates/server/src/` (**D-96** complete: S0 `state`/`world_io`; S1 `projects.rs`; S2 `build.rs`; S3 `layers.rs`; S4 `rivers.rs`; `lib.rs` facade)
-- World-write reliability characterization (phase 1): HTTP harness `crates/server/tests/support/`; integration `world_write_characterization.rs`, `layers_batch_api.rs`; in-crate failpoints `world_write_characterization.rs` + `world_io` `SIMULATE_*` / `MAPKEEPER_FAILPOINT` -> agent-reliability concurrency track
+- World-write reliability characterization (phase 1): HTTP harness `crates/server/tests/support/`; integration `world_write_characterization.rs`, `layers_batch_api.rs`, `map_revision_api.rs`; in-crate failpoints `world_write_characterization.rs` + `world_io` `SIMULATE_*` / `MAPKEEPER_FAILPOINT` -> agent-reliability concurrency track
+- **Map revision optimistic concurrency (coarse world `revision`)** — `X-World-Base-Revision` / `X-World-Result-Revision`; 409 mismatch / 428 legacy; bump only after commit -> `crates/server/src/world_revision.rs`, `world_transaction.rs`, `world_io.rs`, handlers; web `map_revision` in `state.rs`/`api.rs`; contract `docs/MAP-REVISION.md` (`agent-reliability--map-revision`)
+- **Mutating op structured tracing** — request-level `tracing` middleware; `X-Request-Id` correlation; commit summary from `CommitReport`; `MAPKEEPER_LOG=json|text` -> `crates/server/src/op_log.rs`, `lib.rs` (`agent-reliability--mutating-op-log`)
+- **Agent operational contract** — machine-readable `schemas/agent_ops_registry.json`; human guide `docs/OPS-INVARIANTS.md` (generated tables + safe sequences); drift `scripts/check_ops_invariants_drift.py` (`agent-reliability--ops-invariants-doc`)
+- **DEV_AGENT_AUTOMATION headless** — `setup.ps1 -NonInteractive`, `scripts/smoke-headless.ps1`, `check.ps1 -Smoke` (opt-in); CI job `headless-smoke` (`agent-reliability--headless-agent-mode`)
 - Map/profile/layer endpoints (`GET /api/map`, profile `GET/PUT`, generic `/api/layers/*`) -> `crates/server/src/layers.rs` (D-96 S3)
 - River catalog API (`GET/PUT /api/rivers`, `POST /api/rivers/append`, `POST /api/rivers/:id/pop`, `POST /api/rivers/pin`, `POST /api/rivers/:id/detach`, `DELETE /api/rivers/:id`) + `river_id` sync -> `crates/server/src/rivers.rs` (`river-overlay-layer-v1`, D-96 S4; pin/detach D-55 tracks)
 - River generate API (`POST /api/rivers/generate` — replace-all; `{ river_density }`; `regenerate_nonce` ignored; `deterministic` + `input_fingerprint` in response; persists one v2 snapshot plus compatibility `river_id`) -> `crates/server/src/rivers.rs`, `world_io.rs` (D-101; `hydrology-regeneration-contract-v1`)
@@ -51,6 +55,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - CLI commands and query flow (`profile`, `terrain`, `elevation`, generic `layer <id>`) -> `crates/cli/src/`
 - Dense-on-disk layer I/O (`read_or_empty` + `write_dense_layer`) -> `crates/core/src/layer.rs`, `crates/server/src/world_io.rs`, `crates/cli/src/main.rs`
 - Web UI (WASM canvas, Home/Editor flow, tool dock + terrain brushes; elevation view palette/labels/peaks in `elevation_view.rs`) -> `crates/web/src/` (**D-94** split: `state.rs`, `dom.rs`, `api.rs`, `canvas.rs`, `brush.rs`, `wizard.rs`, `editor.rs`, `home.rs`; `lib.rs` = `start()` facade)
+- **Web mutate retry** — bounded backoff, network vs 409/500 classification, paint LWW rebase after conflict reload; `content_rev` ≠ `map_revision` -> `crates/web/src/mutate_retry.rs`, `api.rs` (`flush_pending_paints`, `ensure_pending_saved_or_discard`), `wizard.rs` (`agent-reliability--web-revision-retry`)
 - Rivers tool dock — **Generate rivers** always; legacy **Pin river** (2-click source→mouth) + **Detach tributary** + chain-click brush only when `read_only: false` (no v2 snapshot) -> `crates/web/index.html`, `crates/web/src/editor.rs`, `brush.rs`, `api.rs` (`rivers-detach-tributary-v1`, `rivers-pin-source-mouth-v1`; `hydrology-river-ui-truth-v1`; legacy path `river-overlay-layer-v1`)
 - Wizard/editor water generation UI (lake + river density presets, generate lakes/rivers, invalidation copy; lake overlay render) -> `crates/web/index.html`, `crates/web/src/wizard.rs`, `crates/web/src/editor.rs`, `crates/web/src/api.rs`, `crates/web/src/canvas.rs` (`hydrology-water-generation-ui-v1`; closes Phase 1)
 - Water gen dogfood diagnostics (snapshot + last action trace; wizard + editor) -> `crates/web/src/water_diag.rs`, `crates/web/src/api.rs` (`hydrology-dogfood-gen-diagnostics`)
@@ -97,7 +102,11 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Server rivers API: `crates/server/src/rivers.rs` (`/api/rivers/*`, generate — D-96 S4)
 - Server lakes API: `crates/server/src/lakes.rs` (`GET/PUT /api/lakes` — hydrology-lake-domain-v1)
 - Server hydrology diagnostics API: `crates/server/src/hydrology_diagnostics.rs` (`GET /api/hydrology/diagnostics` — D-101 baseline)
-- Server shared state: `crates/server/src/state.rs` (`AppState`, `ActiveWorld` — D-96 S0)
+- Server shared state: `crates/server/src/state.rs` (`AppState`, `ServerState`, `ActiveWorld` — D-96 S0)
+- **Per-world write lock** — `WorldLockManager` keyed by `world_id`; mutating handlers acquire guard before RMW -> `crates/server/src/world_lock.rs`, `resolve_mutate_and_guard` (agent-reliability--world-lock)
+- **Transactional world I/O** — `WorldMutationPlan` stage/commit/rollback for multi-file bundles -> `crates/server/src/world_transaction.rs`, `docs/WORLD-TRANSACTION-IO.md` (agent-reliability--transactional-io)
+- **World integrity checker** — pure `validate_world_integrity` in core; pre-commit hook on txn commit; `GET /api/integrity` + CLI -> `crates/core/src/integrity.rs`, `crates/server/src/integrity.rs`, `docs/INTEGRITY-CHECKER.md` (agent-reliability--integrity-checker)
+- **World-scoped API** — mutating routes resolve `X-World-Id` via `projects.json` registry; `active` UI fallback during migration -> `crates/server/src/world_scope.rs`, `docs/WORLD-SCOPE-API.md`, `crates/web/src/api.rs` (`scoped_world_id`, `scoped_request`; agent-reliability--world-scoped-api)
 - Server world/layer I/O helpers: `crates/server/src/world_io.rs` (manifest, bounds, projects path, dense layer read/write — D-96 S0)
 - Web boundary entry: `crates/web/src/lib.rs` (`start()` + wiring only; D-94 complete)
 - Web state/types/DTOs: `crates/web/src/state.rs` (D-94 B1)

@@ -22,6 +22,12 @@
         "height": { "type": "integer", "minimum": 1 }
       }
     },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Coarse world revision for optimistic concurrency (agent-reliability map-revision)."
+    },
     "layers": {
       "type": "array",
       "items": {

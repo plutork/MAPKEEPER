@@ -15,6 +15,7 @@ mod dom;
 mod editor;
 mod elevation_view;
 mod home;
+mod mutate_retry;
 mod state;
 mod water_diag;
 mod wizard;
@@ -104,10 +105,15 @@ pub fn start() {
         pending_paints: HashMap::new(),
         paint_flush_scheduled: false,
         paint_flush_in_flight: false,
+        paint_autosave_blocked: false,
+        paint_retry_attempts: 0,
+        paint_rebased_after_conflict: false,
         hover_cell: None,
         show_grid: false,
         suppress_next_click: false,
         legacy_map: false,
+        scoped_world_id: None,
+        map_revision: 0,
         default_worlds_root: None,
         path_touched: false,
         build_path_touched: false,
@@ -129,6 +135,8 @@ pub fn start() {
         pending_wizard_stamps: HashMap::new(),
         wizard_stamp_flush_scheduled: false,
         wizard_stamp_flush_in_flight: false,
+        wizard_stamp_retry_attempts: 0,
+        wizard_stamp_autosave_blocked: false,
         wizard_stamp_last_center: None,
         wizard_step: 1,
         wizard_geo_style: "belts".to_string(),

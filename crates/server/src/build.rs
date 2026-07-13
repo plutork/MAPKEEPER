@@ -1,10 +1,10 @@
 //! Build wizard API — draft state, bounds, pipeline generate steps (D-96 S2).
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::{Json, Router};
 use mapkeeper_core::build_state::{self, BUILD_STEP_SIZE};
@@ -21,8 +21,10 @@ use mapkeeper_core::layer::{DenseLayer, DenseState, LayerValue, ELEVATION_LAYER_
 use mapkeeper_core::map_preset::parse_map_preset;
 use serde::{Deserialize, Serialize};
 
-use crate::state::AppState;
+use crate::state::ServerState;
 use crate::world_io;
+use crate::world_lock;
+use crate::world_revision::{self, parse_base_revision};
 use crate::{bounds_response, MapBoundsResponse};
 
 #[derive(Deserialize)]
@@ -30,11 +32,15 @@ struct BuildStateInput {
     status: String,
     #[serde(default)]
     step: Option<u32>,
+    #[serde(default)]
+    base_revision: Option<u64>,
 }
 
 #[derive(Deserialize)]
 struct BuildBoundsInput {
     map_preset: String,
+    #[serde(default)]
+    base_revision: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -97,7 +103,7 @@ struct LandMaskCellInput {
     kind: String,
 }
 
-pub(crate) fn routes() -> Router<Arc<Mutex<AppState>>> {
+pub(crate) fn routes() -> Router<Arc<ServerState>> {
     Router::new()
         .route("/api/build", axum::routing::put(put_build_state))
         .route("/api/build/bounds", axum::routing::put(put_build_bounds))
@@ -124,67 +130,76 @@ pub(crate) fn routes() -> Router<Arc<Mutex<AppState>>> {
 }
 
 async fn put_build_state(
-    State(state): State<Arc<Mutex<AppState>>>,
+    State(server): State<Arc<ServerState>>,
+    headers: HeaderMap,
     Json(input): Json<BuildStateInput>,
 ) -> impl IntoResponse {
-    let world_path = {
-        let guard = state.lock().unwrap();
-        let Some(active) = guard.active.as_ref() else {
-            return (StatusCode::CONFLICT, "no active world").into_response();
-        };
-        active.path.clone()
+    let (world, _write) = match world_lock::resolve_mutate_and_guard(&server, &headers).await {
+        Ok(pair) => pair,
+        Err(err) => return err.into_response(),
     };
-    let result = match input.status.as_str() {
-        "draft" => {
-            let step = input.step.unwrap_or(BUILD_STEP_SIZE);
-            build_state::write_build_draft(&world_path, step)
+    let base_revision = parse_base_revision(&headers, input.base_revision);
+    match world_revision::mutate_map(&world.path, base_revision, || {
+        match input.status.as_str() {
+            "draft" => {
+                let step = input.step.unwrap_or(BUILD_STEP_SIZE);
+                build_state::write_build_draft(&world.path, step).map_err(|e| e.to_string())
+            }
+            "complete" => build_state::clear_build(&world.path).map_err(|e| e.to_string()),
+            _ => Err("status must be draft or complete".to_string()),
         }
-        "complete" => build_state::clear_build(&world_path),
-        _ => return (StatusCode::BAD_REQUEST, "status must be draft or complete").into_response(),
-    };
-    match result {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+    }) {
+        Ok(((), revision)) => world_revision::no_content_with_revision(revision).into_response(),
+        Err(err) => match err {
+            world_revision::RevisionMutationError::Internal(msg)
+                if msg == "status must be draft or complete" =>
+            {
+                (StatusCode::BAD_REQUEST, msg).into_response()
+            }
+            other => other.into_response(),
+        },
     }
 }
 
 async fn put_build_bounds(
-    State(state): State<Arc<Mutex<AppState>>>,
+    State(server): State<Arc<ServerState>>,
+    headers: HeaderMap,
     Json(input): Json<BuildBoundsInput>,
 ) -> impl IntoResponse {
-    let world_path = {
-        let guard = state.lock().unwrap();
-        let Some(active) = guard.active.as_ref() else {
-            return (StatusCode::CONFLICT, "no active world").into_response();
-        };
-        active.path.clone()
+    let (world, _write) = match world_lock::resolve_mutate_and_guard(&server, &headers).await {
+        Ok(pair) => pair,
+        Err(err) => return err.into_response(),
     };
     let Some(preset) = parse_map_preset(&input.map_preset) else {
         return (StatusCode::BAD_REQUEST, "unknown map_preset").into_response();
     };
-    let reset = world_io::pipeline_has_downstream(&world_path);
-    match world_io::reset_build_bounds(&world_path, preset) {
-        Ok(bounds) => Json(BuildBoundsResponse {
-            bounds: bounds_response(&bounds),
-            reset,
-        })
+    let reset = world_io::pipeline_has_downstream(&world.path);
+    let base_revision = parse_base_revision(&headers, input.base_revision);
+    match world_revision::mutate_map(&world.path, base_revision, || {
+        world_io::reset_build_bounds(&world.path, preset).map_err(|e| e.to_string())
+    }) {
+        Ok((bounds, revision)) => world_revision::json_with_revision(
+            BuildBoundsResponse {
+                bounds: bounds_response(&bounds),
+                reset,
+            },
+            revision,
+        )
         .into_response(),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+        Err(err) => err.into_response(),
     }
 }
 
 async fn generate_land_mask_handler(
-    State(state): State<Arc<Mutex<AppState>>>,
+    State(server): State<Arc<ServerState>>,
+    headers: HeaderMap,
     Json(input): Json<LandMaskGenerateInput>,
 ) -> impl IntoResponse {
-    let (world_path, world_id) = {
-        let guard = state.lock().unwrap();
-        let Some(active) = guard.active.as_ref() else {
-            return (StatusCode::CONFLICT, "no active world").into_response();
-        };
-        (active.path.clone(), active.id.clone())
+    let (world, _write) = match world_lock::resolve_mutate_and_guard(&server, &headers).await {
+        Ok(pair) => pair,
+        Err(err) => return err.into_response(),
     };
-    let bounds = world_io::map_bounds(&world_path);
+    let bounds = world_io::map_bounds(&world.path);
     let character = ShoreCharacter::parse(input.character.as_deref().unwrap_or("smooth"));
     let variant = input
         .variant
@@ -208,122 +223,126 @@ async fn generate_land_mask_handler(
         })
         .unwrap_or(LayoutClass::Pangea);
     let recipe_id = recipe.map(|r| r.id).unwrap_or("").to_string();
-    let seed = silhouette_seed(&world_id, style, character, variant, nonce, &recipe_id);
+    let seed = silhouette_seed(&world.id, style, character, variant, nonce, &recipe_id);
     let mask = if let Some(recipe) = recipe {
         generate_land_mask_recipe(&bounds, recipe, character, seed)
     } else {
         generate_land_mask(&bounds, style, character, seed)
     };
     let elevation = elevation_from_land_mask(&bounds, &mask);
-    if let Err(err) = world_io::persist_land_mask_bundle(&world_path, &mask, &elevation) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    let base_revision = parse_base_revision(&headers, None);
+    match world_io::persist_land_mask_bundle(&world.path, &mask, &elevation, base_revision) {
+        Ok(revision) => world_revision::json_with_revision(
+            LandMaskGenerateResponse {
+                seed,
+                recipe_id,
+                layout_class: style.id().to_string(),
+                character: match character {
+                    ShoreCharacter::Smooth => "smooth".to_string(),
+                    ShoreCharacter::Jagged => "jagged".to_string(),
+                },
+                regenerate_nonce: nonce,
+            },
+            revision,
+        )
+        .into_response(),
+        Err(err) => err.into_revision_response(),
     }
-    Json(LandMaskGenerateResponse {
-        seed,
-        recipe_id,
-        layout_class: style.id().to_string(),
-        character: match character {
-            ShoreCharacter::Smooth => "smooth".to_string(),
-            ShoreCharacter::Jagged => "jagged".to_string(),
-        },
-        regenerate_nonce: nonce,
-    })
-    .into_response()
 }
 
 async fn generate_geology_handler(
-    State(state): State<Arc<Mutex<AppState>>>,
+    State(server): State<Arc<ServerState>>,
+    headers: HeaderMap,
     Json(input): Json<GeologyGenerateInput>,
 ) -> impl IntoResponse {
-    let (world_path, world_id) = {
-        let guard = state.lock().unwrap();
-        let Some(active) = guard.active.as_ref() else {
-            return (StatusCode::CONFLICT, "no active world").into_response();
-        };
-        (active.path.clone(), active.id.clone())
+    let (world, _write) = match world_lock::resolve_mutate_and_guard(&server, &headers).await {
+        Ok(pair) => pair,
+        Err(err) => return err.into_response(),
     };
-    let bounds = world_io::map_bounds(&world_path);
-    let mask = world_io::read_dense_layer(&world_path, LAND_MASK_LAYER_ID, &bounds);
+    let bounds = world_io::map_bounds(&world.path);
+    let mask = world_io::read_dense_layer(&world.path, LAND_MASK_LAYER_ID, &bounds);
     let style = GeologyStyle::parse(input.style.as_deref().unwrap_or("belts"));
     let nonce = input.regenerate_nonce.unwrap_or(0) as u64;
-    let seed = geology_seed(&world_id, style, nonce);
+    let seed = geology_seed(&world.id, style, nonce);
     let geology = generate_geology(&bounds, &mask, style, seed);
-    if let Err(err) = world_io::write_dense_layer(&world_path, &geology) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    let base_revision = parse_base_revision(&headers, None);
+    match world_revision::mutate_map(&world.path, base_revision, || {
+        world_io::write_dense_layer(&world.path, &geology)
+    }) {
+        Ok(((), revision)) => world_revision::no_content_with_revision(revision).into_response(),
+        Err(err) => err.into_response(),
     }
-    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn generate_elevation_handler(
-    State(state): State<Arc<Mutex<AppState>>>,
+    State(server): State<Arc<ServerState>>,
+    headers: HeaderMap,
     Json(input): Json<ElevationGenerateInput>,
 ) -> impl IntoResponse {
-    let (world_path, world_id) = {
-        let guard = state.lock().unwrap();
-        let Some(active) = guard.active.as_ref() else {
-            return (StatusCode::CONFLICT, "no active world").into_response();
-        };
-        (active.path.clone(), active.id.clone())
+    let (world, _write) = match world_lock::resolve_mutate_and_guard(&server, &headers).await {
+        Ok(pair) => pair,
+        Err(err) => return err.into_response(),
     };
-    let bounds = world_io::map_bounds(&world_path);
-    let mask = world_io::read_dense_layer(&world_path, LAND_MASK_LAYER_ID, &bounds);
-    let geology = world_io::read_dense_layer(&world_path, GEOLOGY_LAYER_ID, &bounds);
+    let bounds = world_io::map_bounds(&world.path);
+    let mask = world_io::read_dense_layer(&world.path, LAND_MASK_LAYER_ID, &bounds);
+    let geology = world_io::read_dense_layer(&world.path, GEOLOGY_LAYER_ID, &bounds);
     let nonce = input.regenerate_nonce.unwrap_or(0) as u64;
     let intensity = ElevationIntensity::parse(input.style.as_deref().unwrap_or("standard"));
-    let seed = elevation_seed(&world_id, intensity, nonce);
+    let seed = elevation_seed(&world.id, intensity, nonce);
     let elevation = elevation_from_land_mask_and_geology(&bounds, &mask, &geology, seed, intensity);
-    if let Err(err) = world_io::write_dense_layer(&world_path, &elevation) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    let base_revision = parse_base_revision(&headers, None);
+    match world_revision::mutate_map(&world.path, base_revision, || {
+        world_io::write_dense_layer(&world.path, &elevation)
+    }) {
+        Ok(((), revision)) => world_revision::no_content_with_revision(revision).into_response(),
+        Err(err) => err.into_response(),
     }
-    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn generate_climate_handler(
-    State(state): State<Arc<Mutex<AppState>>>,
+    State(server): State<Arc<ServerState>>,
+    headers: HeaderMap,
     Json(input): Json<ClimateGenerateInput>,
 ) -> impl IntoResponse {
-    let (world_path, world_id) = {
-        let guard = state.lock().unwrap();
-        let Some(active) = guard.active.as_ref() else {
-            return (StatusCode::CONFLICT, "no active world").into_response();
-        };
-        (active.path.clone(), active.id.clone())
+    let (world, _write) = match world_lock::resolve_mutate_and_guard(&server, &headers).await {
+        Ok(pair) => pair,
+        Err(err) => return err.into_response(),
     };
-    let bounds = world_io::map_bounds(&world_path);
-    let mask = world_io::read_dense_layer(&world_path, LAND_MASK_LAYER_ID, &bounds);
-    let elevation = world_io::read_dense_layer(&world_path, ELEVATION_LAYER_ID, &bounds);
+    let bounds = world_io::map_bounds(&world.path);
+    let mask = world_io::read_dense_layer(&world.path, LAND_MASK_LAYER_ID, &bounds);
+    let elevation = world_io::read_dense_layer(&world.path, ELEVATION_LAYER_ID, &bounds);
     let style = PrecipitationStyle::parse(input.style.as_deref().unwrap_or("balanced"));
     let nonce = input.regenerate_nonce.unwrap_or(0) as u64;
-    let seed = climate_seed(&world_id, style, nonce);
+    let seed = climate_seed(&world.id, style, nonce);
     let layers = generate_climate_layers(&bounds, &mask, &elevation, style, seed);
-    if let Err(err) = world_io::persist_climate_layers_bundle(
-        &world_path,
+    let base_revision = parse_base_revision(&headers, None);
+    match world_io::persist_climate_layers_bundle(
+        &world.path,
         &layers.temperature,
         &layers.precipitation,
         &layers.ice,
+        base_revision,
     ) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+        Ok(revision) => world_revision::no_content_with_revision(revision).into_response(),
+        Err(err) => err.into_revision_response(),
     }
-    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn put_land_mask_cells(
-    State(state): State<Arc<Mutex<AppState>>>,
+    State(server): State<Arc<ServerState>>,
+    headers: HeaderMap,
     Json(cells): Json<Vec<LandMaskCellInput>>,
 ) -> impl IntoResponse {
     if cells.is_empty() {
         return StatusCode::NO_CONTENT.into_response();
     }
-    let world_path = {
-        let guard = state.lock().unwrap();
-        let Some(active) = guard.active.as_ref() else {
-            return (StatusCode::CONFLICT, "no active world").into_response();
-        };
-        active.path.clone()
+    let (world, _write) = match world_lock::resolve_mutate_and_guard(&server, &headers).await {
+        Ok(pair) => pair,
+        Err(err) => return err.into_response(),
     };
-    let bounds = world_io::map_bounds(&world_path);
-    let mut mask = world_io::read_dense_layer(&world_path, LAND_MASK_LAYER_ID, &bounds);
-    let mut elevation = world_io::read_dense_layer(&world_path, "elevation", &bounds);
+    let bounds = world_io::map_bounds(&world.path);
+    let mut mask = world_io::read_dense_layer(&world.path, LAND_MASK_LAYER_ID, &bounds);
+    let mut elevation = world_io::read_dense_layer(&world.path, "elevation", &bounds);
     for cell in cells {
         let Some(index) = bounds.index_of(Axial::new(cell.q, cell.r)) else {
             continue;
@@ -333,10 +352,11 @@ async fn put_land_mask_cells(
         let elev = if kind == LAND_MASK_LAND { 1 } else { 0 };
         elevation.set(index, DenseState::Value(LayerValue::Int(elev)));
     }
-    if let Err(err) = world_io::persist_land_mask_bundle(&world_path, &mask, &elevation) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response();
+    let base_revision = parse_base_revision(&headers, None);
+    match world_io::persist_land_mask_bundle(&world.path, &mask, &elevation, base_revision) {
+        Ok(revision) => world_revision::no_content_with_revision(revision).into_response(),
+        Err(err) => err.into_revision_response(),
     }
-    StatusCode::NO_CONTENT.into_response()
 }
 
 fn geology_seed(world_id: &str, style: GeologyStyle, regenerate_nonce: u64) -> u64 {

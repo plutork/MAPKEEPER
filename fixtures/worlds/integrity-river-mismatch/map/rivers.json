@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "rivers": [
+    {
+      "id": 1,
+      "cells": [5]
+    }
+  ],
+  "next_id": 2
+}

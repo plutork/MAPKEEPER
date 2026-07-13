@@ -18,18 +18,39 @@
 
 mod build;
 mod hydrology_diagnostics;
+mod integrity;
 mod lakes;
 mod layers;
+mod op_log;
 mod projects;
 mod rivers;
 mod state;
+mod world_lock;
+mod world_revision;
+mod world_scope;
 #[cfg(test)]
 mod world_write_characterization;
 pub mod world_io;
+pub mod world_transaction;
+pub use integrity::audit_world_integrity;
+pub use op_log::REQUEST_ID_HEADER;
+pub use world_revision::{WORLD_BASE_REVISION_HEADER, WORLD_RESULT_REVISION_HEADER};
+pub use world_scope::WORLD_ID_HEADER;
+
+/// Initialize tracing subscriber (`MAPKEEPER_LOG=json|text`, `RUST_LOG`).
+pub fn init_tracing() {
+    op_log::init_tracing();
+}
+
+/// Serializes integration tests that set process-wide `MAPKEEPER_FAILPOINT`.
+#[doc(hidden)]
+pub fn failpoint_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    world_io::failpoint_lock()
+}
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::Result;
 use axum::Router;
@@ -38,7 +59,8 @@ use mapkeeper_core::map_preset::rect_cell_count;
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 
-use state::{ActiveWorld, AppState};
+use state::{ActiveWorld, ServerState};
+use world_transaction::recover_all_registered_worlds;
 
 pub struct ServerConfig {
     pub world: Option<PathBuf>,
@@ -64,6 +86,8 @@ pub(crate) fn bounds_response(bounds: &MapBounds) -> MapBoundsResponse {
 }
 
 pub fn build_router(config: &ServerConfig) -> Result<Router> {
+    op_log::init_tracing();
+    recover_all_registered_worlds().map_err(|e| anyhow::anyhow!(e))?;
     let active = match &config.world {
         Some(world_path) => {
             let id = world_io::read_manifest_id(world_path)?;
@@ -74,15 +98,17 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
         }
         None => None,
     };
-    let state = Arc::new(Mutex::new(AppState { active }));
+    let state = Arc::new(ServerState::new(active));
 
     Ok(projects::routes()
         .merge(build::routes())
         .merge(hydrology_diagnostics::routes())
+        .merge(integrity::routes())
         .merge(layers::routes())
         .merge(rivers::routes())
         .merge(lakes::routes())
         .with_state(state)
+        .layer(axum::middleware::from_fn(op_log::mutate_op_middleware))
         .fallback_service(ServeDir::new(&config.web_dist)))
 }
 
@@ -94,6 +120,7 @@ pub async fn bind(config: ServerConfig) -> Result<(TcpListener, Router)> {
 }
 
 pub async fn run(config: ServerConfig) -> Result<()> {
+    init_tracing();
     let world = config.world.clone();
     let (listener, app) = bind(config).await?;
     let addr = listener.local_addr()?;

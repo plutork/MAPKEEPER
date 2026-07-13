@@ -7,7 +7,8 @@ use std::rc::Rc;
 use mapkeeper_core::build_state::BUILD_STEP_WATER;
 
 use crate::api::{
-    load_elevation, load_geology, load_map, load_rivers, persist_build_draft, refresh_projects,
+    ensure_pending_saved_or_discard, load_elevation, load_geology, load_map, load_rivers,
+    persist_build_draft_for, refresh_projects,
 };
 use crate::canvas::schedule_redraw;
 use crate::dom::{
@@ -363,7 +364,7 @@ pub fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
                         sync_preset_size_warning("wiz-preset", "wiz-preset-warn");
                         sync_wizard_actions(&s);
                     }
-                    let _ = persist_build_draft(1).await;
+                    let _ = persist_build_draft_for(&state, 1).await;
                     set_wizard_status("Confirm map size on the blank grid, then continue.");
                     schedule_redraw(state.clone());
                 }
@@ -630,6 +631,10 @@ pub fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
             let state = state.clone();
             set_text("home-status", "Opening…");
             wasm_bindgen_futures::spawn_local(async move {
+                if !ensure_pending_saved_or_discard(state.clone()).await {
+                    set_text("home-status", "");
+                    return;
+                }
                 let body = OpenProjectInput { path: &path };
                 let sent = gloo_net::http::Request::post("/api/projects/open").json(&body);
                 let sent = match sent {

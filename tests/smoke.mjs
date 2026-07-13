@@ -3,16 +3,17 @@
 // skill / README).
 //
 // Usage: node smoke.mjs [serverUrl] [worldId] [worldPath]
-// Assumes the server was started WITHOUT --world (launcher mode) so the
-// Home screen is the entry point; creates a fresh world through the web
-// wizard, paints one hex, then switches back to Home to confirm the list.
+// Headless: default on (explicit). Set SMOKE_HEADED=1 for local headed debug.
+// Env: SMOKE_HEADLESS=1 (default behavior), SMOKE_HEADED=1 to show browser window.
 import { chromium } from "playwright";
 
 const url = process.argv[2] ?? "http://127.0.0.1:4100";
 const worldId = process.argv[3] ?? "smoke-world";
 const worldPath = process.argv[4] ?? "C:\\projects\\smoke-world";
 
-const browser = await chromium.launch();
+const headless = process.env.SMOKE_HEADED !== "1";
+
+const browser = await chromium.launch({ headless });
 const page = await browser.newPage();
 const consoleErrors = [];
 page.on("console", (msg) => {

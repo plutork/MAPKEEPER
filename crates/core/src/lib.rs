@@ -5,6 +5,7 @@ pub mod build_state;
 pub mod cell_id;
 pub mod hex;
 pub mod hydro;
+pub mod integrity;
 pub mod lakes;
 pub mod layer;
 pub mod map_preset;

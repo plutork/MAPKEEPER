@@ -75,6 +75,11 @@ enum Command {
         #[command(subcommand)]
         action: LakesAction,
     },
+    /// World integrity audit (agent-reliability integrity-checker).
+    Integrity {
+        #[command(subcommand)]
+        action: IntegrityAction,
+    },
 }
 
 #[derive(Args)]
@@ -275,6 +280,15 @@ enum LakesAction {
     },
 }
 
+#[derive(Subcommand)]
+enum IntegrityAction {
+    /// Audit world files and emit a machine-readable IntegrityReport JSON.
+    Check {
+        #[arg(long, default_value = ".")]
+        world: PathBuf,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -345,6 +359,9 @@ fn main() -> Result<()> {
                 density,
                 seed,
             } => cmd_lakes_generate(&world, &density, seed),
+        },
+        Command::Integrity { action } => match action {
+            IntegrityAction::Check { world } => cmd_integrity_check(&world),
         },
     }
 }
@@ -864,9 +881,24 @@ fn cmd_lakes_generate(world: &Path, density: &str, seed: u64) -> Result<()> {
         density,
         seed,
     );
-    world_io::persist_lake_generation(world, &catalog, &bounds)
-        .map_err(|err| anyhow::anyhow!(err))?;
+    world_io::persist_lake_generation(world, &catalog, &bounds, None)
+        .map_err(|err| match err {
+            mapkeeper_server::world_transaction::CommitError::Op(s) => anyhow::anyhow!(s),
+            mapkeeper_server::world_transaction::CommitError::Revision(_) => {
+                anyhow::anyhow!("world revision conflict")
+            }
+        })?;
     eprintln!("lakes generate: cleared rivers (lake regen invalidation)");
     println!("{}", catalog.to_json_pretty()?);
+    Ok(())
+}
+
+fn cmd_integrity_check(world: &Path) -> Result<()> {
+    let report = mapkeeper_server::audit_world_integrity(world)
+        .map_err(|err| anyhow::anyhow!(err))?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    if report.has_errors() {
+        std::process::exit(1);
+    }
     Ok(())
 }

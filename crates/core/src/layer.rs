@@ -65,6 +65,9 @@ pub struct LayerRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MapManifest {
     pub schema_version: u32,
+    /// Coarse optimistic-concurrency token (agent-reliability map-revision).
+    #[serde(default)]
+    pub revision: u64,
     pub bounds: Bounds,
     #[serde(default)]
     pub layers: Vec<LayerRef>,
@@ -75,6 +78,7 @@ impl MapManifest {
     pub fn default_v0(width: i32, height: i32) -> Self {
         Self {
             schema_version: CURRENT_SCHEMA_VERSION,
+            revision: 0,
             bounds: Bounds::HexRectangle {
                 width: width.max(1),
                 height: height.max(1),

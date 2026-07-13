@@ -1,0 +1,529 @@
+{
+  "schema_version": 1,
+  "artifacts": {
+    "authoritative": [
+      {
+        "id": "world_manifest",
+        "path": "mapkeeper.toml",
+        "role": "World identity, optional [build] draft"
+      },
+      {
+        "id": "map_manifest",
+        "path": "map/manifest.json",
+        "role": "Bounds, layer index, coarse revision"
+      },
+      {
+        "id": "dense_layer",
+        "path": "map/layers/{layer_id}.json",
+        "role": "Authoritative dense layer payload"
+      },
+      {
+        "id": "rivers_catalog",
+        "path": "map/rivers.json",
+        "role": "Legacy/manual river catalog"
+      },
+      {
+        "id": "lakes_catalog",
+        "path": "map/lakes.json",
+        "role": "Lake catalog"
+      },
+      {
+        "id": "named_rivers",
+        "path": "map/named-rivers.json",
+        "role": "Author-named river bindings to hydrology segments"
+      },
+      {
+        "id": "hydrology_snapshot",
+        "path": "map/hydrology-v2.json",
+        "role": "Hydrology v2 snapshot (derived inputs fingerprinted)"
+      },
+      {
+        "id": "cell_profile",
+        "path": "profiles/{cell_id}.json",
+        "role": "Per-cell author profile (display_name, notes)"
+      }
+    ],
+    "derived": [
+      {
+        "id": "river_id_layer",
+        "path": "map/layers/river_id.json",
+        "source": "rivers_catalog",
+        "role": "Dense projection of river catalog or hydrology activation"
+      },
+      {
+        "id": "lake_id_layer",
+        "path": "map/layers/lake_id.json",
+        "source": "lakes_catalog",
+        "role": "Dense projection of lake catalog"
+      },
+      {
+        "id": "hydrology_render",
+        "path": "map/hydrology-v2.json",
+        "source": "elevation,lakes,precip,land_mask",
+        "role": "Channel graph + segments (invalidated when base inputs change)"
+      }
+    ],
+    "server_registry": [
+      {
+        "id": "projects_registry",
+        "path": "server:projects.json",
+        "role": "Launcher registry (not inside world folder)"
+      }
+    ]
+  },
+  "bundles": [
+    {
+      "id": "project_create",
+      "writes": ["mapkeeper.toml", "map/manifest.json", "map/layers/elevation.json"],
+      "txn": "direct"
+    },
+    {
+      "id": "registry_entry",
+      "writes": ["server:projects.json"],
+      "txn": "direct"
+    },
+    {
+      "id": "build_draft",
+      "writes": ["mapkeeper.toml"],
+      "txn": "mutate_map"
+    },
+    {
+      "id": "build_bounds_reset",
+      "writes": ["map/manifest.json", "map/layers/*"],
+      "txn": "mutate_map"
+    },
+    {
+      "id": "land_mask_bundle",
+      "writes": ["map/layers/land_mask.json", "map/layers/elevation.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "txn": "world_transaction"
+    },
+    {
+      "id": "geology_layer",
+      "writes": ["map/layers/geology.json"],
+      "txn": "mutate_map"
+    },
+    {
+      "id": "elevation_layer",
+      "writes": ["map/layers/elevation.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "txn": "mutate_map"
+    },
+    {
+      "id": "climate_bundle",
+      "writes": [
+        "map/layers/temperature.json",
+        "map/layers/precipitation.json",
+        "map/layers/ice.json"
+      ],
+      "invalidates": ["hydrology_snapshot"],
+      "txn": "world_transaction"
+    },
+    {
+      "id": "single_dense_layer",
+      "writes": ["map/layers/{layer_id}.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "txn": "mutate_map"
+    },
+    {
+      "id": "cell_profile",
+      "writes": ["profiles/{cell_id}.json"],
+      "txn": "mutate_map"
+    },
+    {
+      "id": "rivers_catalog_layer",
+      "writes": ["map/rivers.json", "map/layers/river_id.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "txn": "world_transaction"
+    },
+    {
+      "id": "lakes_catalog_layer",
+      "writes": ["map/lakes.json", "map/layers/lake_id.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "txn": "world_transaction"
+    },
+    {
+      "id": "lake_generation",
+      "writes": [
+        "map/lakes.json",
+        "map/layers/lake_id.json",
+        "map/rivers.json",
+        "map/layers/river_id.json"
+      ],
+      "deletes": ["map/hydrology-v2.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "txn": "world_transaction"
+    },
+    {
+      "id": "hydrology_activate",
+      "writes": ["map/hydrology-v2.json", "map/layers/river_id.json"],
+      "txn": "rename_chain"
+    },
+    {
+      "id": "legacy_river_edit",
+      "writes": ["map/rivers.json", "map/layers/river_id.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "txn": "mutate_map"
+    }
+  ],
+  "invalidation_graph": [
+    {
+      "trigger": "land_mask_bundle",
+      "invalidates": ["hydrology_snapshot"]
+    },
+    {
+      "trigger": "elevation_layer",
+      "invalidates": ["hydrology_snapshot"]
+    },
+    {
+      "trigger": "climate_bundle",
+      "invalidates": ["hydrology_snapshot"]
+    },
+    {
+      "trigger": "single_dense_layer",
+      "when": "layer_id in land_mask,elevation,lake_id,precipitation",
+      "invalidates": ["hydrology_snapshot"]
+    },
+    {
+      "trigger": "rivers_catalog_layer",
+      "invalidates": ["hydrology_snapshot"]
+    },
+    {
+      "trigger": "lakes_catalog_layer",
+      "invalidates": ["hydrology_snapshot"]
+    },
+    {
+      "trigger": "lake_generation",
+      "invalidates": ["hydrology_snapshot", "rivers_catalog"]
+    },
+    {
+      "trigger": "legacy_river_edit",
+      "invalidates": ["hydrology_snapshot"]
+    }
+  ],
+  "conflict_groups": [
+    {
+      "id": "per_world_map_write",
+      "scope": "world_mutate",
+      "rule": "All operations in this group serialize on the same world_id (WorldWriteGuard)."
+    }
+  ],
+  "operations": [
+    {
+      "operation_id": "post.projects",
+      "method": "POST",
+      "path": "/api/projects",
+      "scope": "registry",
+      "base_revision": "never",
+      "bundle": "project_create",
+      "reads": [],
+      "writes": ["mapkeeper.toml", "map/manifest.json", "map/layers/elevation.json", "server:projects.json"],
+      "conflicts_with": ["per_world_map_write"],
+      "notes": "Creates world folder; initial revision 0"
+    },
+    {
+      "operation_id": "post.projects.open",
+      "method": "POST",
+      "path": "/api/projects/open",
+      "scope": "registry",
+      "base_revision": "never",
+      "bundle": "registry_entry",
+      "reads": ["server:projects.json"],
+      "writes": ["server:projects.json"],
+      "conflicts_with": []
+    },
+    {
+      "operation_id": "post.projects.forget",
+      "method": "POST",
+      "path": "/api/projects/forget",
+      "scope": "registry",
+      "base_revision": "never",
+      "bundle": "registry_entry",
+      "reads": ["server:projects.json"],
+      "writes": ["server:projects.json"],
+      "conflicts_with": []
+    },
+    {
+      "operation_id": "post.projects.delete",
+      "method": "POST",
+      "path": "/api/projects/delete",
+      "scope": "registry",
+      "base_revision": "never",
+      "bundle": "registry_entry",
+      "reads": ["server:projects.json"],
+      "writes": ["server:projects.json"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "post.projects.close",
+      "method": "POST",
+      "path": "/api/projects/close",
+      "scope": "registry",
+      "base_revision": "never",
+      "bundle": "registry_entry",
+      "reads": ["server:projects.json"],
+      "writes": ["server:projects.json"],
+      "conflicts_with": []
+    },
+    {
+      "operation_id": "post.fixture_worlds.open",
+      "method": "POST",
+      "path": "/api/fixture-worlds/open",
+      "scope": "registry",
+      "base_revision": "never",
+      "bundle": "registry_entry",
+      "reads": ["server:projects.json"],
+      "writes": ["server:projects.json"],
+      "conflicts_with": []
+    },
+    {
+      "operation_id": "put.build.state",
+      "method": "PUT",
+      "path": "/api/build",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "build_draft",
+      "reads": ["mapkeeper.toml"],
+      "writes": ["mapkeeper.toml"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "put.build.bounds",
+      "method": "PUT",
+      "path": "/api/build/bounds",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "build_bounds_reset",
+      "reads": ["map/manifest.json", "map/layers/*"],
+      "writes": ["map/manifest.json", "map/layers/*"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "post.build.land_mask.generate",
+      "method": "POST",
+      "path": "/api/build/land-mask/generate",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "land_mask_bundle",
+      "reads": ["map/manifest.json"],
+      "writes": ["map/layers/land_mask.json", "map/layers/elevation.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "put.build.land_mask.cells",
+      "method": "PUT",
+      "path": "/api/build/land-mask/cells",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "land_mask_bundle",
+      "reads": ["map/layers/land_mask.json", "map/layers/elevation.json"],
+      "writes": ["map/layers/land_mask.json", "map/layers/elevation.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "post.build.geology.generate",
+      "method": "POST",
+      "path": "/api/build/geology/generate",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "geology_layer",
+      "reads": ["map/manifest.json", "map/layers/land_mask.json"],
+      "writes": ["map/layers/geology.json"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "post.build.elevation.generate",
+      "method": "POST",
+      "path": "/api/build/elevation/generate",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "elevation_layer",
+      "reads": ["map/layers/land_mask.json", "map/layers/geology.json"],
+      "writes": ["map/layers/elevation.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "post.build.climate.generate",
+      "method": "POST",
+      "path": "/api/build/climate/generate",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "climate_bundle",
+      "reads": ["map/layers/elevation.json", "map/layers/land_mask.json"],
+      "writes": [
+        "map/layers/temperature.json",
+        "map/layers/precipitation.json",
+        "map/layers/ice.json"
+      ],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "put.cells.profile",
+      "method": "PUT",
+      "path": "/api/cells/:q/:r/profile",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "cell_profile",
+      "reads": ["profiles/{cell_id}.json"],
+      "writes": ["profiles/{cell_id}.json"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "put.layers.batch",
+      "method": "PUT",
+      "path": "/api/layers/:id/batch",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "single_dense_layer",
+      "reads": ["map/layers/{layer_id}.json", "map/manifest.json"],
+      "writes": ["map/layers/{layer_id}.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "put.layers.cell",
+      "method": "PUT",
+      "path": "/api/layers/:id/cells/:q/:r",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "single_dense_layer",
+      "reads": ["map/layers/{layer_id}.json"],
+      "writes": ["map/layers/{layer_id}.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "put.rivers",
+      "method": "PUT",
+      "path": "/api/rivers",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "rivers_catalog_layer",
+      "reads": ["map/rivers.json", "map/manifest.json"],
+      "writes": ["map/rivers.json", "map/layers/river_id.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "post.rivers.pin",
+      "method": "POST",
+      "path": "/api/rivers/pin",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "legacy_river_edit",
+      "reads": ["map/rivers.json", "map/layers/elevation.json"],
+      "writes": ["map/rivers.json", "map/layers/river_id.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"],
+      "notes": "Rejected when hydrology snapshot active (409)"
+    },
+    {
+      "operation_id": "post.rivers.detach",
+      "method": "POST",
+      "path": "/api/rivers/:id/detach",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "legacy_river_edit",
+      "reads": ["map/rivers.json"],
+      "writes": ["map/rivers.json", "map/layers/river_id.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"],
+      "notes": "Rejected when hydrology snapshot active (409)"
+    },
+    {
+      "operation_id": "post.rivers.append",
+      "method": "POST",
+      "path": "/api/rivers/append",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "legacy_river_edit",
+      "reads": ["map/rivers.json"],
+      "writes": ["map/rivers.json", "map/layers/river_id.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "post.rivers.pop",
+      "method": "POST",
+      "path": "/api/rivers/:id/pop",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "legacy_river_edit",
+      "reads": ["map/rivers.json"],
+      "writes": ["map/rivers.json", "map/layers/river_id.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "delete.rivers.id",
+      "method": "DELETE",
+      "path": "/api/rivers/:id",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "legacy_river_edit",
+      "reads": ["map/rivers.json"],
+      "writes": ["map/rivers.json", "map/layers/river_id.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "post.rivers.generate",
+      "method": "POST",
+      "path": "/api/rivers/generate",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "hydrology_activate",
+      "reads": [
+        "map/layers/elevation.json",
+        "map/layers/lake_id.json",
+        "map/layers/precipitation.json",
+        "map/layers/land_mask.json"
+      ],
+      "writes": ["map/hydrology-v2.json", "map/layers/river_id.json"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "put.lakes",
+      "method": "PUT",
+      "path": "/api/lakes",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "lakes_catalog_layer",
+      "reads": ["map/lakes.json", "map/manifest.json"],
+      "writes": ["map/lakes.json", "map/layers/lake_id.json"],
+      "invalidates": ["hydrology_snapshot"],
+      "conflicts_with": ["per_world_map_write"]
+    },
+    {
+      "operation_id": "post.lakes.generate",
+      "method": "POST",
+      "path": "/api/lakes/generate",
+      "scope": "world_mutate",
+      "base_revision": "required_after_first_bump",
+      "bundle": "lake_generation",
+      "reads": ["map/layers/elevation.json", "map/layers/precipitation.json"],
+      "writes": [
+        "map/lakes.json",
+        "map/layers/lake_id.json",
+        "map/rivers.json",
+        "map/layers/river_id.json"
+      ],
+      "deletes": ["map/hydrology-v2.json"],
+      "invalidates": ["hydrology_snapshot", "rivers_catalog"],
+      "conflicts_with": ["per_world_map_write"]
+    }
+  ],
+  "doc_references": [
+    "docs/MAP-REVISION.md",
+    "docs/WORLD-SCOPE-API.md",
+    "docs/WORLD-TRANSACTION-IO.md",
+    "docs/INTEGRITY-CHECKER.md",
+    "crates/server/src/world_transaction.rs",
+    "crates/server/src/world_io.rs",
+    "crates/server/src/op_log.rs"
+  ]
+}

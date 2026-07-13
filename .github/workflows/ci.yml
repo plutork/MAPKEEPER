@@ -56,8 +56,25 @@ jobs:
         run: git diff --exit-code docs/CODEMAP.md
       - name: Check CODEMAP-LITE stale paths
         run: python scripts/check_codemap_drift.py
+      - name: Check OPS-INVARIANTS registry drift
+        run: python scripts/check_ops_invariants_drift.py
       - name: Check text encoding (mojibake + alpha ps1 ASCII)
         run: python scripts/check_text_encoding.py
+
+  headless-smoke:
+    name: Headless API smoke (fixture world)
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: rustup target add wasm32-unknown-unknown
+      - run: cargo install wasm-bindgen-cli --version 0.2.100
+      - run: powershell -File crates/web/build.ps1
+      - run: pwsh -File scripts/smoke-headless.ps1
 
   windows-desktop-build:
     name: cargo build mapkeeper-desktop (Windows only, roadmap 5.9, D-29)

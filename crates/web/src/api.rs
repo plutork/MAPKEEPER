@@ -21,9 +21,13 @@ use crate::brush::{
 };
 use crate::dom::{input, perf_now, set_text, set_world_label, show_view, textarea};
 use crate::home::{refresh_suggested_path, render_project_list};
+use crate::mutate_retry::{
+    classify_http_status, paint_flush_action, paint_stop_message, MutateErrorKind,
+    PaintFlushAction,
+};
 use crate::state::{
-    bump_content_rev, draw_snapshot, fresh_elevation_layer, AppState, BuildStateInput,
-    LayerCellWrite, MapResponse, PerfMetrics, ProjectsResponse, WaterGenTrace,
+    bump_content_rev, draw_snapshot, fresh_elevation_layer, set_elevation_cell, AppState,
+    BuildStateInput, LayerCellWrite, MapResponse, PerfMetrics, ProjectsResponse, WaterGenTrace,
     PAINT_BATCH_MAX_CELLS, PAINT_SAVE_COOLDOWN_MS,
 };
 use crate::water_diag::{
@@ -31,20 +35,112 @@ use crate::water_diag::{
 };
 use crate::wizard::sync_wizard_actions;
 
-pub(crate) async fn persist_build_draft(step: u32) -> bool {
-    let body = BuildStateInput {
+#[derive(Clone, Copy)]
+pub(crate) struct LoadMapOptions {
+    pub clear_pending: bool,
+    pub reset_paint_retry_state: bool,
+}
+
+impl LoadMapOptions {
+    pub(crate) fn default_open() -> Self {
+        Self {
+            clear_pending: true,
+            reset_paint_retry_state: true,
+        }
+    }
+
+    pub(crate) fn conflict_rebase() -> Self {
+        Self {
+            clear_pending: false,
+            reset_paint_retry_state: false,
+        }
+    }
+}
+
+pub(crate) const WORLD_ID_HEADER: &str = "X-World-Id";
+const WORLD_BASE_REVISION_HEADER: &str = "X-World-Base-Revision";
+const WORLD_RESULT_REVISION_HEADER: &str = "X-World-Result-Revision";
+
+pub(crate) fn scoped_request(
+    builder: gloo_net::http::RequestBuilder,
+    world_id: Option<&str>,
+) -> gloo_net::http::RequestBuilder {
+    match world_id {
+        Some(id) => builder.header(WORLD_ID_HEADER, id),
+        None => builder,
+    }
+}
+
+pub(crate) fn scoped_mutate_request(
+    builder: gloo_net::http::RequestBuilder,
+    world_id: Option<&str>,
+    base_revision: u64,
+) -> gloo_net::http::RequestBuilder {
+    scoped_request(builder, world_id).header(WORLD_BASE_REVISION_HEADER, &base_revision.to_string())
+}
+
+fn apply_result_revision(state: &Rc<RefCell<AppState>>, headers: &gloo_net::http::Headers) {
+    if let Some(value) = headers.get(WORLD_RESULT_REVISION_HEADER) {
+        let text = value.as_str();
+        if let Ok(revision) = text.parse::<u64>() {
+            state.borrow_mut().map_revision = revision;
+        }
+    }
+}
+
+fn revision_conflict_message(status: u16) -> &'static str {
+    if status == 409 {
+        "Map changed elsewhere — reload world"
+    } else {
+        "Reload world to continue editing"
+    }
+}
+
+pub(crate) fn scoped_mutate_from_state(
+    state: &Rc<RefCell<AppState>>,
+    builder: gloo_net::http::RequestBuilder,
+) -> gloo_net::http::RequestBuilder {
+    let s = state.borrow();
+    scoped_mutate_request(builder, s.scoped_world_id.as_deref(), s.map_revision)
+}
+
+pub(crate) fn handle_mutate_response(state: &Rc<RefCell<AppState>>, resp: &gloo_net::http::Response) {
+    if resp.ok() {
+        apply_result_revision(state, &resp.headers());
+    } else if resp.status() == 409 || resp.status() == 428 {
+        set_text("status", revision_conflict_message(resp.status()));
+    }
+}
+
+pub(crate) async fn persist_build_draft_for(state: &Rc<RefCell<AppState>>, step: u32) -> bool {
+    let (world_id, base_revision) = {
+        let s = state.borrow();
+        (s.scoped_world_id.clone(), s.map_revision)
+    };
+    let Ok(resp) = scoped_mutate_request(
+        gloo_net::http::Request::put("/api/build"),
+        world_id.as_deref(),
+        base_revision,
+    )
+    .json(&BuildStateInput {
         status: "draft",
         step,
-    };
-    let Ok(resp) = gloo_net::http::Request::put("/api/build")
-        .json(&body)
-        .expect("serializing build state")
-        .send()
-        .await
+    })
+    .expect("serializing build state")
+    .send()
+    .await
     else {
         return false;
     };
-    resp.ok()
+    if resp.ok() {
+        apply_result_revision(state, &resp.headers());
+        true
+    } else {
+        if resp.status() == 409 || resp.status() == 428 {
+            set_text("status", revision_conflict_message(resp.status()));
+        }
+        false
+    }
 }
 pub(crate) async fn load_geology(state: &Rc<RefCell<AppState>>) {
     let Ok(resp) = gloo_net::http::Request::get("/api/layers/geology")
@@ -83,7 +179,7 @@ pub(crate) async fn refresh_projects(state: Rc<RefCell<AppState>>) {
     render_project_list(&data.projects, &state);
 
     if let Some(active) = data.active {
-        let _ = active;
+        state.borrow_mut().scoped_world_id = Some(active.id.clone());
         show_view("editor");
         wasm_bindgen_futures::spawn_local(load_map(state));
     } else {
@@ -91,30 +187,52 @@ pub(crate) async fn refresh_projects(state: Rc<RefCell<AppState>>) {
     }
 }
 pub(crate) async fn load_map(state: Rc<RefCell<AppState>>) {
+    load_map_with_options(state, LoadMapOptions::default_open()).await;
+}
+
+pub(crate) async fn load_map_with_options(state: Rc<RefCell<AppState>>, options: LoadMapOptions) {
     {
         let mut s = state.borrow_mut();
         s.perf = PerfMetrics::default();
         s.perf_timers.open_start = Some(perf_now());
     }
-    if let Ok(resp) = gloo_net::http::Request::get("/api/map").send().await {
+    let scoped_world_id = state.borrow().scoped_world_id.clone();
+    if let Ok(resp) = scoped_request(
+        gloo_net::http::Request::get("/api/map"),
+        scoped_world_id.as_deref(),
+    )
+    .send()
+    .await
+    {
         if let Ok(map) = resp.json::<MapResponse>().await {
             let mut state_mut = state.borrow_mut();
+            state_mut.scoped_world_id = Some(map.world_id.clone());
             state_mut.cells = map
                 .cells
                 .into_iter()
                 .map(|c| ((c.q, c.r), c.display_name))
                 .collect();
             bump_content_rev(&mut state_mut);
+            state_mut.map_revision = map.revision;
             state_mut.map_bounds =
                 MapBounds::new(map.bounds.width.max(1), map.bounds.height.max(1));
-            state_mut.zoom = 1.0;
-            state_mut.pan_x = 0.0;
-            state_mut.pan_y = 0.0;
-            state_mut.pending_paints.clear();
-            state_mut.paint_flush_scheduled = false;
-            state_mut.paint_flush_in_flight = false;
+            if options.reset_paint_retry_state {
+                state_mut.paint_autosave_blocked = false;
+                state_mut.paint_retry_attempts = 0;
+                state_mut.paint_rebased_after_conflict = false;
+            }
+            if options.clear_pending {
+                state_mut.pending_paints.clear();
+                state_mut.paint_flush_scheduled = false;
+                state_mut.paint_flush_in_flight = false;
+            }
+            if options.clear_pending || options.reset_paint_retry_state {
+                state_mut.zoom = 1.0;
+                state_mut.pan_x = 0.0;
+                state_mut.pan_y = 0.0;
+                reset_view_on_world_open(&mut state_mut);
+            }
             state_mut.legacy_map = map.legacy_map;
-            reset_view_on_world_open(&mut state_mut);
             sync_wizard_actions(&state_mut);
             set_world_label(&format!(
                 "{} · {} cells",
@@ -359,7 +477,10 @@ pub(crate) async fn post_river_pin(
         mouth_r: mouth.1,
         river_id: None,
     };
-    let Ok(resp) = gloo_net::http::Request::post("/api/rivers/pin")
+    let Ok(resp) = scoped_mutate_from_state(
+        &state,
+        gloo_net::http::Request::post("/api/rivers/pin"),
+    )
         .json(&body)
         .expect("serialize river pin")
         .send()
@@ -368,6 +489,7 @@ pub(crate) async fn post_river_pin(
         set_text("river-status", "Pin river failed (network)");
         return;
     };
+    handle_mutate_response(&state, &resp);
     if !resp.ok() {
         let msg = resp
             .text()
@@ -405,7 +527,10 @@ pub(crate) async fn post_river_append(state: Rc<RefCell<AppState>>, q: i32, r: i
     }
     let river_id = state.borrow().active_river_id;
     let body = RiverAppendBody { river_id, q, r };
-    let Ok(resp) = gloo_net::http::Request::post("/api/rivers/append")
+    let Ok(resp) = scoped_mutate_from_state(
+        &state,
+        gloo_net::http::Request::post("/api/rivers/append"),
+    )
         .json(&body)
         .expect("serialize river append")
         .send()
@@ -414,6 +539,7 @@ pub(crate) async fn post_river_append(state: Rc<RefCell<AppState>>, q: i32, r: i
         set_text("river-status", "River save failed (network)");
         return;
     };
+    handle_mutate_response(&state, &resp);
     if !resp.ok() {
         let msg = resp
             .text()
@@ -455,7 +581,7 @@ pub(crate) async fn post_river_detach(state: Rc<RefCell<AppState>>) {
         }
     };
     let url = format!("/api/rivers/{river_id}/detach");
-    let Ok(resp) = gloo_net::http::Request::post(&url)
+    let Ok(resp) = scoped_mutate_from_state(&state, gloo_net::http::Request::post(&url))
         .header("content-type", "application/json")
         .body("")
         .expect("detach body")
@@ -465,6 +591,7 @@ pub(crate) async fn post_river_detach(state: Rc<RefCell<AppState>>) {
         set_text("river-status", "Detach failed (network)");
         return;
     };
+    handle_mutate_response(&state, &resp);
     if !resp.ok() {
         let msg = resp
             .text()
@@ -508,10 +635,14 @@ pub(crate) async fn delete_river_at_cell(state: Rc<RefCell<AppState>>, q: i32, r
         }
     };
     let url = format!("/api/rivers/{river_id}");
-    let Ok(resp) = gloo_net::http::Request::delete(&url).send().await else {
+    let Ok(resp) = scoped_mutate_from_state(&state, gloo_net::http::Request::delete(&url))
+        .send()
+        .await
+    else {
         set_text("river-status", "River delete failed (network)");
         return;
     };
+    handle_mutate_response(&state, &resp);
     if !resp.ok() {
         let msg = resp
             .text()
@@ -549,10 +680,14 @@ pub(crate) async fn post_river_pop(state: Rc<RefCell<AppState>>) {
         }
     };
     let url = format!("/api/rivers/{river_id}/pop");
-    let Ok(resp) = gloo_net::http::Request::post(&url).send().await else {
+    let Ok(resp) = scoped_mutate_from_state(&state, gloo_net::http::Request::post(&url))
+        .send()
+        .await
+    else {
         set_text("river-status", "Undo failed (network)");
         return;
     };
+    handle_mutate_response(&state, &resp);
     if !resp.ok() {
         let msg = resp.text().await.unwrap_or_else(|_| "Undo rejected".into());
         set_text("river-status", &msg);
@@ -586,7 +721,10 @@ pub(crate) async fn post_lake_generate(
         density: density.clone(),
         seed: 1,
     };
-    let Ok(resp) = gloo_net::http::Request::post("/api/lakes/generate")
+    let Ok(resp) = scoped_mutate_from_state(
+        &state,
+        gloo_net::http::Request::post("/api/lakes/generate"),
+    )
         .json(&body)
         .expect("serialize lakes generate")
         .send()
@@ -605,6 +743,7 @@ pub(crate) async fn post_lake_generate(
         set_text(status_id, "Generate failed (network)");
         return;
     };
+    handle_mutate_response(&state, &resp);
     if !resp.ok() {
         let msg = resp
             .text()
@@ -690,7 +829,10 @@ pub(crate) async fn post_river_generate(
     let body = RiversGenerateInput {
         river_density: river_density.clone(),
     };
-    let Ok(resp) = gloo_net::http::Request::post("/api/rivers/generate")
+    let Ok(resp) = scoped_mutate_from_state(
+        &state,
+        gloo_net::http::Request::post("/api/rivers/generate"),
+    )
         .json(&body)
         .expect("serialize rivers generate")
         .send()
@@ -709,6 +851,7 @@ pub(crate) async fn post_river_generate(
         set_text(status_id, "Generate failed (network)");
         return;
     };
+    handle_mutate_response(&state, &resp);
     if !resp.ok() {
         let msg = resp
             .text()
@@ -819,6 +962,103 @@ pub(crate) async fn post_river_generate(
     );
     crate::canvas::schedule_redraw(state);
 }
+
+fn reapply_pending_paints_to_elevation(state: &Rc<RefCell<AppState>>) {
+    let pending: Vec<_> = state
+        .borrow()
+        .pending_paints
+        .iter()
+        .map(|(cell, value)| (*cell, *value))
+        .collect();
+    if pending.is_empty() {
+        return;
+    }
+    let mut s = state.borrow_mut();
+    let bounds = s.map_bounds;
+    for ((q, r), value) in pending {
+        set_elevation_cell(&mut s.elevation, bounds, q, r, value);
+    }
+    bump_content_rev(&mut s);
+}
+
+pub(crate) async fn reload_map_for_conflict_rebase(state: Rc<RefCell<AppState>>) {
+    set_text(
+        "status",
+        paint_stop_message(PaintFlushAction::ReloadAndRebase),
+    );
+    {
+        let mut s = state.borrow_mut();
+        s.paint_rebased_after_conflict = true;
+    }
+    load_map_with_options(state.clone(), LoadMapOptions::conflict_rebase()).await;
+    reapply_pending_paints_to_elevation(&state);
+    {
+        let mut s = state.borrow_mut();
+        s.paint_autosave_blocked = false;
+        s.paint_retry_attempts = 0;
+    }
+}
+
+/// Flush or explicit discard before switching projects — never silent clear.
+pub(crate) async fn ensure_pending_saved_or_discard(state: Rc<RefCell<AppState>>) -> bool {
+    if state.borrow().pending_paints.is_empty() {
+        return true;
+    }
+    flush_pending_paints(state.clone()).await;
+    if state.borrow().pending_paints.is_empty() {
+        return true;
+    }
+    if state.borrow().paint_autosave_blocked {
+        set_text(
+            "status",
+            "Unsaved elevation edits — reload world or discard before leaving",
+        );
+        return false;
+    }
+    let discard = web_sys::window()
+        .and_then(|w| {
+            w.confirm_with_message("Discard unsaved elevation edits?")
+                .ok()
+        })
+        .unwrap_or(false);
+    if discard {
+        let mut s = state.borrow_mut();
+        s.pending_paints.clear();
+        s.paint_retry_attempts = 0;
+        s.paint_autosave_blocked = false;
+        s.paint_rebased_after_conflict = false;
+        true
+    } else {
+        set_text("status", "Switch cancelled — unsaved elevation edits kept");
+        false
+    }
+}
+
+async fn send_paint_batch(
+    state: &Rc<RefCell<AppState>>,
+    payload: &[LayerCellWrite],
+) -> Result<(), Option<MutateErrorKind>> {
+    let world_id = state.borrow().scoped_world_id.clone();
+    let base_revision = state.borrow().map_revision;
+    let sent = scoped_mutate_request(
+        gloo_net::http::Request::put("/api/layers/elevation/batch"),
+        world_id.as_deref(),
+        base_revision,
+    )
+    .json(&payload)
+    .expect("serializing elevation batch body")
+    .send()
+    .await;
+    match sent {
+        Err(_) => Err(Some(MutateErrorKind::Network)),
+        Ok(resp) if resp.ok() => {
+            apply_result_revision(state, &resp.headers());
+            Ok(())
+        }
+        Ok(resp) => Err(Some(classify_http_status(resp.status()))),
+    }
+}
+
 pub(crate) fn schedule_paint_flush(state: Rc<RefCell<AppState>>) {
     let should_schedule = {
         let mut s = state.borrow_mut();
@@ -839,6 +1079,14 @@ pub(crate) fn schedule_paint_flush(state: Rc<RefCell<AppState>>) {
 }
 
 pub(crate) async fn flush_pending_paints(state: Rc<RefCell<AppState>>) {
+    if state.borrow().paint_autosave_blocked {
+        set_text(
+            "status",
+            paint_stop_message(PaintFlushAction::StopConflict),
+        );
+        return;
+    }
+
     let batch = {
         let mut s = state.borrow_mut();
         s.paint_flush_scheduled = false;
@@ -851,9 +1099,10 @@ pub(crate) async fn flush_pending_paints(state: Rc<RefCell<AppState>>) {
 
     let mut failed_cells: Vec<((i32, i32), i32)> = Vec::new();
     let mut measured_batch = false;
-    // save-batch--http-endpoint-v1: send chunked batch writes.
-    for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
-        let payload = chunk
+    let mut stop_scheduling = false;
+
+    'chunks: for chunk in batch.chunks(PAINT_BATCH_MAX_CELLS.max(1)) {
+        let payload: Vec<LayerCellWrite> = chunk
             .iter()
             .map(|((q, r), elevation)| LayerCellWrite {
                 q: *q,
@@ -861,18 +1110,60 @@ pub(crate) async fn flush_pending_paints(state: Rc<RefCell<AppState>>) {
                 state: "value",
                 value: *elevation,
             })
-            .collect::<Vec<_>>();
+            .collect();
         let batch_start = perf_now();
-        let sent = gloo_net::http::Request::put("/api/layers/elevation/batch")
-            .json(&payload)
-            .expect("serializing elevation batch body")
-            .send()
-            .await;
-        if matches!(sent, Ok(resp) if resp.ok()) {
-            state.borrow_mut().perf.batch_flush_ms = Some(perf_now() - batch_start);
-            measured_batch = true;
-        } else {
-            failed_cells.extend(chunk.iter().copied());
+        let mut attempt = state.borrow().paint_retry_attempts;
+
+        loop {
+            let already_rebased = state.borrow().paint_rebased_after_conflict;
+            match send_paint_batch(&state, &payload).await {
+                Ok(()) => {
+                    {
+                        let mut s = state.borrow_mut();
+                        s.paint_retry_attempts = 0;
+                        s.paint_rebased_after_conflict = false;
+                    }
+                    state.borrow_mut().perf.batch_flush_ms = Some(perf_now() - batch_start);
+                    measured_batch = true;
+                    continue 'chunks;
+                }
+                Err(kind) => {
+                    let action = paint_flush_action(kind, attempt, already_rebased);
+                    match action {
+                        PaintFlushAction::Success => continue 'chunks,
+                        PaintFlushAction::Retry {
+                            next_attempt,
+                            delay_ms,
+                        } => {
+                            set_text("status", paint_stop_message(action));
+                            state.borrow_mut().paint_retry_attempts = next_attempt;
+                            attempt = next_attempt;
+                            TimeoutFuture::new(delay_ms).await;
+                        }
+                        PaintFlushAction::ReloadAndRebase => {
+                            {
+                                let mut s = state.borrow_mut();
+                                s.paint_flush_in_flight = false;
+                                for (cell, value) in &batch {
+                                    s.pending_paints.insert(*cell, *value);
+                                }
+                            }
+                            reload_map_for_conflict_rebase(state.clone()).await;
+                            schedule_paint_flush(state);
+                            return;
+                        }
+                        PaintFlushAction::StopConflict | PaintFlushAction::StopPermanent => {
+                            failed_cells.extend(chunk.iter().copied());
+                            stop_scheduling = true;
+                            if matches!(action, PaintFlushAction::StopConflict) {
+                                state.borrow_mut().paint_autosave_blocked = true;
+                            }
+                            set_text("status", paint_stop_message(action));
+                            break 'chunks;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -888,10 +1179,12 @@ pub(crate) async fn flush_pending_paints(state: Rc<RefCell<AppState>>) {
         crate::perf_emit(&state.borrow().perf);
     }
 
-    if !state.borrow().pending_paints.is_empty() {
-        set_text("status", "Autosave retry…");
-        schedule_paint_flush(state);
-    } else {
+    if !state.borrow().pending_paints.is_empty() && !stop_scheduling {
+        let attempts = state.borrow().paint_retry_attempts;
+        if attempts > 0 && attempts < crate::mutate_retry::MUTATE_MAX_RETRY_ATTEMPTS {
+            schedule_paint_flush(state);
+        }
+    } else if state.borrow().pending_paints.is_empty() {
         set_text("status", "");
     }
 }

@@ -5,7 +5,8 @@ use std::rc::Rc;
 
 use crate::api::{
     delete_river_at_cell, flush_pending_paints, load_profile_into_panel, post_lake_generate,
-    post_river_append, post_river_detach, post_river_generate, post_river_pin, post_river_pop, schedule_paint_flush,
+    post_river_append, post_river_detach, post_river_generate, post_river_pin, post_river_pop,
+    schedule_paint_flush, scoped_request,
 };
 use crate::brush::{
     active_dock_tab, apply_elevation_brush_intent, apply_paint_brush, brush_absolute_elevation,
@@ -577,7 +578,11 @@ pub fn attach_save_click(state: Rc<RefCell<AppState>>) {
                 display_name: display_name.clone(),
                 notes,
             };
-            let sent = gloo_net::http::Request::put(&format!("/api/cells/{q}/{r}/profile"))
+            let world_id = state.borrow().scoped_world_id.clone();
+            let sent = scoped_request(
+                gloo_net::http::Request::put(&format!("/api/cells/{q}/{r}/profile")),
+                world_id.as_deref(),
+            )
                 .json(&body)
                 .expect("serializing profile body")
                 .send()
