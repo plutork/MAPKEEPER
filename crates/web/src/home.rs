@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use mapkeeper_core::build_state::BUILD_STEP_WATER;
+use mapkeeper_core::world;
 
 use crate::api::{
     ensure_pending_saved_or_discard, load_elevation, load_geology, load_map, load_rivers,
@@ -20,8 +21,8 @@ use crate::state::{
     ProjectStatus,
 };
 use crate::wizard::{
-    build_step_label, close_build_wizard, ensure_wizard_recipe, open_build_wizard,
-    preset_id_for_bounds, set_wizard_status, sync_wizard_actions,
+    build_step_label, clear_wizard_viewed_stub, close_build_draft_session, ensure_wizard_recipe,
+    open_build_draft_session, preset_id_for_bounds, set_wizard_status, sync_wizard_actions,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -149,16 +150,40 @@ fn suggested_world_path(state: &AppState, world_id: &str) -> Option<String> {
     Some(format!("{root}{sep}{tail}"))
 }
 
+fn normalized_id_for_path(raw: &str) -> String {
+    world::normalize_world_id(raw).unwrap_or_else(|_| {
+        if raw.trim().is_empty() {
+            "my-world".to_string()
+        } else {
+            raw.trim().to_ascii_lowercase()
+        }
+    })
+}
+
+fn refresh_id_preview(input_id: &str, preview_id: &str) {
+    let raw = input(input_id).value();
+    if raw.trim().is_empty() {
+        set_text(preview_id, "");
+        return;
+    }
+    match world::normalize_world_id(&raw) {
+        Ok(id) => set_text(preview_id, &format!("Folder id: {id}")),
+        Err(_) => set_text(preview_id, "Folder id: (invalid — use letters or digits)"),
+    }
+}
+
 pub(crate) fn refresh_suggested_path(state: &Rc<RefCell<AppState>>) {
     let state_ref = state.borrow();
     if !state_ref.path_touched {
-        let id = input("new-id").value();
+        let id = normalized_id_for_path(&input("new-id").value());
+        refresh_id_preview("new-id", "new-id-preview");
         if let Some(path) = suggested_world_path(&state_ref, &id) {
             input("new-path").set_value(&path);
         }
     }
     if !state_ref.build_path_touched {
-        let id = input("generate-id").value();
+        let id = normalized_id_for_path(&input("generate-id").value());
+        refresh_id_preview("generate-id", "generate-id-preview");
         if let Some(path) = suggested_world_path(&state_ref, &id) {
             input("generate-path").set_value(&path);
         }
@@ -166,24 +191,7 @@ pub(crate) fn refresh_suggested_path(state: &Rc<RefCell<AppState>>) {
 }
 
 fn slugify_world_id(name: &str) -> String {
-    let mut out = String::new();
-    let mut prev_dash = false;
-    for ch in name.chars() {
-        let lower = ch.to_ascii_lowercase();
-        if lower.is_ascii_alphanumeric() {
-            out.push(lower);
-            prev_dash = false;
-        } else if !prev_dash {
-            out.push('-');
-            prev_dash = true;
-        }
-    }
-    let trimmed = out.trim_matches('-');
-    if trimmed.is_empty() {
-        "my-world".to_string()
-    } else {
-        trimmed.to_string()
-    }
+    world::normalize_world_id(name).unwrap_or_else(|_| "my-world".to_string())
 }
 
 fn pick_unique_first_world_id_and_path(
@@ -256,12 +264,19 @@ pub fn attach_preset_warn_handlers() {
 }
 pub fn attach_create_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
-        let id = input("new-id").value();
+        let raw_id = input("new-id").value();
         let path = input("new-path").value();
-        if id.trim().is_empty() || path.trim().is_empty() {
+        if raw_id.trim().is_empty() || path.trim().is_empty() {
             set_text("home-status", "World name and folder are both required.");
             return;
         }
+        let id = match world::normalize_world_id(&raw_id) {
+            Ok(id) => id,
+            Err(msg) => {
+                set_text("home-status", msg);
+                return;
+            }
+        };
         let preset = select_value("new-preset");
         let state = state.clone();
         set_text("home-status", "Creating…");
@@ -310,15 +325,22 @@ pub fn attach_create_click(state: Rc<RefCell<AppState>>) {
 
 pub fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
     let closure = Closure::<dyn FnMut()>::new(move || {
-        let id = input("generate-id").value();
+        let raw_id = input("generate-id").value();
         let path = input("generate-path").value();
-        if id.trim().is_empty() || path.trim().is_empty() {
+        if raw_id.trim().is_empty() || path.trim().is_empty() {
             set_text(
                 "generate-status",
                 "World name and folder are both required.",
             );
             return;
         }
+        let id = match world::normalize_world_id(&raw_id) {
+            Ok(id) => id,
+            Err(msg) => {
+                set_text("generate-status", msg);
+                return;
+            }
+        };
         let preset = select_value("generate-preset");
         let state = state.clone();
         set_text("generate-status", "Creating…");
@@ -345,9 +367,10 @@ pub fn attach_build_start_click(state: Rc<RefCell<AppState>>) {
                     refresh_suggested_path(&state);
                     show_view("editor");
                     load_map(state.clone()).await;
-                    open_build_wizard();
+                    open_build_draft_session(&mut state.borrow_mut());
                     {
                         let mut s = state.borrow_mut();
+                        clear_wizard_viewed_stub(&mut s);
                         s.wizard_step = 1;
                         s.wizard_layout_class = "pangea".to_string();
                         s.wizard_regenerate_nonce = 0;
@@ -650,10 +673,12 @@ pub fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                         show_view("editor");
                         load_map(state.clone()).await;
                         if resume_wizard {
-                            open_build_wizard();
+                            open_build_draft_session(&mut state.borrow_mut());
                             {
                                 let mut s = state.borrow_mut();
+                                clear_wizard_viewed_stub(&mut s);
                                 s.wizard_step = resume_step;
+                                s.wizard_peak_step = resume_step;
                                 s.wizard_accepted = resume_step > 2;
                                 s.wizard_edit_mode = false;
                                 s.wizard_geo_accepted = resume_step > 3;
@@ -720,7 +745,7 @@ pub fn attach_project_list_click(state: Rc<RefCell<AppState>>) {
                                 }
                             }
                         } else {
-                            close_build_wizard();
+                            close_build_draft_session(&mut state.borrow_mut());
                         }
                     }
                     Ok(resp) => {

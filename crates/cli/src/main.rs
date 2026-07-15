@@ -367,12 +367,8 @@ fn main() -> Result<()> {
 }
 
 fn cmd_init(args: InitArgs) -> Result<()> {
-    if !world::is_valid_world_id(&args.world_id) {
-        bail!(
-            "invalid world id '{}': use lowercase letters, digits, '-', '_' only",
-            args.world_id
-        );
-    }
+    let world_id = world::normalize_world_id(&args.world_id)
+        .map_err(|msg| anyhow::anyhow!("{} ('{}')", msg, args.world_id))?;
     fs::create_dir_all(&args.path)
         .with_context(|| format!("creating world folder {}", args.path.display()))?;
     for dir in world::SCAFFOLD_DIRS {
@@ -396,16 +392,16 @@ fn cmd_init(args: InitArgs) -> Result<()> {
     };
     write_map_manifest(&args.path, preset)?;
     write_initial_ocean_elevation(&args.path, preset)?;
-    fs::write(&manifest, world::manifest_toml(&args.world_id))?;
+    fs::write(&manifest, world::manifest_toml(&world_id))?;
     println!(
         "Scaffolded world '{}' at {}",
-        args.world_id,
+        world_id,
         args.path.display()
     );
 
     // Best-effort: register in the shared projects list so the launcher/web
     // wizard also sees worlds created from the CLI. Never fails `init`.
-    if let Err(err) = register_project(&args.world_id, &args.path) {
+    if let Err(err) = register_project(&world_id, &args.path) {
         eprintln!("warn: could not register in projects list: {err}");
     }
     Ok(())

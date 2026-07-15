@@ -105,3 +105,66 @@ async fn revision_persists_in_manifest_after_successful_write() {
         .await;
     assert_eq!(status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn land_mask_generate_requires_base_revision_after_draft_bump() {
+    use mapkeeper_core::build_state::manifest_toml_with_build;
+
+    let _lock = registry_test_lock();
+    let root = tempdir().unwrap();
+    let world = root.path().join("wizard-draft");
+    seed_world(&world, "wizard-draft", 14, 8);
+    std::fs::write(
+        world.join("mapkeeper.toml"),
+        manifest_toml_with_build("wizard-draft", true),
+    )
+    .unwrap();
+
+    let harness = Harness::launcher();
+    assert_eq!(harness.open_project(&world).await, StatusCode::OK);
+
+    let draft_body = serde_json::json!({ "status": "draft", "step": 1 }).to_string();
+    assert_eq!(
+        harness
+            .send_scoped_with_revision(
+                "PUT",
+                "/api/build",
+                Some(draft_body.into_bytes()),
+                Some("wizard-draft"),
+                Some(0),
+            )
+            .await
+            .0,
+        StatusCode::NO_CONTENT,
+    );
+
+    let gen_body = serde_json::json!({
+        "variant": "pangea",
+        "character": "smooth",
+        "regenerate_nonce": 0
+    })
+    .to_string();
+
+    let (status, body) = harness
+        .send_scoped(
+            "POST",
+            "/api/build/land-mask/generate",
+            Some(gen_body.as_bytes().to_vec()),
+            Some("wizard-draft"),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PRECONDITION_REQUIRED);
+    assert!(String::from_utf8_lossy(&body).contains("base_revision_required"));
+
+    let (status, _) = harness
+        .send_scoped_with_revision(
+            "POST",
+            "/api/build/land-mask/generate",
+            Some(gen_body.into_bytes()),
+            Some("wizard-draft"),
+            Some(1),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(world.join("map/layers/land_mask.json").is_file());
+}

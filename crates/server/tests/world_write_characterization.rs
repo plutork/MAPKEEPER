@@ -7,10 +7,34 @@ use std::sync::Arc;
 use axum::http::StatusCode;
 use mapkeeper_core::build_state::read_build;
 use support::harness::{
-    elevation_int_at, failpoint_test_lock, lake_catalog_with_cell_marker, layer_cell_write,
-    read_lakes_json, registry_test_lock, seed_world, Harness,
+    elevation_int_at, failpoint_test_lock, isolated_registry_home, real_projects_file_path,
+    lake_catalog_with_cell_marker, layer_cell_write, read_lakes_json, registry_test_lock,
+    seed_world, Harness,
 };
 use tempfile::tempdir;
+
+#[tokio::test]
+async fn open_project_writes_isolated_registry_not_real_appdata() {
+    let _lock = registry_test_lock();
+    let real_path = real_projects_file_path();
+    let before = std::fs::read_to_string(&real_path).ok();
+
+    let root = tempdir().unwrap();
+    let world = root.path().join("registry-iso");
+    seed_world(&world, "registry-iso", 14, 8);
+
+    let harness = Harness::launcher();
+    assert_eq!(harness.open_project(&world).await, StatusCode::OK);
+
+    let after = std::fs::read_to_string(&real_path).ok();
+    assert_eq!(before, after);
+
+    let isolated_path = isolated_registry_home()
+        .path()
+        .join("mapkeeper/projects.json");
+    let isolated = std::fs::read_to_string(isolated_path).expect("isolated projects.json");
+    assert!(isolated.contains("registry-iso"));
+}
 
 #[tokio::test]
 async fn scoped_writes_ignore_active_world_switch() {

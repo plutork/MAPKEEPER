@@ -4,8 +4,8 @@ use crate::canvas::current_hex_size_px;
 use crate::dom::{document, set_text};
 use crate::elevation_view::{self, ColorMode};
 use crate::state::{
-    AppState, Brush, BRUSH_PREVIEW_HEX_DETAIL_MAX, BRUSH_SCREEN_DIAMETERS_PX, MAX_BRUSH_TIER,
-    MAX_EFFECTIVE_BRUSH_RADIUS, MIN_BRUSH_TIER,
+    AppState, Brush, WorkspaceMode, BRUSH_PREVIEW_HEX_DETAIL_MAX, BRUSH_SCREEN_DIAMETERS_PX,
+    MAX_BRUSH_TIER, MAX_EFFECTIVE_BRUSH_RADIUS, MIN_BRUSH_TIER,
 };
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::rivers::RiverCatalog;
@@ -15,7 +15,7 @@ use web_sys::Element;
 fn wizard_overlay_active() -> bool {
     document()
         .get_element_by_id("editor")
-        .is_some_and(|el| el.class_list().contains("wizard-active"))
+        .is_some_and(|el| el.class_list().contains("workspace-build"))
 }
 
 pub(crate) fn clear_pointer_interaction(s: &mut AppState) {
@@ -250,7 +250,99 @@ pub(crate) fn sync_river_status(state: &AppState) {
         );
     }
     sync_detach_tributary_ui(state);
+    sync_editor_object_list(state);
 }
+
+/// D-106 track 2 — category object list in workspace right panel.
+pub(crate) fn sync_editor_object_list(state: &AppState) {
+    let Some(panel) = document().get_element_by_id("editor-object-panel") else {
+        return;
+    };
+    let Some(list) = document().get_element_by_id("editor-object-list") else {
+        return;
+    };
+    let tab = active_dock_tab().unwrap_or_default();
+    let mut html = String::new();
+    match tab.as_str() {
+        "rivers" => {
+            if !state.lakes.lakes.is_empty() {
+                html.push_str("<li class=\"editor-object-head\">Lakes</li>");
+                for lake in &state.lakes.lakes {
+                    let name = lake
+                        .name
+                        .as_deref()
+                        .filter(|n| !n.is_empty())
+                        .unwrap_or("Unnamed");
+                    let endo = if lake.endorheic { " · endorheic" } else { "" };
+                    html.push_str(&format!(
+                        "<li class=\"editor-object-item\"><span>Lake #{id} · {name} · {cells} cells{endo}</span></li>",
+                        id = lake.id,
+                        name = name,
+                        cells = lake.cells.len(),
+                        endo = endo,
+                    ));
+                }
+            }
+            if state.rivers_read_only && !state.named_rivers.is_empty() {
+                html.push_str("<li class=\"editor-object-head\">Named rivers</li>");
+                for river in &state.named_rivers {
+                    let label = if river.name.is_empty() {
+                        format!("River #{}", river.id)
+                    } else {
+                        river.name.clone()
+                    };
+                    html.push_str(&format!(
+                        "<li class=\"editor-object-item\"><span>{label} · {seg} segment(s)</span></li>",
+                        label = label,
+                        seg = river.segment_ids.len(),
+                    ));
+                }
+            } else if !state.rivers_read_only && !state.rivers.rivers.is_empty() {
+                html.push_str("<li class=\"editor-object-head\">Legacy rivers</li>");
+                for river in &state.rivers.rivers {
+                    html.push_str(&format!(
+                        "<li class=\"editor-object-item\"><span>River #{id} · {cells} cells</span><button type=\"button\" class=\"editor-object-delete\" data-river-delete=\"{id}\">Delete</button></li>",
+                        id = river.id,
+                        cells = river.cells.len(),
+                    ));
+                }
+            }
+            if html.is_empty() {
+                html.push_str(
+                    "<li class=\"editor-object-empty\">No lakes or rivers yet — generate from settings above.</li>",
+                );
+            }
+            let _ = panel.class_list().remove_1("hidden");
+        }
+        "inspect" => {
+            if state.cells.is_empty() {
+                let _ = panel.class_list().add_1("hidden");
+                list.set_inner_html("");
+                return;
+            }
+            html.push_str("<li class=\"editor-object-head\">Named cells</li>");
+            let mut entries: Vec<_> = state.cells.iter().collect();
+            entries.sort_by_key(|((q, r), _)| (*q, *r));
+            for ((q, r), title) in entries {
+                let label = if title.is_empty() { "—" } else { title.as_str() };
+                html.push_str(&format!(
+                    "<li class=\"editor-object-item\"><span>q{q} r{r} · {label}</span></li>",
+                    q = q,
+                    r = r,
+                    label = label,
+                ));
+            }
+            let _ = panel.class_list().remove_1("hidden");
+        }
+        _ => {
+            let _ = panel.class_list().add_1("hidden");
+            list.set_inner_html("");
+            return;
+        }
+    }
+    list.set_inner_html(&html);
+}
+
 pub(crate) fn brush_tier_screen_diameter(tier: i32) -> f64 {
     let i = tier.clamp(MIN_BRUSH_TIER, MAX_BRUSH_TIER) as usize;
     BRUSH_SCREEN_DIAMETERS_PX[i]
@@ -372,6 +464,8 @@ pub(crate) fn reset_view_on_world_open(s: &mut AppState) {
     s.precip_source = None;
     s.wizard_accepted = false;
     s.wizard_edit_mode = false;
+    // Neutral default; a build-draft resume overrides to Wizard right after.
+    s.workspace_mode = WorkspaceMode::Editor;
     deactivate_paint_brush(s);
 }
 /// Map a brush to absolute target elevation. `Inspect` / Raise / Lower write nothing here.

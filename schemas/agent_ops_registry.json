@@ -94,8 +94,9 @@
     },
     {
       "id": "land_mask_bundle",
-      "writes": ["map/layers/land_mask.json", "map/layers/elevation.json"],
-      "invalidates": ["hydrology_snapshot"],
+      "writes": ["map/layers/land_mask.json", "map/layers/elevation.json", "map/rivers.json", "map/layers/river_id.json", "map/lakes.json", "map/layers/lake_id.json"],
+      "deletes": ["map/named-rivers.json", "map/hydrology-v2.json"],
+      "invalidates": ["hydrology_snapshot", "rivers_catalog", "lakes_catalog"],
       "txn": "world_transaction"
     },
     {
@@ -169,7 +170,7 @@
   "invalidation_graph": [
     {
       "trigger": "land_mask_bundle",
-      "invalidates": ["hydrology_snapshot"]
+      "invalidates": ["hydrology_snapshot", "rivers_catalog"]
     },
     {
       "trigger": "elevation_layer",
@@ -306,8 +307,9 @@
       "base_revision": "required_after_first_bump",
       "bundle": "land_mask_bundle",
       "reads": ["map/manifest.json"],
-      "writes": ["map/layers/land_mask.json", "map/layers/elevation.json"],
-      "invalidates": ["hydrology_snapshot"],
+      "writes": ["map/layers/land_mask.json", "map/layers/elevation.json", "map/rivers.json", "map/layers/river_id.json", "map/lakes.json", "map/layers/lake_id.json"],
+      "deletes": ["map/named-rivers.json", "map/hydrology-v2.json"],
+      "invalidates": ["hydrology_snapshot", "rivers_catalog", "lakes_catalog"],
       "conflicts_with": ["per_world_map_write"]
     },
     {
@@ -318,8 +320,9 @@
       "base_revision": "required_after_first_bump",
       "bundle": "land_mask_bundle",
       "reads": ["map/layers/land_mask.json", "map/layers/elevation.json"],
-      "writes": ["map/layers/land_mask.json", "map/layers/elevation.json"],
-      "invalidates": ["hydrology_snapshot"],
+      "writes": ["map/layers/land_mask.json", "map/layers/elevation.json", "map/rivers.json", "map/layers/river_id.json", "map/lakes.json", "map/layers/lake_id.json"],
+      "deletes": ["map/named-rivers.json", "map/hydrology-v2.json"],
+      "invalidates": ["hydrology_snapshot", "rivers_catalog", "lakes_catalog"],
       "conflicts_with": ["per_world_map_write"]
     },
     {

@@ -182,7 +182,7 @@ _Source: `schemas/agent_ops_registry.json` · regenerate: `python scripts/gen_op
 | `registry_entry` | direct | server:projects.json | — | — |
 | `build_draft` | mutate_map | mapkeeper.toml | — | — |
 | `build_bounds_reset` | mutate_map | map/manifest.json, map/layers/* | — | — |
-| `land_mask_bundle` | world_transaction | map/layers/land_mask.json, map/layers/elevation.json | — | hydrology_snapshot |
+| `land_mask_bundle` | world_transaction | map/layers/land_mask.json, map/layers/elevation.json, map/rivers.json, map/layers/river_id.json, map/lakes.json, map/layers/lake_id.json | map/named-rivers.json, map/hydrology-v2.json | hydrology_snapshot, rivers_catalog, lakes_catalog |
 | `geology_layer` | mutate_map | map/layers/geology.json | — | — |
 | `elevation_layer` | mutate_map | map/layers/elevation.json | — | hydrology_snapshot |
 | `climate_bundle` | world_transaction | map/layers/temperature.json, map/layers/precipitation.json, map/layers/ice.json | — | hydrology_snapshot |
@@ -198,7 +198,7 @@ _Source: `schemas/agent_ops_registry.json` · regenerate: `python scripts/gen_op
 
 | Trigger | When | Invalidates |
 |---------|------|-------------|
-| `land_mask_bundle` | always | `hydrology_snapshot` |
+| `land_mask_bundle` | always | `hydrology_snapshot`, `rivers_catalog` |
 | `elevation_layer` | always | `hydrology_snapshot` |
 | `climate_bundle` | always | `hydrology_snapshot` |
 | `single_dense_layer` | layer_id in land_mask,elevation,lake_id,precipitation | `hydrology_snapshot` |
@@ -219,8 +219,8 @@ _Source: `schemas/agent_ops_registry.json` · regenerate: `python scripts/gen_op
 | POST | `/api/fixture-worlds/open` | `post.fixture_worlds.open` | registry | never | `registry_entry` | server:projects.json | server:projects.json | — | — |
 | PUT | `/api/build` | `put.build.state` | world_mutate | required_after_first_bump | `build_draft` | mapkeeper.toml | mapkeeper.toml | — | per_world_map_write |
 | PUT | `/api/build/bounds` | `put.build.bounds` | world_mutate | required_after_first_bump | `build_bounds_reset` | map/manifest.json, map/layers/* | map/manifest.json, map/layers/* | — | per_world_map_write |
-| POST | `/api/build/land-mask/generate` | `post.build.land_mask.generate` | world_mutate | required_after_first_bump | `land_mask_bundle` | map/manifest.json | map/layers/land_mask.json, map/layers/elevation.json | hydrology_snapshot | per_world_map_write |
-| PUT | `/api/build/land-mask/cells` | `put.build.land_mask.cells` | world_mutate | required_after_first_bump | `land_mask_bundle` | map/layers/land_mask.json, map/layers/elevation.json | map/layers/land_mask.json, map/layers/elevation.json | hydrology_snapshot | per_world_map_write |
+| POST | `/api/build/land-mask/generate` | `post.build.land_mask.generate` | world_mutate | required_after_first_bump | `land_mask_bundle` | map/manifest.json | map/layers/land_mask.json, map/layers/elevation.json, map/rivers.json, map/layers/river_id.json, map/lakes.json, map/layers/lake_id.json | hydrology_snapshot, rivers_catalog, lakes_catalog | per_world_map_write |
+| PUT | `/api/build/land-mask/cells` | `put.build.land_mask.cells` | world_mutate | required_after_first_bump | `land_mask_bundle` | map/layers/land_mask.json, map/layers/elevation.json | map/layers/land_mask.json, map/layers/elevation.json, map/rivers.json, map/layers/river_id.json, map/lakes.json, map/layers/lake_id.json | hydrology_snapshot, rivers_catalog, lakes_catalog | per_world_map_write |
 | POST | `/api/build/geology/generate` | `post.build.geology.generate` | world_mutate | required_after_first_bump | `geology_layer` | map/manifest.json, map/layers/land_mask.json | map/layers/geology.json | — | per_world_map_write |
 | POST | `/api/build/elevation/generate` | `post.build.elevation.generate` | world_mutate | required_after_first_bump | `elevation_layer` | map/layers/land_mask.json, map/layers/geology.json | map/layers/elevation.json | hydrology_snapshot | per_world_map_write |
 | POST | `/api/build/climate/generate` | `post.build.climate.generate` | world_mutate | required_after_first_bump | `climate_bundle` | map/layers/elevation.json, map/layers/land_mask.json | map/layers/temperature.json, map/layers/precipitation.json, map/layers/ice.json | hydrology_snapshot | per_world_map_write |

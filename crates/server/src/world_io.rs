@@ -10,6 +10,7 @@ use mapkeeper_core::cell_id::CellId;
 use mapkeeper_core::climate::{ICE_LAYER_ID, PRECIPITATION_LAYER_ID, TEMPERATURE_LAYER_ID};
 use mapkeeper_core::geology::GEOLOGY_LAYER_ID;
 use mapkeeper_core::hex::MapBounds;
+use mapkeeper_core::history;
 use mapkeeper_core::lakes::{sync_lake_id_layer, LakeCatalog, LAKE_CATALOG_FILE};
 use mapkeeper_core::land_mask::LAND_MASK_LAYER_ID;
 use mapkeeper_core::layer::Bounds;
@@ -357,7 +358,18 @@ pub(crate) fn read_dense_layer(
     layer_id: &str,
     bounds: &MapBounds,
 ) -> DenseLayer {
-    let raw = std::fs::read_to_string(layer_file_path(world_path, layer_id)).ok();
+    let manifest = history::read_history_manifest(world_path);
+    let path = if manifest.enabled {
+        history::resolve_layer_path(
+            world_path,
+            &manifest,
+            &manifest.selected_state_id,
+            layer_id,
+        )
+    } else {
+        layer_file_path(world_path, layer_id)
+    };
+    let raw = std::fs::read_to_string(&path).ok();
     DenseLayer::read_or_empty(
         raw.as_deref(),
         layer_id,
@@ -368,7 +380,28 @@ pub(crate) fn read_dense_layer(
 
 pub(crate) fn write_dense_layer(world_path: &Path, layer: &DenseLayer) -> Result<(), String> {
     maybe_simulate_layer_write_failure()?;
-    let path = layer_file_path(world_path, &layer.layer_id);
+    let mut manifest = history::read_history_manifest(world_path);
+    if manifest.enabled {
+        if history::selected_state_locked(&manifest) {
+            return Err("world state is locked".to_string());
+        }
+        if let Some(domain) = history::domain_for_layer(&layer.layer_id) {
+            let state_id = manifest.selected_state_id.clone();
+            history::ensure_domain_forked_for_write(world_path, &mut manifest, &state_id, domain)?;
+            history::write_history_manifest(world_path, &manifest)?;
+            manifest = history::read_history_manifest(world_path);
+        }
+    }
+    let path = if manifest.enabled {
+        history::resolve_layer_path(
+            world_path,
+            &manifest,
+            &manifest.selected_state_id,
+            &layer.layer_id,
+        )
+    } else {
+        layer_file_path(world_path, &layer.layer_id)
+    };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -686,16 +719,60 @@ pub(crate) fn persist_land_mask_bundle(
 ) -> Result<u64, CommitError> {
     #[cfg(test)]
     reset_layer_write_attempts();
+    let bounds = map_bounds(world_path);
     let mask_path = layer_file_path(world_path, LAND_MASK_LAYER_ID);
     let elevation_path = layer_file_path(world_path, ELEVATION_LAYER_ID);
     let mask_body = mask.to_json_pretty().map_err(|e| CommitError::Op(e.to_string()))?;
     let elevation_body = elevation.to_json_pretty().map_err(|e| CommitError::Op(e.to_string()))?;
+
+    // Land silhouette regen invalidates downstream water (D-46).
+    let empty_rivers = RiverCatalog::default();
+    let river_layer = sync_river_id_layer(&empty_rivers, &bounds);
+    let rivers_body = empty_rivers
+        .to_json_pretty()
+        .map_err(|e| CommitError::Op(e.to_string()))?;
+    let river_layer_body = river_layer
+        .to_json_pretty()
+        .map_err(|e| CommitError::Op(e.to_string()))?;
+    let empty_lakes = LakeCatalog::default();
+    let lake_layer = sync_lake_id_layer(&empty_lakes, &bounds);
+    let lakes_body = empty_lakes
+        .to_json_pretty()
+        .map_err(|e| CommitError::Op(e.to_string()))?;
+    let lake_layer_body = lake_layer
+        .to_json_pretty()
+        .map_err(|e| CommitError::Op(e.to_string()))?;
 
     let mut plan = WorldMutationPlan::begin(world_path).map_err(CommitError::Op)?;
     plan.stage_write(&mask_path, mask_body.into_bytes())
         .map_err(CommitError::Op)?;
     plan.stage_write(&elevation_path, elevation_body.into_bytes())
         .map_err(CommitError::Op)?;
+    plan.stage_write(
+        &rivers_file_path(world_path),
+        rivers_body.into_bytes(),
+    )
+    .map_err(CommitError::Op)?;
+    plan.stage_write(
+        &layer_file_path(world_path, RIVER_ID_LAYER_ID),
+        river_layer_body.into_bytes(),
+    )
+    .map_err(CommitError::Op)?;
+    plan.stage_write(&lakes_file_path(world_path), lakes_body.into_bytes())
+        .map_err(CommitError::Op)?;
+    plan.stage_write(
+        &layer_file_path(world_path, LAKE_ID_LAYER_ID),
+        lake_layer_body.into_bytes(),
+    )
+    .map_err(CommitError::Op)?;
+    if named_rivers_file_path(world_path).exists() {
+        plan.stage_delete(&named_rivers_file_path(world_path))
+            .map_err(CommitError::Op)?;
+    }
+    if hydrology_snapshot_path(world_path).exists() {
+        plan.stage_delete(&hydrology_snapshot_path(world_path))
+            .map_err(CommitError::Op)?;
+    }
     plan.post_commit_invalidate_hydrology();
     let (_, revision) = plan.commit(base_revision)?;
     Ok(revision)
@@ -1565,6 +1642,66 @@ mod build_lifecycle_tests {
         SIMULATE_LAYER_WRITE_FAIL_ON_ATTEMPT.store(0, Ordering::SeqCst);
         assert!(err.contains("simulated"));
         assert_eq!(file_bytes(&paths), before);
+    }
+
+    #[test]
+    fn land_mask_bundle_clears_stale_water_downstream() {
+        let _lock = super::failpoint_lock();
+        use mapkeeper_core::lakes::Lake;
+        use mapkeeper_core::layer::{DenseState, LayerValue};
+
+        let dir = tempdir().unwrap();
+        let world = dir.path();
+        let bounds = seed_world(world, "land-water");
+        std::fs::write(
+            rivers_file_path(world),
+            RiverCatalog::default().to_json_pretty().unwrap(),
+        )
+        .unwrap();
+        let mut stale_river_id = sync_river_id_layer(&RiverCatalog::default(), &bounds);
+        stale_river_id.set(3, DenseState::Value(LayerValue::Int(1)));
+        std::fs::write(
+            layer_file_path(world, RIVER_ID_LAYER_ID),
+            stale_river_id.to_json_pretty().unwrap(),
+        )
+        .unwrap();
+        let mut lakes = LakeCatalog::default();
+        lakes.lakes.push(Lake {
+            id: 1,
+            cells: vec![10],
+            outlet_cell: None,
+            endorheic: true,
+            name: None,
+        });
+        lakes.next_id = 2;
+        std::fs::write(
+            lakes_file_path(world),
+            lakes.to_json_pretty().unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            layer_file_path(world, LAKE_ID_LAYER_ID),
+            sync_lake_id_layer(&lakes, &bounds)
+                .to_json_pretty()
+                .unwrap(),
+        )
+        .unwrap();
+
+        let mask = generate_land_mask(&bounds, LayoutClass::Pangea, ShoreCharacter::Smooth, 1);
+        let elevation =
+            mapkeeper_core::land_mask::elevation_from_land_mask(&bounds, &mask);
+        persist_land_mask_bundle(world, &mask, &elevation, current_base_revision(world)).unwrap();
+
+        let report = crate::integrity::audit_world_integrity(world).unwrap();
+        assert!(!report.has_errors(), "{:?}", report.findings);
+        let rivers: RiverCatalog =
+            serde_json::from_str(&std::fs::read_to_string(rivers_file_path(world)).unwrap())
+                .unwrap();
+        assert!(rivers.rivers.is_empty());
+        let lakes_out: LakeCatalog =
+            serde_json::from_str(&std::fs::read_to_string(lakes_file_path(world)).unwrap())
+                .unwrap();
+        assert!(lakes_out.lakes.is_empty());
     }
 
     #[test]

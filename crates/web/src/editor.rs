@@ -4,33 +4,32 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::api::{
-    delete_river_at_cell, flush_pending_paints, load_profile_into_panel, post_lake_generate,
-    post_river_append, post_river_detach, post_river_generate, post_river_pin, post_river_pop,
-    schedule_paint_flush, scoped_request,
+    delete_river_at_cell, delete_river_by_id, flush_pending_paints, load_profile_into_panel,
+    post_lake_generate, post_river_append, post_river_detach, post_river_generate, post_river_pin,
+    post_river_pop, schedule_paint_flush, scoped_request,
 };
 use crate::brush::{
     active_dock_tab, apply_elevation_brush_intent, apply_paint_brush, brush_absolute_elevation,
     brush_delta_sign, brush_paints, clear_pointer_interaction, deactivate_paint_brush,
     effective_brush_radius_from_hex_size, effective_paint_radius, river_brush,
     sync_brush_effective_label, sync_brush_radius_active, sync_brush_step_active,
-    sync_falloff_active, sync_manual_river_authoring_ui, sync_paint_tool_ui, sync_river_status,
-    sync_detach_tributary_ui,
-    terrain_brush, RIVERS_READ_ONLY_MSG,
+    sync_editor_object_list, sync_falloff_active, sync_manual_river_authoring_ui,
+    sync_paint_tool_ui, sync_river_status, sync_detach_tributary_ui, terrain_brush,
+    RIVERS_READ_ONLY_MSG,
 };
 use crate::canvas::{clamp_zoom, current_hex_size_px, hex_layout, map_layout, schedule_redraw};
 use crate::dom::{
     active_attr_in_group, canvas, click_target_element, document, drawer_is_open, input,
     set_dock_tab, set_drawer_open, set_text, textarea, toggle_active_in_group, window,
+    workspace_panels_pinned,
 };
 use crate::elevation_view::ColorMode;
 use crate::state::{
     bump_content_rev, elevation_at, grid_lines_toggle_label, set_elevation_cell, AppState, Brush,
-    ProfileInput, MAX_BRUSH_TIER, MAX_EFFECTIVE_BRUSH_RADIUS, MIN_BRUSH_TIER, PAN_DRAG_THRESHOLD,
+    ProfileInput, WorkspaceMode, MAX_BRUSH_TIER, MAX_EFFECTIVE_BRUSH_RADIUS, MIN_BRUSH_TIER,
+    PAN_DRAG_THRESHOLD,
 };
-use crate::wizard::{
-    close_build_wizard, queue_wizard_land_mask_stamp, schedule_wizard_stamp_flush,
-    wizard_is_active, wizard_return_home,
-};
+use crate::wizard::{queue_wizard_land_mask_stamp, schedule_wizard_stamp_flush, wizard_is_active};
 use mapkeeper_core::hex::{Axial, MapBounds};
 use mapkeeper_core::hydro::stamp_delta;
 use mapkeeper_core::river_detach::tributary_at_cell;
@@ -42,7 +41,52 @@ fn open_dock_tab(tab: &str) {
     set_drawer_open(true);
 }
 
+fn sync_dock_tab_ui(state: &Rc<RefCell<AppState>>, tab: &str) {
+    match tab {
+        "inspect" | "view" | "world" => {
+            let mut s = state.borrow_mut();
+            deactivate_paint_brush(&mut s);
+            sync_paint_tool_ui(&Brush::Inspect);
+        }
+        "terrain" => {
+            let brush = {
+                let mut s = state.borrow_mut();
+                clear_pointer_interaction(&mut s);
+                if !terrain_brush(&s.brush) {
+                    s.brush = s.last_paint_brush.clone();
+                }
+                s.hover_cell = None;
+                s.brush.clone()
+            };
+            sync_paint_tool_ui(&brush);
+        }
+        "rivers" => {
+            let brush = {
+                let mut s = state.borrow_mut();
+                clear_pointer_interaction(&mut s);
+                if s.rivers_read_only {
+                    s.brush = Brush::Inspect;
+                } else if !river_brush(&s.brush) {
+                    s.brush = s.last_river_brush.clone();
+                }
+                s.hover_cell = None;
+                s.brush.clone()
+            };
+            sync_paint_tool_ui(&brush);
+            sync_river_status(&state.borrow());
+            sync_manual_river_authoring_ui(&state.borrow());
+        }
+        _ => {}
+    }
+    sync_editor_object_list(&state.borrow());
+    schedule_redraw(state.clone());
+}
+
 fn toggle_dock_tab(tab: &str) {
+    if crate::dom::workspace_panels_pinned() {
+        open_dock_tab(tab);
+        return;
+    }
     if drawer_is_open() {
         let current = document().get_element_by_id("dock-rail").and_then(|rail| {
             rail.query_selector("[data-dock].active")
@@ -169,6 +213,12 @@ pub fn attach_canvas_click(state: Rc<RefCell<AppState>>) {
                 return;
             }
 
+            // Canvas edits (paint, river ops, inspect-to-edit) are Editor-only;
+            // Generator/Agent/History leave the map read-only.
+            if state.borrow().workspace_mode != WorkspaceMode::Editor {
+                return;
+            }
+
             // Hydro brush paints elevation-driven hydro; Inspect opens the
             // author profile panel (unchanged behavior).
             let brush = state.borrow().brush.clone();
@@ -248,8 +298,11 @@ pub fn attach_pan_drag(state: Rc<RefCell<AppState>>) {
             if wizard_is_active() && down_state.borrow().wizard_edit_mode {
                 return;
             }
-            // Keep painting clicks reliable: pan starts only in Inspect mode.
-            if !matches!(down_state.borrow().brush, Brush::Inspect) {
+            // Route by mode, not by resetting the saved brush: in Editor a paint
+            // brush owns the drag (pan needs Inspect); in every other mode the
+            // stored Editor brush is inert, so pan/zoom always works.
+            let editing = down_state.borrow().workspace_mode == WorkspaceMode::Editor;
+            if editing && !matches!(down_state.borrow().brush, Brush::Inspect) {
                 return;
             }
             let mut s = down_state.borrow_mut();
@@ -341,6 +394,11 @@ pub fn attach_paint_drag(state: Rc<RefCell<AppState>>) {
                     s.suppress_next_click = true;
                 }
                 queue_wizard_land_mask_stamp(down_state.clone(), (q, r));
+                return;
+            }
+            // Paint/stamp mutations are Editor-only; the saved brush stays untouched
+            // in other modes but must not mutate the map there.
+            if down_state.borrow().workspace_mode != WorkspaceMode::Editor {
                 return;
             }
             let brush = down_state.borrow().brush.clone();
@@ -595,6 +653,7 @@ pub fn attach_save_click(state: Rc<RefCell<AppState>>) {
                         bump_content_rev(&mut s);
                     }
                     schedule_redraw(state.clone());
+                    sync_editor_object_list(&state.borrow());
                     set_text("status", "Saved.");
                 }
                 _ => set_text("status", "Save failed."),
@@ -626,20 +685,6 @@ pub fn attach_close_click(state: Rc<RefCell<AppState>>) {
 
 /// "&larr; Worlds" button in the editor: clears the server's active world
 /// and local UI state, then goes back to the Home screen.
-pub fn attach_switch_world_click(state: Rc<RefCell<AppState>>) {
-    let closure = Closure::<dyn FnMut()>::new(move || {
-        close_build_wizard();
-        let state = state.clone();
-        wasm_bindgen_futures::spawn_local(wizard_return_home(state));
-    });
-    document()
-        .get_element_by_id("switch-world")
-        .expect("missing #switch-world")
-        .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
-        .expect("attaching switch-world handler");
-    closure.forget();
-}
-
 /// map-bounds--hex-rectangle-16x9: Grand/World preset warnings on Home (D-49).
 pub fn attach_generate_lakes_click(state: Rc<RefCell<AppState>>) {
     {
@@ -847,52 +892,21 @@ pub fn attach_dock_click(state: Rc<RefCell<AppState>>) {
                 }
 
                 toggle_dock_tab(&tab);
+                sync_dock_tab_ui(&state, &tab);
+                return;
+            }
 
-                match tab.as_str() {
-                    "inspect" | "view" | "world" => {
-                        {
-                            let mut s = state.borrow_mut();
-                            deactivate_paint_brush(&mut s);
-                        }
-                        sync_paint_tool_ui(&Brush::Inspect);
-                        schedule_redraw(state.clone());
-                    }
-                    "terrain" => {
-                        let brush = {
-                            let mut s = state.borrow_mut();
-                            clear_pointer_interaction(&mut s);
-                            if !terrain_brush(&s.brush) {
-                                s.brush = s.last_paint_brush.clone();
-                            }
-                            s.hover_cell = None;
-                            s.brush.clone()
-                        };
-                        sync_paint_tool_ui(&brush);
-                        if brush_paints(&brush) {
-                            schedule_redraw(state.clone());
-                        }
-                    }
-                    "rivers" => {
-                        let brush = {
-                            let mut s = state.borrow_mut();
-                            clear_pointer_interaction(&mut s);
-                            if s.rivers_read_only {
-                                s.brush = Brush::Inspect;
-                            } else if !river_brush(&s.brush) {
-                                s.brush = s.last_river_brush.clone();
-                            }
-                            s.hover_cell = None;
-                            s.brush.clone()
-                        };
-                        sync_paint_tool_ui(&brush);
-                        sync_river_status(&state.borrow());
-                        sync_manual_river_authoring_ui(&state.borrow());
-                        if brush_paints(&brush) {
-                            schedule_redraw(state.clone());
-                        }
-                    }
-                    _ => {}
-                }
+            if let Ok(Some(button)) = target.closest("[data-river-delete]") {
+                let Some(raw) = button.get_attribute("data-river-delete") else {
+                    return;
+                };
+                let Ok(river_id) = raw.parse::<u32>() else {
+                    return;
+                };
+                let state = state.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    delete_river_by_id(state, river_id).await;
+                });
                 return;
             }
 
@@ -981,19 +995,78 @@ pub fn attach_dock_click(state: Rc<RefCell<AppState>>) {
             }
         });
     document()
-        .get_element_by_id("tool-dock")
-        .expect("missing #tool-dock")
+        .get_element_by_id("editor")
+        .expect("missing #editor")
         .add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())
-        .expect("attaching dock handler");
+        .expect("attaching editor panel handler");
     closure.forget();
 }
 
-pub fn attach_escape_key() {
+/// Global Layers ▾ / Settings ▾ popovers: toggle on their button, close on
+/// outside click. Popovers live inside `#editor` so delegated view-toggle and
+/// world handlers keep working unchanged.
+pub fn attach_top_popovers() {
+    let close_all_except = |keep: Option<&str>| {
+        if let Ok(nodes) = document().query_selector_all(".top-popover") {
+            for i in 0..nodes.length() {
+                if let Some(node) = nodes.item(i) {
+                    if let Ok(el) = node.dyn_into::<web_sys::Element>() {
+                        let is_keep = keep.is_some_and(|k| el.id() == k);
+                        if !is_keep {
+                            let _ = el.class_list().add_1("hidden");
+                        }
+                    }
+                }
+            }
+        }
+    };
+    let closure =
+        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+            let Some(target) = click_target_element(&event) else {
+                return;
+            };
+            if let Ok(Some(btn)) = target.closest("[data-popover-toggle]") {
+                let Some(id) = btn.get_attribute("data-popover-toggle") else {
+                    return;
+                };
+                let already_open = document()
+                    .get_element_by_id(&id)
+                    .is_some_and(|el| !el.class_list().contains("hidden"));
+                close_all_except(None);
+                if !already_open {
+                    if let Some(pop) = document().get_element_by_id(&id) {
+                        let _ = pop.class_list().remove_1("hidden");
+                    }
+                }
+                return;
+            }
+            if let Ok(Some(_)) = target.closest(".top-popover") {
+                return; // click inside an open popover — keep it open
+            }
+            close_all_except(None);
+        });
+    let _ =
+        document().add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+    closure.forget();
+}
+
+pub fn attach_escape_key(state: Rc<RefCell<AppState>>) {
     let closure =
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |event: web_sys::KeyboardEvent| {
-            if event.key() == "Escape" {
-                set_drawer_open(false);
+            if event.key() != "Escape" {
+                return;
             }
+            if workspace_panels_pinned() {
+                let mut s = state.borrow_mut();
+                if terrain_brush(&s.brush) || river_brush(&s.brush) {
+                    deactivate_paint_brush(&mut s);
+                    sync_paint_tool_ui(&Brush::Inspect);
+                    sync_editor_object_list(&s);
+                    schedule_redraw(state.clone());
+                }
+                return;
+            }
+            set_drawer_open(false);
         });
     let _ =
         document().add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());

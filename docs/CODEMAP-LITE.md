@@ -13,6 +13,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Spatial contract (distance/ring/range/bounds) -> `crates/core/src/hex.rs`
 - Map size presets (Small/Medium/Large/Epic/Grand/World -> hex-rectangle 16:9 W×H; D-73 ladder Small~510…World~100k) -> `crates/core/src/map_preset.rs` (`map-preset--ladder-retune-500`)
 - Map state model (dense layers, unknown/none/value, manifest; **`revision` coarse optimistic concurrency** — `docs/MAP-REVISION.md`) -> `crates/core/src/layer.rs`
+- **Authored history timeline (D-107)** — WorldState + domain CoW + events/ChangeSets; separate from `map.revision`; `history/manifest.json` -> `crates/core/src/history.rs`, `crates/server/src/history.rs`, `crates/web/src/history.rs`
 - Cell index (`(q,r) <-> linear index`, `MapBounds::index_of`/`from_index`/`len`) -> `crates/core/src/hex.rs`
 - Dense typed-layer model (index-addressed, palette categorical + integer; `read_or_empty`; generic wire `WireCellState`/`LayerCellWrite`) -> `crates/core/src/layer.rs` (`DenseLayer`)
 - Step-3 silhouette model (`land_mask`, six layout classes + growth-plan catalog, seeded layered land growth → cleanup, shore character, inland sea, elevation sync; UI: 6 class cards + recipe-only Regenerate below cards + always-visible gen identity line; Continents balance + Archipelago multi-island enforce, incl. `archipelago_twin_groups` anti-blob retune) -> `crates/core/src/worldgen/land/` (`types`, `catalog`, `generate`, `growth`, `enforce`, `util`, `tests`; D-104 track A split; legacy import `mapkeeper_core::land_mask`)
@@ -70,8 +71,13 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Build wizard draft state (`[build]` in `mapkeeper.toml`, steps 1–6 + `scheme`, read/write/clear/normalize; Home resumes saved step) -> `crates/core/src/build_state.rs`, `crates/web/src/home.rs` (`home-build-draft-v1`, D-59, D-69, D-71)
 - Build draft API (`POST /api/projects` `build_wizard`, `PUT /api/build`, `PUT /api/build/bounds`, list `build_draft`/`build_step`) -> `crates/server/src/projects.rs`, `crates/server/src/build.rs` (D-59, D-69, D-71)
 - Build wizard step-1–4 API (`PUT /api/build/bounds` preset rewrite + Geo reset; `POST /api/build/land-mask/generate` returns seed identity JSON; land-mask cells; geology/elevation/climate generate) -> `crates/server/src/build.rs` (`wizard-merge-size-grid`, `world-pipeline--land-silhouette-v1`, `world-pipeline--tectonics-v1`, D-68/D-69/D-71)
-- Build lifecycle atomic bundles (phase 1): `reset_build_bounds` rollback on draft failure; `persist_land_mask_bundle`; `persist_climate_layers_bundle` via `FilesBundleBackup` in `world_io.rs` (agent-reliability--build-lifecycle-tx)
-- World Build Wizard shell (D-57 + D-59 draft resume + D-71 size+grid one screen): Home **Build World**, fullscreen overlay, Save Draft / wizard resume + Home footer version label -> `crates/web/index.html`, `crates/web/src/wizard.rs`, `crates/web/src/home.rs`
+- Build lifecycle atomic bundles (phase 1): `reset_build_bounds` rollback on draft failure; `persist_land_mask_bundle` (land_mask + elevation + cleared rivers/lakes); wizard `reload_water_layers` after land regen; `persist_climate_layers_bundle` via `FilesBundleBackup` in `world_io.rs` (agent-reliability--build-lifecycle-tx)
+- World Build Wizard shell (**D-106** unified workspace track 0; amends D-57 overlay; **mode toggle superseded by ui-shell-redesign Track 1 5-mode nav**): 3-column frame, collapsible panels; wizard steps in side slots -> `crates/web/index.html`, `crates/web/src/wizard.rs`, `crates/web/src/dom.rs`, `docs/WORLD-GEN-UI.md`
+- World Build Wizard panels (**D-106**): left tier nav (`#wiz-tier-nav`, collapsible tiers + locked stubs 7–12), right gen categories + stub panel + stale banner, `wizard_peak_step` + `wizard_invalidation_from` + `wizard_viewed_stub` in `state.rs` -> `crates/web/index.html`, `crates/web/src/wizard.rs`, `crates/web/src/state.rs`, `docs/WORLD-GEN-UI.md`
+- Editor workspace panels (**D-106 track 2**): dock rail → `#workspace-left` categories; drawer → `#workspace-right` settings + `#editor-object-list`; `sync_editor_object_list` in `brush.rs` -> `crates/web/index.html`, `crates/web/src/editor.rs`, `crates/web/src/brush.rs`, `crates/web/src/dom.rs`, `docs/WORLD-GEN-UI.md`
+- Build draft lifecycle (**D-106 track 3**): `build_draft_active`; `open/close_build_draft_session`; ← Worlds persist fix -> `crates/web/src/wizard.rs`, `crates/web/src/state.rs`, `crates/web/src/home.rs`, `crates/web/src/editor.rs`, `docs/WORLD-GEN-UI.md`
+- Mode-first shell (**ui-shell-redesign Track 1**): `WorkspaceMode` = SoT (Wizard·Generator·Editor·Agent·History); centralized `request_workspace_mode` → `validate_mode_availability`/`evaluate_wizard_entry` seams + `apply_shell_layout`/`enter/leave`; DOM `workspace-mode-*` derived; 5-seg top nav; global `Layers ▾`/`Settings ▾` popovers (`attach_top_popovers`); compact read-only world label + editable removed to Settings; Generator/Agent stubs + History placeholder; paint/stamp Editor-gated, pan routed by mode -> `crates/web/index.html`, `crates/web/src/wizard.rs`, `crates/web/src/state.rs`, `crates/web/src/editor.rs`, `crates/web/src/brush.rs`, `crates/web/src/dom.rs`, `crates/web/src/history.rs`, `docs/WORLD-GEN-UI.md`
+- World Build Wizard shell (D-57 + D-59 draft resume + D-71 size+grid one screen): Home **Build World**, Save Draft / wizard resume + Home footer version label -> `crates/web/index.html`, `crates/web/src/wizard.rs`, `crates/web/src/home.rs`
 - Home version label only (D-80 supersedes D-76 Check-for-updates CTA for alpha; updates via `update.ps1` / daily `run.ps1` pull when clean) -> `crates/web/index.html`, `crates/web/src/lib.rs`
 - Tester first-run flow (D-77): empty Home primary CTA `Create your first world` -> Build wizard defaults; blank Create demoted to advanced; post-Finish next-step note -> `crates/web/index.html`, `crates/web/src/home.rs`
 - Agent-managed alpha (D-80…D-86): root `setup.ps1` / daily `run.ps1` (pull when clean) / optional `update.ps1` + Cursor `/doctor`
@@ -98,6 +104,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Server boundary entry: `crates/server/src/lib.rs` (facade: `ServerConfig`, `build_router`, `bind`, `run` — **D-96** complete)
 - Server launcher/projects API: `crates/server/src/projects.rs` (`/api/projects*`, `/api/fixture-worlds*` — D-96 S1)
 - Server build wizard API: `crates/server/src/build.rs` (`/api/build*`, pipeline generate — D-96 S2)
+- Server history API: `crates/server/src/history.rs` (`GET/POST/DELETE /api/history*`, unlock, states, events, cataclysm, divergence ack/rebase — D-107)
 - Server map/profile/layers API: `crates/server/src/layers.rs` (`/api/map`, profile, `/api/layers/*` — D-96 S3)
 - Server rivers API: `crates/server/src/rivers.rs` (`/api/rivers/*`, generate — D-96 S4)
 - Server lakes API: `crates/server/src/lakes.rs` (`GET/PUT /api/lakes` — hydrology-lake-domain-v1)
@@ -112,6 +119,7 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Web state/types/DTOs: `crates/web/src/state.rs` (D-94 B1)
 - Web DOM helpers: `crates/web/src/dom.rs` (D-94 B1)
 - Web HTTP fetch/load/post: `crates/web/src/api.rs` (D-94 B1)
+- Web history timeline UI: `crates/web/src/history.rs` (D-107 — states, events, divergence review, rebase/ack)
 - Web canvas layout/redraw/rAF: `crates/web/src/canvas.rs` (D-94 B2; river polygon LOD `rivers-polygon-render-v1`)
 - Web brush tiers + paint stamps: `crates/web/src/brush.rs` (D-94 B4)
 - Web Build Wizard UI/handlers: `crates/web/src/wizard.rs` (D-94 B3)
@@ -120,8 +128,8 @@ Product pitch / invariants (authors): `README.md#product` · `README.md#invarian
 - Web elevation view overlays: `crates/web/src/elevation_view.rs`
 - Home screen layout entry: `crates/web/index.html`
 - Alpha tester notes (stub → CURSOR-ALPHA): `docs/TESTER-NOTES-0.2.1.md`
-- World Build Wizard overlay (D-57 shell + D-59 draft): `crates/web/index.html` (`#build-wizard`), `crates/web/src/wizard.rs`
-- Editor tool dock (rail + collapsible drawers: Inspect/profile, Terrain brushes Land/Water/Raise/Lower + step/falloff, View color mode + elevation overlays, World): `crates/web/index.html`, `crates/web/src/editor.rs`, `crates/web/src/elevation_view.rs` — **overlays** the map (D-39); canvas stable on drawer toggle
+- World Build Wizard overlay (D-57 shell + D-59 draft; **superseded by D-106 workspace frame**): `crates/web/index.html` (`#build-wizard` side slots), `crates/web/src/wizard.rs`
+- Editor tool dock (rail + collapsible drawers: Inspect/profile, Terrain brushes Land/Water/Raise/Lower + step/falloff, Lakes & rivers): `crates/web/index.html`, `crates/web/src/editor.rs`, `crates/web/src/elevation_view.rs` — **D-106 track 2** in-frame left/right panels (amends D-39 overlay); **ui-shell-redesign Track 1** moved View overlays → global `Layers ▾` and World info → `Settings ▾`; canvas stable on category switch
 - Project list actions (`open` / `remove` / `delete`, with secondary manage flow): `crates/web/src/home.rs`, `crates/server/src/projects.rs`
 - Default create path suggestion (`Documents/MAPKEEPER Worlds`): `crates/server/src/projects.rs`, `crates/web/src/home.rs`
 - Map bounds at create (`map_preset`, `write_map_manifest`, `/api/map` bounds + `legacy_map`): `crates/server/src/projects.rs`, `crates/server/src/world_io.rs`, `crates/server/src/layers.rs` (`GET /api/map`), `crates/core/src/map_preset.rs`

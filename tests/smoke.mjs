@@ -46,9 +46,9 @@ await page.click("#save");
 await page.waitForFunction(() => document.getElementById("status")?.textContent === "Saved.", { timeout: 3000 });
 
 if (homeActive) {
-  await page.click('[data-dock="world"]');
-  await page.waitForSelector("#dock-drawer:not(.collapsed)", { timeout: 2000 });
-  await page.click("#switch-world");
+  // ui-shell-redesign Track 1: ← Worlds lives in the top bar (#wiz-worlds);
+  // the World drawer moved into Settings ▾ and no longer duplicates navigation.
+  await page.click("#wiz-worlds");
   await page.waitForSelector("#home.active", { timeout: 3000 });
   await page.locator("#project-list .id", { hasText: worldId }).waitFor({ timeout: 3000 });
 }

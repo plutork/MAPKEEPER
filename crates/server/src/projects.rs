@@ -167,13 +167,10 @@ async fn create_project(
     State(server): State<Arc<ServerState>>,
     Json(input): Json<CreateProjectInput>,
 ) -> impl IntoResponse {
-    if !world::is_valid_world_id(&input.id) {
-        return (
-            StatusCode::BAD_REQUEST,
-            "invalid world name format: use lowercase letters, digits, '-', '_' only",
-        )
-            .into_response();
-    }
+    let id = match world::normalize_world_id(&input.id) {
+        Ok(id) => id,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
     let path = world_io::normalize_world_path(Path::new(&input.path));
     let manifest = path.join("mapkeeper.toml");
     if manifest.exists() {
@@ -183,7 +180,7 @@ async fn create_project(
         )
             .into_response();
     }
-    let _write = server.world_locks.acquire_write(&input.id).await;
+    let _write = server.world_locks.acquire_write(&id).await;
     if let Err(err) = std::fs::create_dir_all(&path) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
@@ -205,7 +202,7 @@ async fn create_project(
     }
     if let Err(err) = std::fs::write(
         &manifest,
-        build_state::manifest_toml_with_build(&input.id, input.build_wizard == Some(true)),
+        build_state::manifest_toml_with_build(&id, input.build_wizard == Some(true)),
     ) {
         return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
@@ -220,9 +217,9 @@ async fn create_project(
     }
 
     let mut file = world_io::load_projects();
-    file.projects.retain(|entry| entry.id != input.id);
+    file.projects.retain(|entry| entry.id != id);
     file.upsert(ProjectEntry {
-        id: input.id.clone(),
+        id: id.clone(),
         path: path.display().to_string(),
     });
     if let Err(err) = world_io::save_projects(&file) {
@@ -231,10 +228,10 @@ async fn create_project(
 
     server.app.lock().unwrap().active = Some(ActiveWorld {
         path: path.clone(),
-        id: input.id.clone(),
+        id: id.clone(),
     });
     Json(ProjectEntry {
-        id: input.id,
+        id,
         path: path.display().to_string(),
     })
     .into_response()

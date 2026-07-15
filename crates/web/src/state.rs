@@ -403,6 +403,42 @@ pub(crate) enum Brush {
     RiverErase,
 }
 
+/// Top-shell workspace mode (D-106 → ui-shell-redesign Track 1). Single source of
+/// truth for which mode is active; DOM classes/panels are derived from it.
+/// Not a world lifecycle — mode never persists to disk.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum WorkspaceMode {
+    Wizard,
+    Generator,
+    Editor,
+    Agent,
+    History,
+}
+
+impl WorkspaceMode {
+    /// CSS suffix for the `workspace-mode-*` class on `#editor`.
+    pub(crate) fn css_slug(self) -> &'static str {
+        match self {
+            WorkspaceMode::Wizard => "wizard",
+            WorkspaceMode::Generator => "generator",
+            WorkspaceMode::Editor => "editor",
+            WorkspaceMode::Agent => "agent",
+            WorkspaceMode::History => "history",
+        }
+    }
+
+    pub(crate) fn from_slug(slug: &str) -> Option<Self> {
+        match slug {
+            "wizard" => Some(WorkspaceMode::Wizard),
+            "generator" => Some(WorkspaceMode::Generator),
+            "editor" => Some(WorkspaceMode::Editor),
+            "agent" => Some(WorkspaceMode::Agent),
+            "history" => Some(WorkspaceMode::History),
+            _ => None,
+        }
+    }
+}
+
 pub(crate) struct AppState {
     /// Cells that have an author profile (used for the profile-presence marker).
     pub(crate) cells: HashMap<(i32, i32), String>,
@@ -520,6 +556,8 @@ pub(crate) struct AppState {
     pub(crate) wizard_stamp_last_center: Option<(i32, i32)>,
     /// Build wizard step: 1 size · 2 land · 3 tectonics · 4 elevation · 5 climate · 6 water (D-71/D-90/D-91).
     pub(crate) wizard_step: u32,
+    /// Furthest pipeline step reached this session (never decreases on back-nav).
+    pub(crate) wizard_peak_step: u32,
     pub(crate) wizard_geo_style: String,
     pub(crate) wizard_geo_nonce: u32,
     pub(crate) wizard_elev_style: String,
@@ -527,8 +565,91 @@ pub(crate) struct AppState {
     pub(crate) wizard_climate_style: String,
     pub(crate) wizard_climate_nonce: u32,
     pub(crate) wizard_geo_accepted: bool,
+    /// First pipeline step index marked stale after upstream regen (D-106 track 1).
+    pub(crate) wizard_invalidation_from: Option<u32>,
+    /// View-only stub panel (7–12); does not change `wizard_step` or persisted draft.
+    pub(crate) wizard_viewed_stub: Option<u32>,
     /// Dense geology cache for tint overlay (index → palette string).
     pub(crate) geology: Option<DenseLayer>,
+    /// D-106 track 3 — incomplete build draft session (Wizard|Editor toggle).
+    pub(crate) build_draft_active: bool,
+    /// ui-shell-redesign Track 1 — active top-shell mode (single source of truth).
+    pub(crate) workspace_mode: WorkspaceMode,
+    /// D-107 — authored history timeline.
+    pub(crate) history_enabled: bool,
+    pub(crate) history_unlock_available: bool,
+    pub(crate) history_expanded: bool,
+    pub(crate) history_selected_id: String,
+    pub(crate) history_states: Vec<HistoryStateWire>,
+    pub(crate) history_events: Vec<HistoryEventWire>,
+    pub(crate) history_divergence: Vec<String>,
+    pub(crate) history_divergence_review: Vec<DivergenceReviewWire>,
+    pub(crate) history_selected_can_delete: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(crate) struct DivergenceReviewWire {
+    pub(crate) state_id: String,
+    pub(crate) display_date: String,
+    pub(crate) name: String,
+    pub(crate) domains: Vec<DomainRefWire>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(crate) struct DomainRefWire {
+    pub(crate) domain: String,
+    pub(crate) local_ref: String,
+    #[serde(default)]
+    pub(crate) fork_source_state_id: Option<String>,
+    #[serde(default)]
+    pub(crate) fork_source_state_name: Option<String>,
+    pub(crate) message: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(crate) struct HistoryEventWire {
+    pub(crate) id: String,
+    pub(crate) time_key: i64,
+    pub(crate) display_date: String,
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) description: String,
+    #[serde(default)]
+    pub(crate) anchor_state_id: Option<String>,
+    #[serde(default)]
+    pub(crate) change_set_id: Option<String>,
+    #[serde(default)]
+    pub(crate) result_state_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(crate) struct HistoryStateWire {
+    pub(crate) id: String,
+    pub(crate) time_key: i64,
+    pub(crate) display_date: String,
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) based_on: Option<String>,
+    #[serde(default)]
+    pub(crate) locked: bool,
+    #[serde(default)]
+    pub(crate) history_divergence: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct HistoryResponse {
+    pub(crate) enabled: bool,
+    pub(crate) unlock_available: bool,
+    pub(crate) selected_state_id: String,
+    pub(crate) states: Vec<HistoryStateWire>,
+    #[serde(default)]
+    pub(crate) events: Vec<HistoryEventWire>,
+    #[serde(default)]
+    pub(crate) history_divergence: Vec<String>,
+    #[serde(default)]
+    pub(crate) divergence_review: Vec<DivergenceReviewWire>,
+    #[serde(default)]
+    pub(crate) selected_can_delete: bool,
 }
 /// D-69: in-app confirm — window.confirm is often silent/blocked in Tauri WebView2.
 #[derive(Clone)]

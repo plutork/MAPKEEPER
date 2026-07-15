@@ -95,6 +95,28 @@ pub fn is_valid_world_id(id: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
+/// Author-facing input → stored `world_id` (trim, lowercase, non-alnum → `-`).
+pub fn normalize_world_id(input: &str) -> Result<String, &'static str> {
+    let mut out = String::new();
+    let mut prev_sep = false;
+    for ch in input.trim().chars() {
+        let lower = ch.to_ascii_lowercase();
+        if lower.is_ascii_alphanumeric() || lower == '_' {
+            out.push(lower);
+            prev_sep = false;
+        } else if !prev_sep {
+            out.push('-');
+            prev_sep = true;
+        }
+    }
+    let trimmed = out.trim_matches('-').trim_matches('_');
+    if trimmed.is_empty() || !is_valid_world_id(trimmed) {
+        Err("invalid world id after normalization: use letters, digits, '-', '_'")
+    } else {
+        Ok(trimmed.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +128,14 @@ mod tests {
         assert!(!is_valid_world_id("My-World"));
         assert!(is_valid_world_id("main"));
         assert!(is_valid_world_id("north-continent_2"));
+    }
+
+    #[test]
+    fn normalize_slugifies_author_input() {
+        assert_eq!(normalize_world_id("DOGGOD").unwrap(), "doggod");
+        assert_eq!(normalize_world_id("My World").unwrap(), "my-world");
+        assert_eq!(normalize_world_id("  North_2  ").unwrap(), "north_2");
+        assert!(normalize_world_id("").is_err());
+        assert!(normalize_world_id("!!!").is_err());
     }
 }

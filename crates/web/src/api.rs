@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::brush::{
     deactivate_paint_brush, reset_view_on_world_open, river_brush, sync_detach_tributary_ui,
-    sync_manual_river_authoring_ui, sync_name_migration_warning, sync_river_status,
-    RIVERS_READ_ONLY_MSG,
+    sync_editor_object_list, sync_manual_river_authoring_ui, sync_name_migration_warning,
+    sync_river_status, RIVERS_READ_ONLY_MSG,
 };
 use crate::dom::{input, perf_now, set_text, set_world_label, show_view, textarea};
 use crate::home::{refresh_suggested_path, render_project_list};
@@ -33,6 +33,7 @@ use crate::state::{
 use crate::water_diag::{
     lake_catalog_stats, set_water_gen_trace, sync_water_diagnostics,
 };
+use crate::history::sync_history_ui;
 use crate::wizard::sync_wizard_actions;
 
 #[derive(Clone, Copy)]
@@ -252,6 +253,8 @@ pub(crate) async fn load_map_with_options(state: Rc<RefCell<AppState>>, options:
     probe_precip_layer(&state).await;
     load_lakes(&state).await;
     load_rivers(&state).await;
+    load_history(state.clone()).await;
+    sync_editor_object_list(&state.borrow());
     let redraw_start = perf_now();
     let drawn = crate::canvas::redraw(&state.borrow());
     let first_redraw_ms = perf_now() - redraw_start;
@@ -266,6 +269,34 @@ pub(crate) async fn load_map_with_options(state: Rc<RefCell<AppState>>, options:
         s.last_draw_snapshot = Some(draw_snapshot(&s));
     }
     crate::perf_emit(&state.borrow().perf);
+}
+
+pub(crate) async fn load_history(state: Rc<RefCell<AppState>>) {
+    let world_id = state.borrow().scoped_world_id.clone();
+    let Ok(resp) = scoped_request(
+        gloo_net::http::Request::get("/api/history"),
+        world_id.as_deref(),
+    )
+    .send()
+    .await
+    else {
+        return;
+    };
+    let Ok(h) = resp.json::<crate::state::HistoryResponse>().await else {
+        return;
+    };
+    {
+        let mut s = state.borrow_mut();
+        s.history_enabled = h.enabled;
+        s.history_unlock_available = h.unlock_available;
+        s.history_selected_id = h.selected_state_id;
+        s.history_states = h.states;
+        s.history_events = h.events;
+        s.history_divergence = h.history_divergence;
+        s.history_divergence_review = h.divergence_review;
+        s.history_selected_can_delete = h.selected_can_delete;
+    }
+    sync_history_ui(&state.borrow());
 }
 
 /// Fetch the dense elevation layer (scale-layers, D-46) into index buffers.
@@ -350,6 +381,15 @@ async fn sync_precip_input_from_diagnostics(state: &Rc<RefCell<AppState>>) {
         state.borrow_mut().precip_input_state = Some(value.to_string());
         sync_water_diagnostics(&state.borrow());
     }
+}
+
+/// Reload lakes + rivers after land silhouette changes (D-46 downstream invalidation).
+pub(crate) async fn reload_water_layers(state: &Rc<RefCell<AppState>>) {
+    load_lakes(state).await;
+    load_rivers(state).await;
+    let mut s = state.borrow_mut();
+    s.active_river_id = None;
+    s.river_pin_source = None;
 }
 
 /// Fetch river topology projection.
@@ -615,25 +655,11 @@ pub(crate) async fn post_river_detach(state: Rc<RefCell<AppState>>) {
     crate::canvas::schedule_redraw(state);
 }
 
-pub(crate) async fn delete_river_at_cell(state: Rc<RefCell<AppState>>, q: i32, r: i32) {
+pub(crate) async fn delete_river_by_id(state: Rc<RefCell<AppState>>, river_id: u32) {
     if state.borrow().rivers_read_only {
         set_text("river-status", RIVERS_READ_ONLY_MSG);
         return;
     }
-    let river_id = {
-        let s = state.borrow();
-        let index = match s.map_bounds.index_of(Axial::new(q, r)) {
-            Some(i) => i,
-            None => return,
-        };
-        match river_at_cell(&s.rivers, index) {
-            Some(id) => id,
-            None => {
-                set_text("river-status", "No river on this cell");
-                return;
-            }
-        }
-    };
     let url = format!("/api/rivers/{river_id}");
     let Ok(resp) = scoped_mutate_from_state(&state, gloo_net::http::Request::delete(&url))
         .send()
@@ -665,6 +691,28 @@ pub(crate) async fn delete_river_at_cell(state: Rc<RefCell<AppState>>, q: i32, r
         sync_river_status(&s);
     }
     crate::canvas::schedule_redraw(state);
+}
+
+pub(crate) async fn delete_river_at_cell(state: Rc<RefCell<AppState>>, q: i32, r: i32) {
+    if state.borrow().rivers_read_only {
+        set_text("river-status", RIVERS_READ_ONLY_MSG);
+        return;
+    }
+    let river_id = {
+        let s = state.borrow();
+        let index = match s.map_bounds.index_of(Axial::new(q, r)) {
+            Some(i) => i,
+            None => return,
+        };
+        match river_at_cell(&s.rivers, index) {
+            Some(id) => id,
+            None => {
+                set_text("river-status", "No river on this cell");
+                return;
+            }
+        }
+    };
+    delete_river_by_id(state, river_id).await;
 }
 
 pub(crate) async fn post_river_pop(state: Rc<RefCell<AppState>>) {

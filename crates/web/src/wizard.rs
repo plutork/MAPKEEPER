@@ -1,20 +1,21 @@
 //! World Build Wizard UI and handlers (D-94 B3).
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::api::{
     ensure_pending_saved_or_discard, flush_pending_paints, handle_mutate_response,
     load_elevation, load_geology, load_map, persist_build_draft_for, post_lake_generate,
-    post_river_generate, refresh_projects, scoped_mutate_from_state, scoped_request,
+    post_river_generate, refresh_projects, reload_water_layers, scoped_mutate_from_state,
 };
+use crate::history::sync_history_ui;
 use crate::mutate_retry::{classify_http_status, paint_stop_message, wizard_stamp_flush_action, MutateErrorKind, PaintFlushAction};
 use crate::brush::{effective_brush_radius_from_hex_size, paint_stamp_cells, reset_view_on_world_open};
 use crate::canvas::{current_hex_size_px, schedule_redraw};
 use crate::dom::{
     active_attr_in_group, clear_inspect_panel, click_target_element, document,
-    hide_post_finish_note, hide_wiz_confirm, select_value, set_drawer_open, set_select_value,
+    hide_post_finish_note, hide_wiz_confirm, select_value, set_dock_tab, set_drawer_open, set_select_value,
     set_text, set_world_label, show_post_finish_note, show_wiz_confirm, sync_preset_size_warning,
     toggle_active_in_group,
 };
@@ -22,7 +23,7 @@ use crate::state::{
     bump_content_rev, fresh_elevation_layer, set_elevation_cell, AppState, BuildBoundsInput,
     BuildBoundsResponse, BuildStateInput, WizConfirmKind, WizardClimateGenerateInput,
     WizardElevationGenerateInput, WizardGeologyGenerateInput, WizardLandMaskCellInput,
-    WizardLandMaskGenerateInput, WizardLandMaskGenerateResponse, MAX_BRUSH_RADIUS,
+    WizardLandMaskGenerateInput, WizardLandMaskGenerateResponse, WorkspaceMode, MAX_BRUSH_RADIUS,
     MIN_BRUSH_RADIUS, PAINT_BATCH_MAX_CELLS, PAINT_SAVE_COOLDOWN_MS,
 };
 use crate::water_diag::sync_water_diagnostics;
@@ -106,15 +107,14 @@ async fn apply_wizard_preset_now(state: Rc<RefCell<AppState>>, preset: &str) -> 
     let _ = resp.json::<BuildBoundsResponse>().await;
     {
         let mut s = state.borrow_mut();
-        s.wizard_accepted = false;
-        s.wizard_edit_mode = false;
+        invalidate_wizard_downstream(&mut s, 1);
         clear_wizard_stamp_pending(&mut s);
-        s.wizard_geo_accepted = false;
-        s.geology = None;
         s.wizard_recipe_id.clear();
         s.wizard_gen_seed = None;
         s.wizard_regenerate_nonce = 0;
+        clear_wizard_viewed_stub(&mut s);
         s.wizard_step = 1;
+        s.wizard_peak_step = 1;
     }
     load_map(state.clone()).await;
     {
@@ -144,6 +144,7 @@ async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
     }
     {
         let mut s = state.borrow_mut();
+        clear_wizard_viewed_stub(&mut s);
         s.wizard_step = to;
         s.wizard_edit_mode = false;
         if to <= 1 {
@@ -168,26 +169,247 @@ async fn wizard_go_back_one_step(state: Rc<RefCell<AppState>>) {
     }
 }
 
-fn set_wizard_active(active: bool) {
+fn set_workspace_active(active: bool) {
     let Some(editor) = document().get_element_by_id("editor") else {
         return;
     };
     if active {
-        let _ = editor.class_list().add_1("wizard-active");
-        set_drawer_open(false);
+        let _ = editor.class_list().add_1("workspace-active");
+        if !editor.class_list().contains("workspace-build") {
+            let _ = editor.class_list().add_1("workspace-mode-editor");
+            let _ = editor.class_list().remove_1("workspace-mode-wizard");
+        }
     } else {
-        let _ = editor.class_list().remove_1("wizard-active");
+        let _ = editor.class_list().remove_1("workspace-active");
+        let _ = editor.class_list().remove_1("workspace-build");
+        let _ = editor.class_list().remove_1("workspace-mode-wizard");
+        let _ = editor.class_list().remove_1("workspace-mode-editor");
+        let _ = editor.class_list().remove_1("workspace-left-collapsed");
+        let _ = editor.class_list().remove_1("workspace-right-collapsed");
+    }
+}
+
+/// Set the single `workspace-mode-*` class on `#editor` (derived from WorkspaceMode).
+fn set_mode_class(mode: WorkspaceMode) {
+    let Some(editor) = document().get_element_by_id("editor") else {
+        return;
+    };
+    for slug in ["wizard", "generator", "editor", "agent", "history"] {
+        let _ = editor
+            .class_list()
+            .remove_1(&format!("workspace-mode-{slug}"));
+    }
+    let _ = editor
+        .class_list()
+        .add_1(&format!("workspace-mode-{}", mode.css_slug()));
+}
+
+fn set_workspace_mode_wizard() {
+    set_mode_class(WorkspaceMode::Wizard);
+    sync_mode_nav(WorkspaceMode::Wizard);
+    set_drawer_open(false);
+}
+
+fn set_workspace_mode_editor() {
+    set_mode_class(WorkspaceMode::Editor);
+    sync_mode_nav(WorkspaceMode::Editor);
+    set_dock_tab("inspect");
+    set_drawer_open(true);
+}
+
+/// Reflect the active mode in the 5-segment top nav.
+fn sync_mode_nav(mode: WorkspaceMode) {
+    if let Ok(nodes) = document().query_selector_all("[data-workspace-mode]") {
+        for i in 0..nodes.length() {
+            if let Some(node) = nodes.item(i) {
+                if let Ok(el) = node.dyn_into::<web_sys::Element>() {
+                    let active =
+                        el.get_attribute("data-workspace-mode").as_deref() == Some(mode.css_slug());
+                    if active {
+                        let _ = el.class_list().add_1("active");
+                    } else {
+                        let _ = el.class_list().remove_1("active");
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Transient note near the mode nav (e.g. blocked Wizard entry). Auto-clears on next switch.
+fn set_mode_note(msg: &str) {
+    set_text("workspace-mode-note", msg);
+}
+
+/// Legacy Wizard entry-policy seam (ui-shell-redesign Track 1). The *only* place the
+/// legacy availability lives; `wizard-reset-contract` will replace this body without
+/// touching the shared mode switch. Today: Wizard is enterable only during an active
+/// build-draft session (mirrors the retired Wizard|Editor toggle availability).
+fn evaluate_wizard_entry(state: &AppState) -> bool {
+    state.build_draft_active
+}
+
+/// History availability seam. Track 1 keeps the legacy D-107 gate here (single locus);
+/// entering History always succeeds — the mode surfaces the existing unlock/unavailable
+/// state when history is not enabled. Removing draft lifecycle later replaces only this.
+fn validate_mode_availability(_state: &AppState, _mode: WorkspaceMode) -> bool {
+    true
+}
+
+/// Centralized mode switch: seam checks → leave current → set SoT → apply layout → enter.
+pub(crate) async fn request_workspace_mode(state: Rc<RefCell<AppState>>, target: WorkspaceMode) {
+    if target == WorkspaceMode::Wizard && !evaluate_wizard_entry(&state.borrow()) {
+        set_mode_note("Restart with Wizard is not available yet for this world.");
+        sync_mode_nav(state.borrow().workspace_mode);
+        return;
+    }
+    if !validate_mode_availability(&state.borrow(), target) {
+        sync_mode_nav(state.borrow().workspace_mode);
+        return;
+    }
+    set_mode_note("");
+    let current = state.borrow().workspace_mode;
+    leave_current_mode(state.clone(), current).await;
+    state.borrow_mut().workspace_mode = target;
+    apply_shell_layout(target);
+    enter_new_mode(state.clone(), target).await;
+}
+
+/// Flush/persist obligations when leaving a mode. Only Wizard has side effects today.
+async fn leave_current_mode(state: Rc<RefCell<AppState>>, current: WorkspaceMode) {
+    if current == WorkspaceMode::Wizard && state.borrow().build_draft_active {
+        flush_pending_paints(state.clone()).await;
+        ensure_wizard_stamps_flushed(state.clone()).await;
+        let step = state.borrow().wizard_step.max(2);
+        let _ = persist_build_draft_for(&state, step).await;
+        state.borrow_mut().wizard_edit_mode = false;
+    }
+}
+
+/// DOM/layout derived from the active mode (single place that sets mode classes/panels).
+fn apply_shell_layout(mode: WorkspaceMode) {
+    set_mode_class(mode);
+    sync_mode_nav(mode);
+    match mode {
+        WorkspaceMode::Editor => {
+            set_dock_tab("inspect");
+            set_drawer_open(true);
+        }
+        WorkspaceMode::Wizard => {
+            set_drawer_open(false);
+        }
+        _ => {}
+    }
+}
+
+/// Mode-specific setup after the layout is applied.
+async fn enter_new_mode(state: Rc<RefCell<AppState>>, mode: WorkspaceMode) {
+    match mode {
+        WorkspaceMode::Wizard => {
+            {
+                let mut s = state.borrow_mut();
+                clear_wizard_viewed_stub(&mut s);
+                sync_wizard_actions(&s);
+            }
+            let step = state.borrow().wizard_step;
+            if step >= 3 {
+                load_geology(&state).await;
+            }
+            if step >= 4 {
+                load_elevation(&state).await;
+            }
+            if step >= 6 {
+                reload_water_layers(&state).await;
+            }
+            schedule_redraw(state.clone());
+        }
+        WorkspaceMode::Editor => {
+            sync_workspace_lifecycle_crumb(&state.borrow());
+            sync_history_ui(&state.borrow());
+        }
+        WorkspaceMode::History => {
+            let mut s = state.borrow_mut();
+            s.history_expanded = true;
+            sync_history_ui(&s);
+        }
+        _ => {}
+    }
+}
+
+fn toggle_workspace_panel_collapse(side: &str) {
+    let Some(editor) = document().get_element_by_id("editor") else {
+        return;
+    };
+    let class = match side {
+        "left" => "workspace-left-collapsed",
+        "right" => "workspace-right-collapsed",
+        _ => return,
+    };
+    if editor.class_list().contains(class) {
+        let _ = editor.class_list().remove_1(class);
+    } else {
+        let _ = editor.class_list().add_1(class);
+    }
+}
+
+fn set_workspace_build(active: bool) {
+    let Some(editor) = document().get_element_by_id("editor") else {
+        return;
+    };
+    if active {
+        set_workspace_active(true);
+        let _ = editor.class_list().add_1("workspace-build");
+        set_workspace_mode_wizard();
+    } else {
+        let _ = editor.class_list().remove_1("workspace-build");
+        set_workspace_mode_editor();
         set_wizard_status("");
     }
 }
 
 pub fn open_build_wizard() {
     hide_post_finish_note();
-    set_wizard_active(true);
+    set_workspace_build(true);
+}
+
+pub(crate) fn open_build_draft_session(state: &mut AppState) {
+    state.build_draft_active = true;
+    state.workspace_mode = WorkspaceMode::Wizard;
+    open_build_wizard();
 }
 
 pub(crate) fn close_build_wizard() {
-    set_wizard_active(false);
+    set_workspace_build(false);
+}
+
+pub(crate) fn close_build_draft_session(state: &mut AppState) {
+    state.build_draft_active = false;
+    state.workspace_mode = WorkspaceMode::Editor;
+    close_build_wizard();
+    sync_history_ui(state);
+}
+
+fn sync_workspace_lifecycle_crumb(state: &AppState) {
+    if !state.build_draft_active {
+        return;
+    }
+    let Some(editor) = document().get_element_by_id("editor") else {
+        return;
+    };
+    if !editor.class_list().contains("workspace-mode-editor") {
+        return;
+    }
+    if let Some(crumb) = document().query_selector(".wiz-crumb").ok().flatten() {
+        let label = build_step_label(state.wizard_step);
+        crumb.set_text_content(Some(&format!("Build draft · {label} · Editor")));
+    }
+}
+
+pub(crate) async fn ensure_wizard_stamps_flushed(state: Rc<RefCell<AppState>>) {
+    if state.borrow().pending_wizard_stamps.is_empty() {
+        return;
+    }
+    flush_wizard_land_mask_stamps(state).await;
 }
 
 pub(crate) fn set_wizard_status(msg: &str) {
@@ -197,7 +419,7 @@ pub(crate) fn set_wizard_status(msg: &str) {
 pub(crate) fn wizard_is_active() -> bool {
     document()
         .get_element_by_id("editor")
-        .is_some_and(|el| el.class_list().contains("wizard-active"))
+        .is_some_and(|el| el.class_list().contains("workspace-build"))
 }
 
 fn set_panel_hidden(id: &str, hidden: bool) {
@@ -223,109 +445,21 @@ fn sync_wizard_nav(step: u32) {
         };
         crumb.set_text_content(Some(text));
     }
-    if let Ok(Some(list)) = document().query_selector(".wiz-group.expanded .wiz-steps") {
-        if let Ok(items) = list.query_selector_all(".wiz-step") {
-            for i in 0..items.length() {
-                let Some(node) = items.item(i) else {
-                    continue;
-                };
-                let Ok(el) = node.dyn_into::<web_sys::Element>() else {
-                    continue;
-                };
-                let _ = el.class_list().remove_1("active");
-                let _ = el.class_list().remove_1("done");
-                let _ = el.class_list().remove_1("locked");
-                let step_num = i + 1;
-                if step_num < step.min(5) {
-                    let _ = el.class_list().add_1("done");
-                } else if step_num == step && step < 5 {
-                    let _ = el.class_list().add_1("active");
-                } else if step >= 5 {
-                    let _ = el.class_list().add_1("done");
-                } else {
-                    let _ = el.class_list().add_1("locked");
-                }
-            }
-        }
-    }
-    if let Some(climate_group) = document().get_element_by_id("wiz-group-climate") {
-        if step >= 5 {
-            let _ = climate_group.class_list().remove_1("locked");
-            let _ = climate_group.class_list().add_1("expanded");
-            if let Ok(Some(head)) = climate_group.query_selector(".wiz-group-head") {
-                let _ = head.remove_attribute("disabled");
-                head.set_text_content(Some("▼ Climate"));
-            }
-            if let Ok(Some(list)) = climate_group.query_selector(".wiz-steps") {
-                if let Ok(items) = list.query_selector_all(".wiz-step") {
-                    for i in 0..items.length() {
-                        let Some(node) = items.item(i) else {
-                            continue;
-                        };
-                        let Ok(el) = node.dyn_into::<web_sys::Element>() else {
-                            continue;
-                        };
-                        let _ = el.class_list().remove_1("active");
-                        let _ = el.class_list().remove_1("done");
-                        let _ = el.class_list().remove_1("locked");
-                        if step == 5 {
-                            let _ = el.class_list().add_1("active");
-                        } else {
-                            let _ = el.class_list().add_1("done");
-                        }
-                    }
-                }
-            }
-        } else {
-            let _ = climate_group.class_list().add_1("locked");
-            let _ = climate_group.class_list().remove_1("expanded");
-            if let Ok(Some(head)) = climate_group.query_selector(".wiz-group-head") {
-                let _ = head.set_attribute("disabled", "");
-                head.set_text_content(Some("▶ Climate"));
-            }
-        }
-    }
-    if let Some(water_group) = document().get_element_by_id("wiz-group-water") {
-        if step >= 6 {
-            let _ = water_group.class_list().remove_1("locked");
-            let _ = water_group.class_list().add_1("expanded");
-            if let Ok(Some(head)) = water_group.query_selector(".wiz-group-head") {
-                let _ = head.remove_attribute("disabled");
-                head.set_text_content(Some("▼ Water"));
-            }
-            if let Ok(Some(list)) = water_group.query_selector(".wiz-steps") {
-                if let Ok(items) = list.query_selector_all(".wiz-step") {
-                    for i in 0..items.length() {
-                        let Some(node) = items.item(i) else {
-                            continue;
-                        };
-                        let Ok(el) = node.dyn_into::<web_sys::Element>() else {
-                            continue;
-                        };
-                        let _ = el.class_list().remove_1("active");
-                        let _ = el.class_list().remove_1("done");
-                        let _ = el.class_list().remove_1("locked");
-                        if step == 6 {
-                            let _ = el.class_list().add_1("active");
-                        } else {
-                            let _ = el.class_list().add_1("done");
-                        }
-                    }
-                }
-            }
-        } else {
-            let _ = water_group.class_list().add_1("locked");
-            let _ = water_group.class_list().remove_1("expanded");
-            if let Ok(Some(head)) = water_group.query_selector(".wiz-group-head") {
-                let _ = head.set_attribute("disabled", "");
-                head.set_text_content(Some("▶ Water"));
-            }
-        }
-    }
 }
 
 fn show_wizard_step(state: &AppState) {
     let step = state.wizard_step;
+    let viewing_stub = state.wizard_viewed_stub;
+    for n in 1..=WIZARD_BUILTIN_STEPS {
+        let id = format!("wiz-panel-step{n}");
+        set_panel_hidden(&id, true);
+    }
+    set_panel_hidden("wiz-panel-stub", viewing_stub.is_none());
+    if let Some(stub_step) = viewing_stub {
+        sync_wizard_stub_panel(stub_step);
+        sync_wizard_nav(step);
+        return;
+    }
     set_panel_hidden("wiz-panel-step1", step != 1);
     set_panel_hidden("wiz-panel-step2", step != 2);
     set_panel_hidden("wiz-panel-step3", step != 3);
@@ -384,6 +518,472 @@ fn wizard_has_downstream(state: &AppState) -> bool {
         }
     }
     false
+}
+
+/// D-106 track 1 — pipeline step freeze/stale display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WizardFreezeStatus {
+    Pending,
+    Active,
+    Frozen,
+    Stale,
+}
+
+fn bump_wizard_peak(state: &mut AppState, step: u32) {
+    state.wizard_peak_step = state.wizard_peak_step.max(step);
+}
+
+pub(crate) fn wizard_step_is_frozen(
+    step: u32,
+    _wizard_step: u32,
+    wizard_peak_step: u32,
+    land_accepted: bool,
+    geo_accepted: bool,
+) -> bool {
+    match step {
+        1 => wizard_peak_step > 1,
+        2 => land_accepted,
+        3 => geo_accepted,
+        4 => wizard_peak_step >= 4,
+        5 => wizard_peak_step >= 5,
+        _ => false,
+    }
+}
+
+pub(crate) fn wizard_freeze_status(
+    step: u32,
+    wizard_step: u32,
+    wizard_peak_step: u32,
+    land_accepted: bool,
+    geo_accepted: bool,
+    invalidation_from: Option<u32>,
+) -> WizardFreezeStatus {
+    if invalidation_from.is_some_and(|from| step >= from) {
+        return WizardFreezeStatus::Stale;
+    }
+    if wizard_step == step {
+        return WizardFreezeStatus::Active;
+    }
+    if wizard_step_is_frozen(
+        step,
+        wizard_step,
+        wizard_peak_step,
+        land_accepted,
+        geo_accepted,
+    ) {
+        return WizardFreezeStatus::Frozen;
+    }
+    WizardFreezeStatus::Pending
+}
+
+pub(crate) fn invalidate_wizard_downstream(state: &mut AppState, from_step: u32) {
+    let first_stale = from_step.saturating_add(1);
+    if state.wizard_invalidation_from.map(|v| v > first_stale).unwrap_or(true) {
+        state.wizard_invalidation_from = Some(first_stale);
+    }
+    if from_step <= 2 {
+        state.wizard_accepted = false;
+        state.wizard_edit_mode = false;
+    }
+    if from_step <= 3 {
+        state.wizard_geo_accepted = false;
+        state.geology = None;
+    }
+}
+
+pub(crate) fn advance_invalidation_after_regen(state: &mut AppState, step: u32) {
+    if state.wizard_invalidation_from == Some(step) {
+        state.wizard_invalidation_from = if step >= 6 {
+            None
+        } else {
+            Some(step + 1)
+        };
+    }
+}
+
+fn freeze_status_label(status: WizardFreezeStatus) -> &'static str {
+    match status {
+        WizardFreezeStatus::Pending => "pending",
+        WizardFreezeStatus::Active => "active",
+        WizardFreezeStatus::Frozen => "frozen",
+        WizardFreezeStatus::Stale => "stale",
+    }
+}
+
+pub(crate) const WIZARD_BUILTIN_STEPS: u32 = 6;
+pub(crate) const WIZARD_FIRST_STUB_STEP: u32 = 7;
+pub(crate) const WIZARD_LAST_STUB_STEP: u32 = 12;
+
+pub(crate) fn is_wizard_stub_step(step: u32) -> bool {
+    (WIZARD_FIRST_STUB_STEP..=WIZARD_LAST_STUB_STEP).contains(&step)
+}
+
+pub(crate) fn tier_id_for_step(step: u32) -> &'static str {
+    match step {
+        1 => "setup",
+        2..=4 => "geo",
+        5 => "climate",
+        6 => "water",
+        7 => "soils",
+        8 => "life",
+        9..=11 => "extras",
+        12 => "validation",
+        _ => "setup",
+    }
+}
+
+pub(crate) struct WizardStubInfo {
+    #[allow(dead_code)]
+    pub step: u32,
+    pub slug: &'static str,
+    pub title: &'static str,
+    pub description: &'static str,
+}
+
+pub(crate) fn wizard_stub_info(step: u32) -> Option<WizardStubInfo> {
+    Some(match step {
+        7 => WizardStubInfo {
+            step: 7,
+            slug: "soil-foundation",
+            title: "Soil foundation",
+            description: "Build the underlying soil properties that will later influence biomes, vegetation, agriculture, and erosion.",
+        },
+        8 => WizardStubInfo {
+            step: 8,
+            slug: "biomes",
+            title: "Biomes",
+            description: "Place life zones from climate, elevation, and soils — forests, grasslands, deserts, and tundra belts across the map.",
+        },
+        9 => WizardStubInfo {
+            step: 9,
+            slug: "resources",
+            title: "Resources",
+            description: "Scatter ore deposits, fertile belts, and strategic raw materials tied to geology and terrain.",
+        },
+        10 => WizardStubInfo {
+            step: 10,
+            slug: "hazards",
+            title: "Hazards",
+            description: "Mark volcanoes, earthquake zones, flood plains, and other natural risks authors can weave into lore.",
+        },
+        11 => WizardStubInfo {
+            step: 11,
+            slug: "points-of-interest",
+            title: "Points of interest",
+            description: "Seed landmarks, ruins, and settlement sites that later become named places in the editor.",
+        },
+        12 => WizardStubInfo {
+            step: 12,
+            slug: "validate-world",
+            title: "Validate world",
+            description: "Run integrity checks on layers and hydrology before you call the build complete and export.",
+        },
+        _ => return None,
+    })
+}
+
+struct WizardTierDef {
+    id: &'static str,
+    label: &'static str,
+    steps: &'static [WizardNavStep],
+}
+
+struct WizardNavStep {
+    step: u32,
+    label: &'static str,
+    stub: bool,
+}
+
+const WIZARD_TIERS: &[WizardTierDef] = &[
+    WizardTierDef {
+        id: "setup",
+        label: "Setup",
+        steps: &[WizardNavStep {
+            step: 1,
+            label: "Map size",
+            stub: false,
+        }],
+    },
+    WizardTierDef {
+        id: "geo",
+        label: "Geo",
+        steps: &[
+            WizardNavStep {
+                step: 2,
+                label: "Land",
+                stub: false,
+            },
+            WizardNavStep {
+                step: 3,
+                label: "Tectonics",
+                stub: false,
+            },
+            WizardNavStep {
+                step: 4,
+                label: "Elevation",
+                stub: false,
+            },
+        ],
+    },
+    WizardTierDef {
+        id: "climate",
+        label: "Climate",
+        steps: &[WizardNavStep {
+            step: 5,
+            label: "Climate",
+            stub: false,
+        }],
+    },
+    WizardTierDef {
+        id: "water",
+        label: "Water",
+        steps: &[WizardNavStep {
+            step: 6,
+            label: "Lakes & rivers",
+            stub: false,
+        }],
+    },
+    WizardTierDef {
+        id: "soils",
+        label: "Soils",
+        steps: &[WizardNavStep {
+            step: 7,
+            label: "Soil foundation",
+            stub: true,
+        }],
+    },
+    WizardTierDef {
+        id: "life",
+        label: "Life",
+        steps: &[WizardNavStep {
+            step: 8,
+            label: "Biomes",
+            stub: true,
+        }],
+    },
+    WizardTierDef {
+        id: "extras",
+        label: "Extras",
+        steps: &[
+            WizardNavStep {
+                step: 9,
+                label: "Resources",
+                stub: true,
+            },
+            WizardNavStep {
+                step: 10,
+                label: "Hazards",
+                stub: true,
+            },
+            WizardNavStep {
+                step: 11,
+                label: "Points of interest",
+                stub: true,
+            },
+        ],
+    },
+    WizardTierDef {
+        id: "validation",
+        label: "Validation",
+        steps: &[WizardNavStep {
+            step: 12,
+            label: "Validate world",
+            stub: true,
+        }],
+    },
+];
+
+thread_local! {
+    static WIZ_TIER_COLLAPSED: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+}
+
+fn tier_must_expand(tier_id: &str, progression_step: u32, viewed_stub: Option<u32>) -> bool {
+    if tier_id == tier_id_for_step(progression_step) {
+        return true;
+    }
+    if let Some(stub) = viewed_stub {
+        if tier_id == tier_id_for_step(stub) {
+            return true;
+        }
+    }
+    false
+}
+
+fn tier_is_complete(tier: &WizardTierDef, state: &AppState) -> bool {
+    tier.steps.iter().all(|entry| {
+        if entry.stub {
+            return false;
+        }
+        let status = wizard_freeze_status(
+            entry.step,
+            state.wizard_step,
+            state.wizard_peak_step,
+            state.wizard_accepted,
+            state.wizard_geo_accepted,
+            state.wizard_invalidation_from,
+        );
+        matches!(
+            status,
+            WizardFreezeStatus::Frozen | WizardFreezeStatus::Stale
+        )
+    })
+}
+
+fn sync_wizard_stub_panel(step: u32) {
+    let Some(info) = wizard_stub_info(step) else {
+        return;
+    };
+    set_text("wiz-stub-title", info.title);
+    set_text("wiz-stub-desc", info.description);
+}
+
+fn sync_wizard_tier_nav(state: &AppState) {
+    let Some(root) = document().get_element_by_id("wiz-tier-nav") else {
+        return;
+    };
+    let progression_step = state.wizard_step;
+    let viewed_stub = state.wizard_viewed_stub;
+    WIZ_TIER_COLLAPSED.with(|collapsed| {
+        let mut set = collapsed.borrow_mut();
+        for tier in WIZARD_TIERS {
+            if tier_must_expand(tier.id, progression_step, viewed_stub) {
+                set.remove(tier.id);
+            }
+        }
+    });
+    let collapsed: HashSet<String> = WIZ_TIER_COLLAPSED.with(|c| c.borrow().clone());
+    let mut html = String::new();
+    for tier in WIZARD_TIERS {
+        let is_collapsed = collapsed.contains(tier.id)
+            && !tier_must_expand(tier.id, progression_step, viewed_stub);
+        let tier_class = if tier_is_complete(tier, state) {
+            "wiz-tier tier-complete"
+        } else {
+            "wiz-tier"
+        };
+        let collapsed_class = if is_collapsed { " collapsed" } else { "" };
+        let expanded = if is_collapsed { "false" } else { "true" };
+        html.push_str(&format!(
+            "<div class=\"{tier_class}{collapsed_class}\" data-tier=\"{id}\">\
+<button type=\"button\" class=\"wiz-tier-header\" data-tier-toggle=\"{id}\" aria-expanded=\"{expanded}\">\
+<span class=\"wiz-tier-chevron\" aria-hidden=\"true\">&#9660;</span>{label}</button>\
+<ul class=\"wiz-freeze-list wiz-tier-body\" data-tier-body=\"{id}\">",
+            tier_class = tier_class,
+            collapsed_class = collapsed_class,
+            id = tier.id,
+            expanded = expanded,
+            label = tier.label,
+        ));
+        for entry in tier.steps {
+            if entry.stub {
+                let viewing = viewed_stub == Some(entry.step);
+                let viewing_class = if viewing { " viewing" } else { "" };
+                let slug = wizard_stub_info(entry.step)
+                    .map(|s| s.slug)
+                    .unwrap_or("stub");
+                html.push_str(&format!(
+                    "<li class=\"wiz-freeze-item locked{viewing_class}\" data-freeze-step=\"{step}\" data-stub=\"1\" data-step=\"{slug}\" data-tier=\"{tier}\">\
+<button type=\"button\" class=\"wiz-freeze-btn wiz-stub-btn\" data-freeze-step=\"{step}\" data-stub=\"1\" data-step=\"{slug}\" data-tier=\"{tier}\">{step} · {label}</button></li>",
+                    viewing_class = viewing_class,
+                    step = entry.step,
+                    slug = slug,
+                    tier = tier.id,
+                    label = entry.label,
+                ));
+                continue;
+            }
+            let status = wizard_freeze_status(
+                entry.step,
+                state.wizard_step,
+                state.wizard_peak_step,
+                state.wizard_accepted,
+                state.wizard_geo_accepted,
+                state.wizard_invalidation_from,
+            );
+            let tag = freeze_status_label(status);
+            let clickable = entry.step <= state.wizard_step;
+            let btn = if clickable { "button" } else { "span" };
+            html.push_str(&format!(
+                "<li class=\"wiz-freeze-item {tag}\" data-freeze-step=\"{step}\">\
+<{btn} type=\"button\" class=\"wiz-freeze-btn\" data-freeze-step=\"{step}\">{step} · {label}</{btn}></li>",
+                tag = tag,
+                step = entry.step,
+                label = entry.label,
+                btn = btn,
+            ));
+        }
+        html.push_str("</ul></div>");
+    }
+    root.set_inner_html(&html);
+}
+
+pub(crate) fn clear_wizard_viewed_stub(state: &mut AppState) {
+    state.wizard_viewed_stub = None;
+}
+
+fn wizard_view_stub_panel(state: &mut AppState, step: u32) {
+    if !is_wizard_stub_step(step) {
+        return;
+    }
+    state.wizard_viewed_stub = Some(step);
+}
+
+fn sync_wizard_stale_banner(state: &AppState) {
+    let msg = if let Some(from) = state.wizard_invalidation_from {
+        let name = match from {
+            3 => "Tectonics and below",
+            4 => "Elevation and below",
+            5 => "Climate and below",
+            6 => "Water",
+            _ => "Downstream steps",
+        };
+        format!("{name} need regeneration after the upstream change.")
+    } else {
+        String::new()
+    };
+    if let Some(el) = document().get_element_by_id("wiz-stale-banner") {
+        if msg.is_empty() {
+            let _ = el.class_list().add_1("hidden");
+            el.set_text_content(None);
+        } else {
+            let _ = el.class_list().remove_1("hidden");
+            el.set_text_content(Some(&msg));
+        }
+    }
+}
+
+async fn wizard_go_to_step(state: Rc<RefCell<AppState>>, to: u32) {
+    let from = state.borrow().wizard_step;
+    if to == from || !(1..=WIZARD_BUILTIN_STEPS).contains(&to) {
+        return;
+    }
+    if to > from {
+        return;
+    }
+    if !persist_build_draft_for(&state, to).await {
+        set_wizard_status("Could not switch step.");
+        return;
+    }
+    {
+        let mut s = state.borrow_mut();
+        clear_wizard_viewed_stub(&mut s);
+        s.wizard_step = to;
+        s.wizard_edit_mode = false;
+        if to <= 1 {
+            s.show_grid = true;
+        }
+        sync_wizard_actions(&s);
+    }
+    if to >= 3 {
+        load_geology(&state).await;
+    }
+    if to >= 4 {
+        load_elevation(&state).await;
+    }
+    if to >= 6 {
+        reload_water_layers(&state).await;
+    }
+    schedule_redraw(state);
 }
 
 fn set_button_disabled(id: &str, disabled: bool) {
@@ -541,6 +1141,8 @@ pub(crate) fn sync_wizard_actions(state: &AppState) {
         state.wizard_brush_radius,
     );
     sync_wizard_gen_identity(state);
+    sync_wizard_tier_nav(state);
+    sync_wizard_stale_banner(state);
     show_wizard_step(state);
 }
 
@@ -549,6 +1151,9 @@ async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
     set_wizard_status("Generating silhouette… (can take a moment on large maps)");
     let (recipe_id, character, layout_class, nonce) = {
         let mut s = state.borrow_mut();
+        if s.wizard_peak_step > 2 || s.wizard_geo_accepted {
+            invalidate_wizard_downstream(&mut s, 2);
+        }
         clear_wizard_stamp_pending(&mut s);
         ensure_wizard_recipe(&mut s);
         (
@@ -564,10 +1169,9 @@ async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
         variant: &layout_class,
         regenerate_nonce: nonce,
     };
-    let world_id = state.borrow().scoped_world_id.clone();
-    let Ok(resp) = scoped_request(
+    let Ok(resp) = scoped_mutate_from_state(
+        &state,
         gloo_net::http::Request::post("/api/build/land-mask/generate"),
-        world_id.as_deref(),
     )
         .json(&body)
         .expect("serialize wizard generate")
@@ -583,10 +1187,17 @@ async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
         return;
     };
     if !resp.ok() {
-        let msg = resp
-            .text()
-            .await
-            .unwrap_or_else(|_| "Generation rejected".to_string());
+        let msg = if resp.status() == 409 || resp.status() == 428 {
+            if resp.status() == 409 {
+                "Map changed elsewhere — reload world".to_string()
+            } else {
+                "Reload world to continue editing".to_string()
+            }
+        } else {
+            resp.text()
+                .await
+                .unwrap_or_else(|_| "Generation rejected".to_string())
+        };
         set_wizard_generating(false);
         {
             let s = state.borrow();
@@ -595,6 +1206,7 @@ async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
         set_wizard_status(&msg);
         return;
     }
+    handle_mutate_response(&state, &resp);
     if let Ok(identity) = resp.json::<WizardLandMaskGenerateResponse>().await {
         let mut s = state.borrow_mut();
         s.wizard_gen_seed = Some(identity.seed);
@@ -610,6 +1222,11 @@ async fn generate_wizard_land_mask(state: Rc<RefCell<AppState>>) {
         s.wizard_regenerate_nonce = identity.regenerate_nonce as u32;
     }
     load_elevation(&state).await;
+    reload_water_layers(&state).await;
+    {
+        let mut s = state.borrow_mut();
+        s.geology = None;
+    }
     schedule_redraw(state.clone());
     set_wizard_generating(false);
     {
@@ -641,6 +1258,12 @@ fn set_wizard_generating(busy: bool) {
 }
 
 async fn generate_wizard_geology(state: Rc<RefCell<AppState>>) {
+    {
+        let mut s = state.borrow_mut();
+        if s.wizard_peak_step > 3 {
+            invalidate_wizard_downstream(&mut s, 3);
+        }
+    }
     let (style, nonce) = {
         let s = state.borrow();
         (s.wizard_geo_style.clone(), s.wizard_geo_nonce)
@@ -649,10 +1272,9 @@ async fn generate_wizard_geology(state: Rc<RefCell<AppState>>) {
         style: &style,
         regenerate_nonce: nonce,
     };
-    let world_id = state.borrow().scoped_world_id.clone();
-    let Ok(resp) = scoped_request(
+    let Ok(resp) = scoped_mutate_from_state(
+        &state,
         gloo_net::http::Request::post("/api/build/geology/generate"),
-        world_id.as_deref(),
     )
         .json(&body)
         .expect("serialize geology generate")
@@ -663,17 +1285,26 @@ async fn generate_wizard_geology(state: Rc<RefCell<AppState>>) {
         return;
     };
     if !resp.ok() {
-        let msg = resp
-            .text()
-            .await
-            .unwrap_or_else(|_| "Geology generation rejected".to_string());
+        let msg = if resp.status() == 409 || resp.status() == 428 {
+            if resp.status() == 409 {
+                "Map changed elsewhere — reload world".to_string()
+            } else {
+                "Reload world to continue editing".to_string()
+            }
+        } else {
+            resp.text()
+                .await
+                .unwrap_or_else(|_| "Geology generation rejected".to_string())
+        };
         set_wizard_status(&msg);
         return;
     }
+    handle_mutate_response(&state, &resp);
     load_geology(&state).await;
     {
         let mut s = state.borrow_mut();
         s.wizard_geo_accepted = false;
+        advance_invalidation_after_regen(&mut s, 3);
         sync_wizard_actions(&s);
     }
     schedule_redraw(state.clone());
@@ -681,6 +1312,12 @@ async fn generate_wizard_geology(state: Rc<RefCell<AppState>>) {
 }
 
 async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
+    {
+        let mut s = state.borrow_mut();
+        if s.wizard_peak_step > 4 {
+            invalidate_wizard_downstream(&mut s, 4);
+        }
+    }
     let (style, nonce) = {
         let s = state.borrow();
         (s.wizard_elev_style.clone(), s.wizard_elev_nonce)
@@ -689,10 +1326,9 @@ async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
         style: &style,
         regenerate_nonce: nonce,
     };
-    let world_id = state.borrow().scoped_world_id.clone();
-    let Ok(resp) = scoped_request(
+    let Ok(resp) = scoped_mutate_from_state(
+        &state,
         gloo_net::http::Request::post("/api/build/elevation/generate"),
-        world_id.as_deref(),
     )
         .json(&body)
         .expect("serialize elevation generate")
@@ -703,19 +1339,37 @@ async fn generate_wizard_elevation(state: Rc<RefCell<AppState>>) {
         return;
     };
     if !resp.ok() {
-        let msg = resp
-            .text()
-            .await
-            .unwrap_or_else(|_| "Elevation generation rejected".to_string());
+        let msg = if resp.status() == 409 || resp.status() == 428 {
+            if resp.status() == 409 {
+                "Map changed elsewhere — reload world".to_string()
+            } else {
+                "Reload world to continue editing".to_string()
+            }
+        } else {
+            resp.text()
+                .await
+                .unwrap_or_else(|_| "Elevation generation rejected".to_string())
+        };
         set_wizard_status(&msg);
         return;
     }
+    handle_mutate_response(&state, &resp);
     load_elevation(&state).await;
+    {
+        let mut s = state.borrow_mut();
+        advance_invalidation_after_regen(&mut s, 4);
+    }
     schedule_redraw(state.clone());
     set_wizard_status("Elevation generated from land + geology.");
 }
 
 async fn generate_wizard_climate(state: Rc<RefCell<AppState>>) {
+    {
+        let mut s = state.borrow_mut();
+        if s.wizard_peak_step > 5 {
+            invalidate_wizard_downstream(&mut s, 5);
+        }
+    }
     let (style, nonce) = {
         let s = state.borrow();
         (s.wizard_climate_style.clone(), s.wizard_climate_nonce)
@@ -724,10 +1378,9 @@ async fn generate_wizard_climate(state: Rc<RefCell<AppState>>) {
         style: &style,
         regenerate_nonce: nonce,
     };
-    let world_id = state.borrow().scoped_world_id.clone();
-    let Ok(resp) = scoped_request(
+    let Ok(resp) = scoped_mutate_from_state(
+        &state,
         gloo_net::http::Request::post("/api/build/climate/generate"),
-        world_id.as_deref(),
     )
         .json(&body)
         .expect("serialize climate generate")
@@ -738,12 +1391,24 @@ async fn generate_wizard_climate(state: Rc<RefCell<AppState>>) {
         return;
     };
     if !resp.ok() {
-        let msg = resp
-            .text()
-            .await
-            .unwrap_or_else(|_| "Climate generation rejected".to_string());
+        let msg = if resp.status() == 409 || resp.status() == 428 {
+            if resp.status() == 409 {
+                "Map changed elsewhere — reload world".to_string()
+            } else {
+                "Reload world to continue editing".to_string()
+            }
+        } else {
+            resp.text()
+                .await
+                .unwrap_or_else(|_| "Climate generation rejected".to_string())
+        };
         set_wizard_status(&msg);
         return;
+    }
+    handle_mutate_response(&state, &resp);
+    {
+        let mut s = state.borrow_mut();
+        advance_invalidation_after_regen(&mut s, 5);
     }
     schedule_redraw(state.clone());
     set_wizard_status("Climate generated — temperature and precipitation layers saved.");
@@ -929,6 +1594,8 @@ async fn flush_wizard_land_mask_stamps(state: Rc<RefCell<AppState>>) {
         s.wizard_stamp_flush_in_flight = false;
     }
     if state.borrow().pending_wizard_stamps.is_empty() {
+        reload_water_layers(&state).await;
+        schedule_redraw(state.clone());
         set_wizard_status("Edit saved.");
     } else if !stop_scheduling {
         let attempts = state.borrow().wizard_stamp_retry_attempts;
@@ -952,6 +1619,47 @@ fn wiz_toggle_style_group(container_id: &str, attr: &str, active: &web_sys::Elem
         }
     }
     let _ = active.class_list().add_1("active");
+}
+
+fn attach_workspace_shell_handlers(state: Rc<RefCell<AppState>>) {
+    for (id, side) in [
+        ("workspace-left-collapse", "left"),
+        ("workspace-left-collapse-wiz", "left"),
+        ("workspace-right-collapse", "right"),
+        ("workspace-right-collapse-wiz", "right"),
+    ] {
+        if let Some(btn) = document().get_element_by_id(id) {
+            let side = side.to_string();
+            let closure = Closure::<dyn FnMut()>::new(move || {
+                toggle_workspace_panel_collapse(&side);
+            });
+            let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+            closure.forget();
+        }
+    }
+    // 5-segment top nav: delegate on the container, resolve target via data-workspace-mode.
+    if let Some(nav) = document().get_element_by_id("workspace-mode-nav") {
+        let state = state.clone();
+        let closure =
+            Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+                let Some(target) = click_target_element(&event) else {
+                    return;
+                };
+                let Ok(Some(btn)) = target.closest("[data-workspace-mode]") else {
+                    return;
+                };
+                let Some(slug) = btn.get_attribute("data-workspace-mode") else {
+                    return;
+                };
+                let Some(mode) = WorkspaceMode::from_slug(&slug) else {
+                    return;
+                };
+                let state = state.clone();
+                wasm_bindgen_futures::spawn_local(request_workspace_mode(state, mode));
+            });
+        let _ = nav.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        closure.forget();
+    }
 }
 
 pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
@@ -996,6 +1704,55 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
         on_cancel.forget();
     }
 
+    attach_workspace_shell_handlers(state.clone());
+
+    if let Ok(Some(nav)) = document().query_selector("#wiz-tier-nav") {
+        let state = state.clone();
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else {
+                return;
+            };
+            let Some(el) = click_target_element(&mouse) else {
+                return;
+            };
+            if let Some(tier_id) = el.get_attribute("data-tier-toggle") {
+                WIZ_TIER_COLLAPSED.with(|collapsed| {
+                    let mut set = collapsed.borrow_mut();
+                    let prog = state.borrow().wizard_step;
+                    let viewed = state.borrow().wizard_viewed_stub;
+                    if tier_must_expand(&tier_id, prog, viewed) {
+                        return;
+                    }
+                    if set.contains(&tier_id) {
+                        set.remove(&tier_id);
+                    } else {
+                        set.insert(tier_id);
+                    }
+                });
+                sync_wizard_tier_nav(&state.borrow());
+                return;
+            }
+            let Some(step_s) = el.get_attribute("data-freeze-step") else {
+                return;
+            };
+            let Ok(step) = step_s.parse::<u32>() else {
+                return;
+            };
+            if el.get_attribute("data-stub").as_deref() == Some("1") {
+                {
+                    let mut s = state.borrow_mut();
+                    wizard_view_stub_panel(&mut s, step);
+                    sync_wizard_actions(&s);
+                }
+                return;
+            }
+            let state = state.clone();
+            wasm_bindgen_futures::spawn_local(wizard_go_to_step(state, step));
+        });
+        let _ = nav.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        closure.forget();
+    }
+
     // Save Draft — flush pending paints; world already on disk from create.
     {
         let state = state.clone();
@@ -1024,7 +1781,6 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
     {
         let state = state.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
-            close_build_wizard();
             let state = state.clone();
             wasm_bindgen_futures::spawn_local(wizard_return_home(state));
         });
@@ -1076,7 +1832,9 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 }
                 {
                     let mut s = state.borrow_mut();
+                    clear_wizard_viewed_stub(&mut s);
                     s.wizard_step = 2;
+                    bump_wizard_peak(&mut s, 2);
                     s.show_grid = false;
                     ensure_wizard_recipe(&mut s);
                     sync_wizard_actions(&s);
@@ -1158,8 +1916,12 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
             {
                 let mut s = state.borrow_mut();
                 pick_wizard_recipe_for_class(&mut s, &class_id);
-                s.wizard_accepted = false;
-                s.wizard_edit_mode = false;
+                if s.wizard_peak_step > 2 || s.wizard_geo_accepted {
+                    invalidate_wizard_downstream(&mut s, 2);
+                } else {
+                    s.wizard_accepted = false;
+                    s.wizard_edit_mode = false;
+                }
                 sync_wizard_actions(&s);
             }
             set_wizard_status("Generating selected class…");
@@ -1180,8 +1942,12 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 let mut s = state.borrow_mut();
                 s.wizard_regenerate_nonce = s.wizard_regenerate_nonce.saturating_add(1);
                 rotate_wizard_recipe(&mut s);
-                s.wizard_accepted = false;
-                s.wizard_edit_mode = false;
+                if s.wizard_peak_step > 2 || s.wizard_geo_accepted {
+                    invalidate_wizard_downstream(&mut s, 2);
+                } else {
+                    s.wizard_accepted = false;
+                    s.wizard_edit_mode = false;
+                }
                 sync_wizard_actions(&s);
             }
             set_wizard_status("New shape for selected class…");
@@ -1327,7 +2093,9 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 }
                 {
                     let mut s = state.borrow_mut();
+                    clear_wizard_viewed_stub(&mut s);
                     s.wizard_step = 3;
+                    bump_wizard_peak(&mut s, 3);
                     s.wizard_edit_mode = false;
                     s.wizard_geo_accepted = false;
                     s.wizard_geo_nonce = 0;
@@ -1416,7 +2184,9 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 }
                 {
                     let mut s = state.borrow_mut();
+                    clear_wizard_viewed_stub(&mut s);
                     s.wizard_step = 4;
+                    bump_wizard_peak(&mut s, 4);
                     s.wizard_elev_nonce = 0;
                     sync_wizard_actions(&s);
                 }
@@ -1475,7 +2245,9 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 }
                 {
                     let mut s = state.borrow_mut();
+                    clear_wizard_viewed_stub(&mut s);
                     s.wizard_step = 5;
+                    bump_wizard_peak(&mut s, 5);
                     s.wizard_climate_nonce = 0;
                     sync_wizard_actions(&s);
                 }
@@ -1534,7 +2306,9 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 }
                 {
                     let mut s = state.borrow_mut();
+                    clear_wizard_viewed_stub(&mut s);
                     s.wizard_step = 6;
+                    bump_wizard_peak(&mut s, 6);
                     sync_wizard_actions(&s);
                 }
                 set_wizard_status("Step 6: generate lakes, then rivers.");
@@ -1628,50 +2402,20 @@ pub fn attach_wizard_handlers(state: Rc<RefCell<AppState>>) {
                 }
                 {
                     let mut s = state.borrow_mut();
+                    clear_wizard_viewed_stub(&mut s);
                     s.wizard_step = 2;
                     s.wizard_accepted = false;
                     s.wizard_geo_accepted = false;
                     s.wizard_edit_mode = false;
+                    close_build_draft_session(&mut s);
                     sync_wizard_actions(&s);
                 }
-                close_build_wizard();
                 set_wizard_status("Build finished.");
                 show_post_finish_note();
             });
         });
         if let Some(btn) = document().get_element_by_id("wiz-finish") {
             let _ = btn.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
-        }
-        closure.forget();
-    }
-
-    // Geo group collapse toggle (shell: only group with steps).
-    {
-        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
-            let Ok(mouse) = event.dyn_into::<web_sys::MouseEvent>() else {
-                return;
-            };
-            let Some(head) = click_target_element(&mouse) else {
-                return;
-            };
-            if head.get_attribute("data-wiz-group").as_deref() != Some("geo") {
-                return;
-            }
-            let Some(group) = head.closest(".wiz-group").ok().flatten() else {
-                return;
-            };
-            let expanded = group.class_list().contains("expanded");
-            if expanded {
-                let _ = group.class_list().remove_1("expanded");
-                head.set_text_content(Some("▶ Geo"));
-            } else {
-                let _ = group.class_list().add_1("expanded");
-                head.set_text_content(Some("▼ Geo"));
-            }
-        });
-        if let Ok(Some(left)) = document().query_selector(".wiz-left") {
-            let _ =
-                left.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
         }
         closure.forget();
     }
@@ -1687,14 +2431,17 @@ pub(crate) async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     if !ensure_pending_saved_or_discard(state.clone()).await {
         return;
     }
-    if document()
-        .get_element_by_id("editor")
-        .is_some_and(|el| el.class_list().contains("wizard-active"))
-    {
+    let should_persist = state.borrow().build_draft_active;
+    if should_persist {
         let step = state.borrow().wizard_step.max(2);
+        flush_pending_paints(state.clone()).await;
+        ensure_wizard_stamps_flushed(state.clone()).await;
         let _ = persist_build_draft_for(&state, step).await;
     }
-    close_build_wizard();
+    {
+        let mut s = state.borrow_mut();
+        close_build_draft_session(&mut s);
+    }
     let _ = gloo_net::http::Request::post("/api/projects/close")
         .send()
         .await;
@@ -1726,7 +2473,9 @@ pub(crate) async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.wizard_regenerate_nonce = 0;
     state_mut.wizard_recipe_id.clear();
     state_mut.wizard_gen_seed = None;
+    clear_wizard_viewed_stub(&mut state_mut);
     state_mut.wizard_step = 1;
+    state_mut.wizard_peak_step = 1;
     state_mut.wizard_geo_style = "belts".to_string();
     state_mut.wizard_geo_nonce = 0;
     state_mut.wizard_elev_style = "standard".to_string();
@@ -1734,7 +2483,9 @@ pub(crate) async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     state_mut.wizard_climate_style = "balanced".to_string();
     state_mut.wizard_climate_nonce = 0;
     state_mut.wizard_geo_accepted = false;
+    state_mut.wizard_invalidation_from = None;
     state_mut.geology = None;
+    state_mut.build_draft_active = false;
     set_drawer_open(false);
     clear_inspect_panel();
     set_world_label("—");
@@ -1742,4 +2493,69 @@ pub(crate) async fn wizard_return_home(state: Rc<RefCell<AppState>>) {
     sync_wizard_actions(&state_mut);
     drop(state_mut);
     wasm_bindgen_futures::spawn_local(refresh_projects(state));
+}
+
+#[cfg(test)]
+mod freeze_tests {
+    use super::{
+        is_wizard_stub_step, tier_id_for_step, wizard_freeze_status, wizard_stub_info,
+        WizardFreezeStatus,
+    };
+
+    #[test]
+    fn freeze_status_active_frozen_and_stale() {
+        assert_eq!(
+            wizard_freeze_status(2, 2, 2, false, false, None),
+            WizardFreezeStatus::Active
+        );
+        assert_eq!(
+            wizard_freeze_status(2, 3, 3, true, false, None),
+            WizardFreezeStatus::Frozen
+        );
+        assert_eq!(
+            wizard_freeze_status(4, 3, 5, true, true, Some(4)),
+            WizardFreezeStatus::Stale
+        );
+        assert_eq!(
+            wizard_freeze_status(6, 6, 6, true, true, None),
+            WizardFreezeStatus::Active
+        );
+        assert_eq!(
+            wizard_freeze_status(5, 3, 5, true, true, None),
+            WizardFreezeStatus::Frozen
+        );
+    }
+
+    #[test]
+    fn stub_steps_and_tier_mapping() {
+        assert!(!is_wizard_stub_step(6));
+        assert!(is_wizard_stub_step(7));
+        assert!(is_wizard_stub_step(12));
+        assert!(!is_wizard_stub_step(13));
+        assert_eq!(tier_id_for_step(1), "setup");
+        assert_eq!(tier_id_for_step(4), "geo");
+        assert_eq!(tier_id_for_step(5), "climate");
+        assert_eq!(tier_id_for_step(7), "soils");
+        assert_eq!(tier_id_for_step(11), "extras");
+        assert_eq!(tier_id_for_step(12), "validation");
+    }
+
+    #[test]
+    fn stub_metadata_has_required_fields() {
+        for step in 7..=12 {
+            let info = wizard_stub_info(step).expect("stub info");
+            assert_eq!(info.step, step);
+            assert!(!info.slug.is_empty());
+            assert!(!info.title.is_empty());
+            assert!(!info.description.is_empty());
+        }
+    }
+
+    #[test]
+    fn stub_view_is_separate_from_builtin_steps() {
+        assert!(!is_wizard_stub_step(6));
+        for step in 7..=12 {
+            assert!(is_wizard_stub_step(step));
+        }
+    }
 }

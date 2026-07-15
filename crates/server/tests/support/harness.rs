@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
@@ -17,6 +17,43 @@ use tempfile::TempDir;
 use tower::ServiceExt;
 
 static PROJECTS_REGISTRY_LOCK: Mutex<()> = Mutex::new(());
+
+/// Throwaway APPDATA for HTTP integration tests (mirrors `crates/cli/tests/query_flow.rs`).
+static ISOLATED_REGISTRY_HOME: OnceLock<TempDir> = OnceLock::new();
+
+/// First real env snapshot before any harness redirects APPDATA/HOME.
+static ORIGINAL_REGISTRY_ENV: OnceLock<(Option<String>, Option<String>)> = OnceLock::new();
+
+pub fn isolated_registry_home() -> &'static TempDir {
+    ISOLATED_REGISTRY_HOME.get_or_init(|| tempfile::tempdir().expect("isolated registry home"))
+}
+
+/// Author `%APPDATA%/mapkeeper/projects.json` — unchanged by isolated harness.
+pub fn real_projects_file_path() -> String {
+    let (appdata, home) = ORIGINAL_REGISTRY_ENV
+        .get()
+        .cloned()
+        .unwrap_or((None, None));
+    mapkeeper_core::projects::projects_file_path(appdata.as_deref(), home.as_deref())
+}
+
+fn install_isolated_projects_registry() {
+    ORIGINAL_REGISTRY_ENV.get_or_init(|| {
+        (
+            std::env::var("APPDATA").ok(),
+            std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .ok(),
+        )
+    });
+    let home = isolated_registry_home().path();
+    // SAFETY: registry-writing tests hold `registry_test_lock`; env is process-wide.
+    unsafe {
+        std::env::set_var("APPDATA", home);
+        std::env::set_var("HOME", home);
+        std::env::set_var("USERPROFILE", home);
+    }
+}
 
 /// Serialize tests that set process-wide `MAPKEEPER_FAILPOINT`.
 pub fn failpoint_test_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -57,6 +94,7 @@ impl Harness {
     }
 
     pub fn with_active_world(world: Option<PathBuf>) -> Self {
+        install_isolated_projects_registry();
         let web_dist = tempfile::tempdir().expect("web_dist tempdir");
         let config = ServerConfig {
             world,

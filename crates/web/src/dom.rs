@@ -103,6 +103,12 @@ pub(crate) fn toggle_active_in_group(container_id: &str, attr: &str, active: &El
     let _ = active.class_list().add_1("active");
 }
 pub(crate) fn set_drawer_open(open: bool) {
+    if workspace_panels_pinned() {
+        if let Some(drawer) = document().get_element_by_id("dock-drawer") {
+            let _ = drawer.class_list().remove_1("collapsed");
+        }
+        return;
+    }
     if let Some(drawer) = document().get_element_by_id("dock-drawer") {
         if open {
             let _ = drawer.class_list().remove_1("collapsed");
@@ -112,7 +118,16 @@ pub(crate) fn set_drawer_open(open: bool) {
     }
 }
 
+pub(crate) fn workspace_panels_pinned() -> bool {
+    document()
+        .get_element_by_id("editor")
+        .is_some_and(|el| el.class_list().contains("workspace-active"))
+}
+
 pub(crate) fn drawer_is_open() -> bool {
+    if workspace_panels_pinned() {
+        return true;
+    }
     document()
         .get_element_by_id("dock-drawer")
         .is_some_and(|drawer| !drawer.class_list().contains("collapsed"))
@@ -153,11 +168,28 @@ pub(crate) fn set_dock_tab(tab: &str) {
     }
 }
 pub(crate) fn set_world_label(world_id: &str) {
+    // Same value in both surfaces: read-only display (Settings ▾) and the
+    // compact top-bar label. Neither is editable (ui-shell-redesign Track 1).
     set_text("world-name", world_id);
+    set_text("workspace-world-label", world_id);
 }
 
 /// Toggle between the Home (project picker) and Editor (hex map) screens.
 pub(crate) fn show_view(name: &str) {
+    if name == "editor" {
+        if let Some(el) = document().get_element_by_id("editor") {
+            let _ = el.class_list().add_1("workspace-active");
+            if !el.class_list().contains("workspace-build") {
+                let _ = el.class_list().add_1("workspace-mode-editor");
+            }
+            set_dock_tab("inspect");
+            set_drawer_open(true);
+        }
+    } else if name != "editor" {
+        if let Some(el) = document().get_element_by_id("editor") {
+            let _ = el.class_list().remove_1("workspace-active");
+        }
+    }
     for id in ["home", "editor"] {
         if let Some(el) = document().get_element_by_id(id) {
             if id == name {

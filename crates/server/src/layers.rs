@@ -215,7 +215,14 @@ async fn put_layer_batch(
         world_io::write_dense_layer(&world.path, &dense)
     }) {
         Ok(((), revision)) => world_revision::no_content_with_revision(revision).into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => match err {
+            world_revision::RevisionMutationError::Internal(msg)
+                if msg == "world state is locked" =>
+            {
+                (StatusCode::FORBIDDEN, msg).into_response()
+            }
+            other => other.into_response(),
+        },
     }
 }
 
@@ -252,6 +259,11 @@ async fn put_layer_cell(
     }) {
         Ok((wire, revision)) => world_revision::json_with_revision(wire, revision).into_response(),
         Err(err) => match err {
+            world_revision::RevisionMutationError::Internal(msg)
+                if msg == "world state is locked" =>
+            {
+                (StatusCode::FORBIDDEN, msg).into_response()
+            }
             world_revision::RevisionMutationError::Internal(msg)
                 if msg == "cell out of map bounds" =>
             {
