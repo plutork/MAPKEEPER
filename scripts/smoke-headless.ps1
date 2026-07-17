@@ -157,7 +157,7 @@ try {
         # bak created on first replace after ensure; optional on some paths
     }
 
-    # Delete → app trash (N-025); not permanent purge.
+    # Delete -> app trash (N-025); not permanent purge.
     $deleteBody = @{ path = $WorldPath; expected_id = "smoke-world" } | ConvertTo-Json
     Invoke-WebRequest -Uri "$BaseUrl/api/projects/delete" -Method Post -ContentType "application/json" -Body $deleteBody -UseBasicParsing -TimeoutSec 10 | Out-Null
     if (Test-Path -LiteralPath $WorldPath) { throw "Delete left world path in place (expected trash move)." }
