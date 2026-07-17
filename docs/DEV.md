@@ -6,13 +6,13 @@ Developer-oriented setup for working on mapkeeper itself.
 
 ## Repo layout
 
-Cargo workspace for the active product shell:
+Cargo workspace for the active product shell + thin spatial binding:
 
 | Path | Owns |
 |------|------|
-| `crates/core` | project registry and identity-only world contract |
-| `crates/server` | local health/projects API + static UI |
-| `crates/web` | Rust -> WASM bootstrap + five-mode shell UI |
+| `crates/core` | project registry, world identity, immutable `[spatial]` config, spatial foundation + relief field |
+| `crates/server` | local HTTP API: health, projects, map-presets, spatial GET/PUT + static UI |
+| `crates/web` | Rust → WASM helpers + five-mode shell UI (`index.html` canvas map) |
 | `crates/desktop` | Windows desktop shell (Tauri) |
 | `archive/map-v2/` | excluded read-only reference; never an active dependency |
 | `setup.ps1` / `run.ps1` / `update.ps1` | Windows alpha bootstrap / daily launch with clean-tree pull / explicit update |
@@ -26,9 +26,10 @@ cargo run -p mapkeeper-server -- --port 4000 --web-dist crates/web/dist
 
 Then open `http://127.0.0.1:4000`.
 
-`mapkeeper-server` without `--world` starts launcher mode. The active API is
-limited to `/api/health` and `/api/projects` create/open/close/forget/delete.
-Map, layer, profile, generator, hydrology, and History APIs are archived.
+`mapkeeper-server` without `--world` starts launcher mode. The active API includes
+`/api/health`, `/api/projects` (create/open/close/forget/delete), `/api/map-presets`,
+`/api/spatial`, and `/api/spatial/field` (relief updates). Archived map-v2 layer,
+profile, generator, hydrology, and History APIs are not restored.
 
 ## Desktop shell (Windows) — source-run
 
@@ -65,8 +66,9 @@ Before `git push` (or automatically via hook after `.\setup.ps1`):
 ```
 
 Runs `cargo test --workspace --exclude mapkeeper-desktop` with
-`RUSTFLAGS=-Dwarnings`, clippy, codemap, archive-isolation, and encoding checks.
-If `CODEMAP.md` is stale:
+`RUSTFLAGS=-Dwarnings`, clippy, codemap, archive-isolation, encoding, and
+doc-drift checks. Optional: `.\scripts\check.ps1 -Smoke` for headless spatial
+smoke. If `CODEMAP.md` is stale:
 
 ```powershell
 python scripts/gen_codemap.py

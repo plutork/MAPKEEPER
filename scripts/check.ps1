@@ -24,7 +24,7 @@ function Require-Python {
 
 Require-Python
 
-Write-Host "check.ps1 [1/5] cargo test (workspace, exclude desktop)..."
+Write-Host "check.ps1 [1/9] cargo test (workspace, exclude desktop)..."
 cargo test --workspace --exclude mapkeeper-desktop
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -32,7 +32,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [2/5] clippy workspace (-D warnings, excl. desktop)..."
+Write-Host "check.ps1 [2/9] clippy workspace (-D warnings, excl. desktop)..."
 cargo clippy -p mapkeeper-core -p mapkeeper-server -p mapkeeper-web -- -D warnings
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -40,7 +40,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [3/5] codemap drift..."
+Write-Host "check.ps1 [3/9] codemap drift..."
 python (Join-Path $Root "scripts\check_codemap_drift.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -50,7 +50,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [4/5] archive isolation..."
+Write-Host "check.ps1 [4/9] archive isolation..."
 python (Join-Path $Root "scripts\check_archive_isolation.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -58,7 +58,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [5/5] text encoding (mojibake + alpha ps1 ASCII)..."
+Write-Host "check.ps1 [5/9] text encoding (mojibake + alpha ps1 ASCII)..."
 python (Join-Path $Root "scripts\check_text_encoding.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -67,8 +67,40 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+Write-Host "check.ps1 [6/9] doc drift (spatial vs identity-only)..."
+python (Join-Path $Root "scripts\check_doc_drift.py")
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Fix docs: python scripts/check_doc_drift.py"
+    exit $LASTEXITCODE
+}
+
+Write-Host "check.ps1 [7/9] render-scale bench structural (N-026)..."
+python (Join-Path $Root "scripts\check_render_scale_bench.py")
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Fix: commit docs/perf/relief-render-scale-report.json + CRS renderer signals"
+    exit $LASTEXITCODE
+}
+
+Write-Host "check.ps1 [8/9] web shell modules structural (N-027)..."
+python (Join-Path $Root "scripts\check_web_shell_modules.py")
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Fix: crates/web ES modules + thin index.html per N-027"
+    exit $LASTEXITCODE
+}
+
+Write-Host "check.ps1 [9/9] web shell pure unit (N-027)..."
+node (Join-Path $Root "scripts\web-shell-unit.mjs")
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Fix: node scripts/web-shell-unit.mjs"
+    exit $LASTEXITCODE
+}
+
 if ($Smoke) {
-    Write-Host "check.ps1 [smoke] headless API smoke (opt-in)..."
+    Write-Host "check.ps1 [smoke] headless spatial smoke (opt-in)..."
     powershell -File (Join-Path $Root "scripts\smoke-headless.ps1")
     if ($LASTEXITCODE -ne 0) {
         Write-Host ""

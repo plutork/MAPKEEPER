@@ -13,6 +13,9 @@ pub const SPATIAL_STATE_RELATIVE: &str = "spatial/state.json";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpatialState {
     pub version: u32,
+    /// Content revision for OCC (N-025). Missing on disk → 0.
+    #[serde(default)]
+    pub revision: u64,
     pub frame: WorldFrame,
     pub grid: HexGrid,
     pub field: GridField,
@@ -25,6 +28,7 @@ pub fn default_spatial_state() -> SpatialState {
     let geometry_stub = GeometryStub::default_probe(&frame, &grid);
     SpatialState {
         version: 1,
+        revision: 0,
         frame,
         grid,
         field: GridField::default_relief(),
@@ -66,6 +70,11 @@ impl SpatialState {
 
     pub fn refresh_geometry_stub_from_probe(&mut self) {
         self.geometry_stub = GeometryStub::default_probe(&self.frame, &self.grid);
+    }
+
+    /// Bump content revision after a successful durable mutation (N-025).
+    pub fn bump_revision(&mut self) {
+        self.revision = self.revision.saturating_add(1).max(1);
     }
 }
 

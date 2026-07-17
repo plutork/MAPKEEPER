@@ -87,6 +87,53 @@ pub fn probe_axial_to_world(
     ProbePoint { x, y }
 }
 
+/// Flat `[x,y, x,y, …]` row-major centers — one WASM call (N-026 CRS).
+#[allow(clippy::too_many_arguments)]
+#[wasm_bindgen]
+pub fn probe_grid_centers(
+    origin_x: f64,
+    origin_y: f64,
+    neighbor_center_distance_m: f64,
+    width: u32,
+    height: u32,
+) -> Vec<f64> {
+    let frame = frame_from(origin_x, origin_y);
+    let grid = grid_from(neighbor_center_distance_m, width, height);
+    let mut out = Vec::with_capacity((width as usize) * (height as usize) * 2);
+    for (q, r) in grid.iter_axial() {
+        let (x, y) = axial_to_world(&frame, &grid, Axial { q, r });
+        out.push(x);
+        out.push(y);
+    }
+    out
+}
+
+/// Axis-aligned world bounds of cell centers `[min_x, min_y, max_x, max_y]`.
+#[allow(clippy::too_many_arguments)]
+#[wasm_bindgen]
+pub fn probe_grid_center_bounds(
+    origin_x: f64,
+    origin_y: f64,
+    neighbor_center_distance_m: f64,
+    width: u32,
+    height: u32,
+) -> Vec<f64> {
+    let frame = frame_from(origin_x, origin_y);
+    let grid = grid_from(neighbor_center_distance_m, width, height);
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for (q, r) in grid.iter_axial() {
+        let (x, y) = axial_to_world(&frame, &grid, Axial { q, r });
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    vec![min_x, min_y, max_x, max_y]
+}
+
 #[wasm_bindgen]
 pub fn probe_hex_distance(q0: i32, r0: i32, q1: i32, r1: i32) -> u32 {
     hex_distance(Axial { q: q0, r: r0 }, Axial { q: q1, r: r1 })

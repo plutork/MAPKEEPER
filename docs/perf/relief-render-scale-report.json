@@ -1,0 +1,653 @@
+{
+  "schema": "mapkeeper.relief-render-scale.v1",
+  "generated_at": "2026-07-17T22:48:54.077Z",
+  "phase": "after_crs",
+  "surface": "playwright-chromium-headless",
+  "build": "debug-server + web dist",
+  "note_facts": "Frame times from flushDrawSpatial (paint). Commit = HTTP stroke only. before_crs_matrix captured on same harness surface prior to incremental/dirty+zoom-scale fixes in this /real. Headless Chromium != Tauri release gate machine (N-026).",
+  "note_assumptions": "Gate Supported SoT remains owner Windows Tauri release; this report is reproducible CI/maintainer evidence.",
+  "crs_signals": {
+    "viewportCull": true,
+    "offscreenCache": true,
+    "rafCoalesce": true,
+    "centerCache": true,
+    "dirtyRect": true
+  },
+  "sizes": [
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "measured_cells": 1980,
+      "open_nav_ms": 728.1097000000001,
+      "reload_after_stroke_ms": 537.3917999999999,
+      "render": {
+        "cells": 1980,
+        "revision": 1,
+        "open_fit": {
+          "p50": 10.900000005960464,
+          "p95": 11.100000023841858,
+          "n": 8
+        },
+        "pan": {
+          "p50": 0.09999999403953552,
+          "p95": 0.30000001192092896,
+          "n": 12
+        },
+        "zoom": {
+          "p50": 0.09999999403953552,
+          "p95": 0.29999998211860657,
+          "n": 8
+        },
+        "hover": {
+          "p50": 0.09999999403953552,
+          "p95": 0.20000001788139343,
+          "n": 12
+        },
+        "view_empty": {
+          "p50": 10.800000011920929,
+          "p95": 11.700000017881393,
+          "n": 6
+        },
+        "relief": {
+          "p50": 11.099999994039536,
+          "p95": 12.299999982118607,
+          "n": 6
+        },
+        "radius_preview": {
+          "p50": 0.4000000059604645,
+          "p95": 1,
+          "n": 8
+        },
+        "stamp_drag": {
+          "p50": 0.699999988079071,
+          "p95": 1.0999999940395355,
+          "n": 8
+        },
+        "airbrush": {
+          "1": {
+            "p50": 0.699999988079071,
+            "p95": 1.0999999940395355,
+            "n": 3
+          },
+          "5": {
+            "p50": 0.5999999940395355,
+            "p95": 0.5999999940395355,
+            "n": 3
+          },
+          "10": {
+            "p50": 0.5,
+            "p95": 0.5999999940395355,
+            "n": 5
+          },
+          "20": {
+            "p50": 0.5,
+            "p95": 0.6000000238418579,
+            "n": 8
+          }
+        },
+        "visible_at_fit": 1980,
+        "crs": {
+          "centerCache": true,
+          "offscreenCache": true,
+          "viewportCull": true,
+          "rafCoalesce": true,
+          "dirtyRect": true
+        }
+      },
+      "commit_latency_ms": {
+        "p50": 3.4900000000002365,
+        "p95": 5.728899999999612,
+        "n": 5,
+        "cells": 1980
+      },
+      "verdict": {
+        "budgets": {
+          "open_fit_p95": 100,
+          "frame_p95": 16,
+          "stamp_p95": 16,
+          "airbrush5_p95": 16,
+          "commit_p95": 100
+        },
+        "checks": {
+          "open_fit": true,
+          "pan": true,
+          "zoom": true,
+          "stamp_drag": true,
+          "airbrush_5": true,
+          "commit": true
+        },
+        "supported": true
+      }
+    },
+    {
+      "size": "approx_10k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "measured_cells": 11968,
+      "open_nav_ms": 672.0445,
+      "reload_after_stroke_ms": 532.9200999999994,
+      "render": {
+        "cells": 11968,
+        "revision": 1,
+        "open_fit": {
+          "p50": 48.5,
+          "p95": 49.900000005960464,
+          "n": 8
+        },
+        "pan": {
+          "p50": 0.09999999403953552,
+          "p95": 0.09999999403953552,
+          "n": 12
+        },
+        "zoom": {
+          "p50": 0.09999999403953552,
+          "p95": 0.19999998807907104,
+          "n": 8
+        },
+        "hover": {
+          "p50": 0.09999999403953552,
+          "p95": 0.20000001788139343,
+          "n": 12
+        },
+        "view_empty": {
+          "p50": 49.69999998807907,
+          "p95": 50.39999997615814,
+          "n": 6
+        },
+        "relief": {
+          "p50": 52.599999994039536,
+          "p95": 53.79999998211861,
+          "n": 6
+        },
+        "radius_preview": {
+          "p50": 0.4000000059604645,
+          "p95": 0.5999999940395355,
+          "n": 8
+        },
+        "stamp_drag": {
+          "p50": 0.699999988079071,
+          "p95": 0.800000011920929,
+          "n": 8
+        },
+        "airbrush": {
+          "1": {
+            "p50": 0.5,
+            "p95": 0.5999999940395355,
+            "n": 3
+          },
+          "5": {
+            "p50": 0.5,
+            "p95": 0.5999999940395355,
+            "n": 3
+          },
+          "10": {
+            "p50": 0.5,
+            "p95": 0.5999999940395355,
+            "n": 5
+          },
+          "20": {
+            "p50": 0.5,
+            "p95": 13.400000005960464,
+            "n": 8
+          }
+        },
+        "visible_at_fit": 11968,
+        "crs": {
+          "centerCache": true,
+          "offscreenCache": true,
+          "viewportCull": true,
+          "rafCoalesce": true,
+          "dirtyRect": true
+        }
+      },
+      "commit_latency_ms": {
+        "p50": 2.9347999999999956,
+        "p95": 4.042499999999563,
+        "n": 5,
+        "cells": 11968
+      },
+      "verdict": {
+        "budgets": {
+          "open_fit_p95": 200,
+          "frame_p95": 20,
+          "stamp_p95": 20,
+          "airbrush5_p95": 20,
+          "commit_p95": 150
+        },
+        "checks": {
+          "open_fit": true,
+          "pan": true,
+          "zoom": true,
+          "stamp_drag": true,
+          "airbrush_5": true,
+          "commit": true
+        },
+        "supported": true
+      }
+    },
+    {
+      "size": "approx_25k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "measured_cells": 26000,
+      "open_nav_ms": 676.1786000000002,
+      "reload_after_stroke_ms": 538.6869000000006,
+      "render": {
+        "cells": 26000,
+        "revision": 1,
+        "open_fit": {
+          "p50": 101.09999999403954,
+          "p95": 113.40000000596046,
+          "n": 8
+        },
+        "pan": {
+          "p50": 0.09999999403953552,
+          "p95": 0.20000001788139343,
+          "n": 12
+        },
+        "zoom": {
+          "p50": 0.09999999403953552,
+          "p95": 0.19999998807907104,
+          "n": 8
+        },
+        "hover": {
+          "p50": 0.09999999403953552,
+          "p95": 0.30000001192092896,
+          "n": 12
+        },
+        "view_empty": {
+          "p50": 99.40000000596046,
+          "p95": 103.2999999821186,
+          "n": 6
+        },
+        "relief": {
+          "p50": 104.90000000596046,
+          "p95": 106.19999998807907,
+          "n": 6
+        },
+        "radius_preview": {
+          "p50": 0.29999998211860657,
+          "p95": 0.5,
+          "n": 8
+        },
+        "stamp_drag": {
+          "p50": 0.800000011920929,
+          "p95": 0.800000011920929,
+          "n": 8
+        },
+        "airbrush": {
+          "1": {
+            "p50": 0.5999999940395355,
+            "p95": 0.699999988079071,
+            "n": 3
+          },
+          "5": {
+            "p50": 0.5,
+            "p95": 0.5999999940395355,
+            "n": 3
+          },
+          "10": {
+            "p50": 0.5999999940395355,
+            "p95": 0.699999988079071,
+            "n": 5
+          },
+          "20": {
+            "p50": 0.5,
+            "p95": 0.7999999821186066,
+            "n": 8
+          }
+        },
+        "visible_at_fit": 26000,
+        "crs": {
+          "centerCache": true,
+          "offscreenCache": true,
+          "viewportCull": true,
+          "rafCoalesce": true,
+          "dirtyRect": true
+        }
+      },
+      "commit_latency_ms": {
+        "p50": 2.705900000000838,
+        "p95": 5.6568999999999505,
+        "n": 5,
+        "cells": 26000
+      },
+      "verdict": {
+        "budgets": {
+          "open_fit_p95": 400,
+          "frame_p95": 33,
+          "stamp_p95": 33,
+          "airbrush5_p95": 33,
+          "commit_p95": 250
+        },
+        "checks": {
+          "open_fit": true,
+          "pan": true,
+          "zoom": true,
+          "stamp_drag": true,
+          "airbrush_5": true,
+          "commit": true
+        },
+        "supported": true
+      }
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "measured_cells": 49860,
+      "open_nav_ms": 760.9045000000006,
+      "reload_after_stroke_ms": 537.8111000000026,
+      "render": {
+        "cells": 49860,
+        "revision": 1,
+        "open_fit": {
+          "p50": 183.60000002384186,
+          "p95": 184.5,
+          "n": 8
+        },
+        "pan": {
+          "p50": 0.09999999403953552,
+          "p95": 0.19999998807907104,
+          "n": 12
+        },
+        "zoom": {
+          "p50": 0.09999999403953552,
+          "p95": 0.29999998211860657,
+          "n": 8
+        },
+        "hover": {
+          "p50": 0.09999999403953552,
+          "p95": 0.19999998807907104,
+          "n": 12
+        },
+        "view_empty": {
+          "p50": 181.90000000596046,
+          "p95": 184.30000001192093,
+          "n": 6
+        },
+        "relief": {
+          "p50": 192.40000000596046,
+          "p95": 198,
+          "n": 6
+        },
+        "radius_preview": {
+          "p50": 0.30000001192092896,
+          "p95": 0.699999988079071,
+          "n": 8
+        },
+        "stamp_drag": {
+          "p50": 0.699999988079071,
+          "p95": 0.8999999761581421,
+          "n": 8
+        },
+        "airbrush": {
+          "1": {
+            "p50": 0.5,
+            "p95": 0.5999999940395355,
+            "n": 3
+          },
+          "5": {
+            "p50": 0.4000000059604645,
+            "p95": 0.5999999940395355,
+            "n": 3
+          },
+          "10": {
+            "p50": 0.5,
+            "p95": 0.5,
+            "n": 5
+          },
+          "20": {
+            "p50": 0.5,
+            "p95": 0.5,
+            "n": 8
+          }
+        },
+        "visible_at_fit": 49860,
+        "crs": {
+          "centerCache": true,
+          "offscreenCache": true,
+          "viewportCull": true,
+          "rafCoalesce": true,
+          "dirtyRect": true
+        }
+      },
+      "commit_latency_ms": {
+        "p50": 2.7946999999985565,
+        "p95": 7.715700000000652,
+        "n": 5,
+        "cells": 49860
+      },
+      "verdict": {
+        "budgets": {
+          "open_fit_p95": 800,
+          "frame_p95": 33,
+          "stamp_p95": 33,
+          "airbrush5_p95": 33,
+          "commit_p95": 400
+        },
+        "checks": {
+          "open_fit": true,
+          "pan": true,
+          "zoom": true,
+          "stamp_drag": true,
+          "airbrush_5": true,
+          "commit": true
+        },
+        "supported": true
+      }
+    }
+  ],
+  "previous_phase": "after_crs",
+  "matrix": [
+    {
+      "size": "approx_2k",
+      "supported": true,
+      "checks": {
+        "open_fit": true,
+        "pan": true,
+        "zoom": true,
+        "stamp_drag": true,
+        "airbrush_5": true,
+        "commit": true
+      },
+      "open_fit_p95": 11.100000023841858,
+      "pan_p95": 0.30000001192092896,
+      "stamp_p95": 1.0999999940395355,
+      "airbrush5_p95": 0.5999999940395355,
+      "commit_p95": 5.728899999999612
+    },
+    {
+      "size": "approx_10k",
+      "supported": true,
+      "checks": {
+        "open_fit": true,
+        "pan": true,
+        "zoom": true,
+        "stamp_drag": true,
+        "airbrush_5": true,
+        "commit": true
+      },
+      "open_fit_p95": 49.900000005960464,
+      "pan_p95": 0.09999999403953552,
+      "stamp_p95": 0.800000011920929,
+      "airbrush5_p95": 0.5999999940395355,
+      "commit_p95": 4.042499999999563
+    },
+    {
+      "size": "approx_25k",
+      "supported": true,
+      "checks": {
+        "open_fit": true,
+        "pan": true,
+        "zoom": true,
+        "stamp_drag": true,
+        "airbrush_5": true,
+        "commit": true
+      },
+      "open_fit_p95": 113.40000000596046,
+      "pan_p95": 0.20000001788139343,
+      "stamp_p95": 0.800000011920929,
+      "airbrush5_p95": 0.5999999940395355,
+      "commit_p95": 5.6568999999999505
+    },
+    {
+      "size": "approx_50k",
+      "supported": true,
+      "checks": {
+        "open_fit": true,
+        "pan": true,
+        "zoom": true,
+        "stamp_drag": true,
+        "airbrush_5": true,
+        "commit": true
+      },
+      "open_fit_p95": 184.5,
+      "pan_p95": 0.19999998807907104,
+      "stamp_p95": 0.8999999761581421,
+      "airbrush5_p95": 0.5999999940395355,
+      "commit_p95": 7.715700000000652
+    }
+  ],
+  "before_crs_matrix": [
+    {
+      "size": "approx_2k",
+      "supported": false,
+      "open_fit_p95": 15.5,
+      "pan_p95": 0.20000001788139343,
+      "stamp_p95": 18.799999982118607,
+      "airbrush5_p95": 4.699999988079071,
+      "commit_p95": 4.615499999999884,
+      "checks": {
+        "open_fit": true,
+        "pan": true,
+        "zoom": true,
+        "stamp_drag": false,
+        "airbrush_5": true,
+        "commit": true
+      }
+    },
+    {
+      "size": "approx_10k",
+      "supported": false,
+      "open_fit_p95": 72.60000002384186,
+      "pan_p95": 0.20000001788139343,
+      "stamp_p95": 78.2000000178814,
+      "airbrush5_p95": 63.599999994039536,
+      "commit_p95": 4.9320000000006985,
+      "checks": {
+        "open_fit": true,
+        "pan": true,
+        "zoom": false,
+        "stamp_drag": false,
+        "airbrush_5": false,
+        "commit": true
+      }
+    },
+    {
+      "size": "approx_25k",
+      "supported": false,
+      "open_fit_p95": 162.7000000178814,
+      "pan_p95": 0.19999998807907104,
+      "stamp_p95": 146.59999999403954,
+      "airbrush5_p95": 127.80000001192093,
+      "commit_p95": 3.9856999999974505,
+      "checks": {
+        "open_fit": true,
+        "pan": true,
+        "zoom": false,
+        "stamp_drag": false,
+        "airbrush_5": false,
+        "commit": true
+      }
+    },
+    {
+      "size": "approx_50k",
+      "supported": false,
+      "open_fit_p95": 265.40000000596046,
+      "pan_p95": 0.30000001192092896,
+      "stamp_p95": 268.7999999821186,
+      "airbrush5_p95": 240.5,
+      "commit_p95": 3.7525000000023283,
+      "checks": {
+        "open_fit": true,
+        "pan": true,
+        "zoom": false,
+        "stamp_drag": false,
+        "airbrush_5": false,
+        "commit": true
+      }
+    }
+  ],
+  "after_crs_matrix": [
+    {
+      "size": "approx_2k",
+      "supported": true,
+      "open_fit_p95": 11.100000023841858,
+      "pan_p95": 0.30000001192092896,
+      "stamp_p95": 1.0999999940395355,
+      "airbrush5_p95": 0.5999999940395355,
+      "commit_p95": 5.728899999999612,
+      "checks": {
+        "open_fit": true,
+        "pan": true,
+        "zoom": true,
+        "stamp_drag": true,
+        "airbrush_5": true,
+        "commit": true
+      }
+    },
+    {
+      "size": "approx_10k",
+      "supported": true,
+      "open_fit_p95": 49.900000005960464,
+      "pan_p95": 0.09999999403953552,
+      "stamp_p95": 0.800000011920929,
+      "airbrush5_p95": 0.5999999940395355,
+      "commit_p95": 4.042499999999563,
+      "checks": {
+        "open_fit": true,
+        "pan": true,
+        "zoom": true,
+        "stamp_drag": true,
+        "airbrush_5": true,
+        "commit": true
+      }
+    },
+    {
+      "size": "approx_25k",
+      "supported": true,
+      "open_fit_p95": 113.40000000596046,
+      "pan_p95": 0.20000001788139343,
+      "stamp_p95": 0.800000011920929,
+      "airbrush5_p95": 0.5999999940395355,
+      "commit_p95": 5.6568999999999505,
+      "checks": {
+        "open_fit": true,
+        "pan": true,
+        "zoom": true,
+        "stamp_drag": true,
+        "airbrush_5": true,
+        "commit": true
+      }
+    },
+    {
+      "size": "approx_50k",
+      "supported": true,
+      "open_fit_p95": 184.5,
+      "pan_p95": 0.19999998807907104,
+      "stamp_p95": 0.8999999761581421,
+      "airbrush5_p95": 0.5999999940395355,
+      "commit_p95": 7.715700000000652,
+      "checks": {
+        "open_fit": true,
+        "pan": true,
+        "zoom": true,
+        "stamp_drag": true,
+        "airbrush_5": true,
+        "commit": true
+      }
+    }
+  ]
+}

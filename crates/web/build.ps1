@@ -18,12 +18,32 @@ $targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Pa
 $wasmPath = Join-Path $targetDir "wasm32-unknown-unknown/release/mapkeeper_web.wasm"
 wasm-bindgen $wasmPath --target web --no-typescript --out-dir $dist
 if ($LASTEXITCODE -ne 0) { throw "wasm-bindgen failed" }
-# HTML is source-of-truth -- copy after wasm-bindgen (it may emit a stub index).
-$indexSrc = Join-Path $PSScriptRoot "index.html"
-$indexDst = Join-Path $dist "index.html"
-Copy-Item $indexSrc $indexDst -Force
-$staged = Get-Content $indexDst -Raw
-if ($staged -notmatch 'id="home"' -or $staged -notmatch "mapkeeper_web") {
+
+# Stage shell assets (index.html + ES modules + CSS) after wasm-bindgen.
+$shellAssets = @(
+    "index.html"
+    "main.js"
+    "api.js"
+    "wasm-api.js"
+    "workspace-state.js"
+    "camera.js"
+    "renderer.js"
+    "relief-tool.js"
+    "spatial-transaction.js"
+    "worlds.js"
+    "shell-math.js"
+    "styles.css"
+)
+foreach ($asset in $shellAssets) {
+    $src = Join-Path $PSScriptRoot $asset
+    $dst = Join-Path $dist $asset
+    if (-not (Test-Path $src)) { throw "Missing shell asset: $asset" }
+    Copy-Item $src $dst -Force
+}
+
+# Sanity check: staged index.html references the module entry point.
+$staged = Get-Content (Join-Path $dist "index.html") -Raw
+if ($staged -notmatch 'id="home"' -or $staged -notmatch 'main\.js') {
     throw "dist/index.html staging failed; refusing stale UI"
 }
 Write-Host "mapkeeper shell built -> $dist"

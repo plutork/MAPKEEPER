@@ -11,15 +11,25 @@ Active product-shell routing:
 | Extent presets + Create catalog (N-014/N-016) | `crates/core/src/spatial/presets.rs` |
 | World ↔ grid ↔ screen conversions | `crates/core/src/spatial/convert.rs` |
 | Health and static server | `crates/server/src/lib.rs` |
-| Projects create/open/close | `crates/server/src/projects.rs` |
+| Projects create/open/close/delete | `crates/server/src/projects.rs` |
 | Create map-preset cards API | `crates/server/src/presets.rs` |
-| Spatial persist + API | `crates/server/src/spatial.rs` |
-| Projects filesystem adapter | `crates/server/src/world_io.rs` |
-| Five-mode shell + tool strip (View/Relief) + elevation canvas | `crates/web/index.html` |
-| WASM bootstrap + shared pick helpers | `crates/web/src/lib.rs` |
+| Spatial persist + stroke + bak restore (N-025) | `crates/server/src/spatial.rs` |
+| Atomic file replace + bak | `crates/server/src/atomic_io.rs` |
+| Per-world locks + stroke staging | `crates/server/src/state.rs` |
+| Projects registry / trash / Create marker | `crates/server/src/world_io.rs` |
+| Thin shell document (N-027) | `crates/web/index.html` + `styles.css` + `main.js` |
+| Workspace state owner (sole) | `crates/web/workspace-state.js` |
+| CRS renderer / camera / relief / stroke client | `crates/web/renderer.js` · `camera.js` · `relief-tool.js` · `spatial-transaction.js` |
+| Home/Create/Delete + HTTP | `crates/web/worlds.js` · `api.js` |
+| Pure shell math (unit-tested) | `crates/web/shell-math.js` |
+| WASM bootstrap + shared pick helpers | `crates/web/src/lib.rs` · `wasm-api.js` |
 | Desktop launch | `crates/desktop/src/lib.rs` |
 | Local checks | `scripts/check.ps1` |
 | Archive isolation guard | `scripts/check_archive_isolation.py` |
+| Doc drift (spatial vs identity-only) | `scripts/check_doc_drift.py` |
+| Headless spatial smoke | `scripts/smoke-headless.ps1` |
+| Relief render scale bench (N-026) | `scripts/bench-render-scale.mjs` + `docs/perf/relief-render-scale-report.json` |
+| CRS renderer (cull/cache/rAF) | `crates/web/renderer.js` + `probe_grid_centers` in `crates/web/src/lib.rs` |
 
 Immutable spatial config: `[spatial]` in `mapkeeper.toml` (meters, extent,
 `neighbor_center_distance_m`, cols/rows). Mutable content: `spatial/state.json`
@@ -27,7 +37,8 @@ Immutable spatial config: `[spatial]` in `mapkeeper.toml` (meters, extent,
 Geometry stub stays on disk/API for contract tests.
 Create: map-size cards from `GET /api/map-presets` → `preset_id` on create
 (N-016…N-018, N-020; name + km + area_km2 + cells + Default; no preview
-glyph; no cost tier; Default Frontier/`wide_2000`; catalog ≤50k; no Editor
+glyph; no cost tier; Default Frontier/`wide_2000`; catalog ≤50k (N-026
+measured support evidence in `docs/perf/`); no Editor
 resize).
 Editor: tool strip under modes (View|Relief); left props; right Details later;
 View layers Empty/relief + session Grid outline overlay; Relief Raise/Lower

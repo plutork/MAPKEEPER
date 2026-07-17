@@ -78,8 +78,10 @@ Your lore stays in the world folder (usually under `Documents/MAPKEEPER Worlds`)
 - **Local metric world frame** — horizontal world coordinates are meters;
   primary-grid resolution is neighbour-center distance (alpha default 1000 m);
   map size is an extent preset (cols/rows derived). Create offers validated
-  wide preset cards (catalog ≤50k cells; Default ≈2k). Silent rescale after
-  data exists is forbidden.
+  wide preset cards (catalog ≤50k cells; Default ≈2k). Relief render scale
+  (N-026) keeps that ceiling when measured Supported — see
+  `docs/perf/relief-render-scale-report.json`. Silent rescale after data
+  exists is forbidden.
 - **Base map topology** — bounded planar `(x, y)` chart with single-valued
   height over `(x, y)`; opposite edges do not connect; not a sphere, cylinder,
   or torus. Outside bounds means outside the map.
@@ -103,7 +105,6 @@ Your lore stays in the world folder (usually under `Documents/MAPKEEPER Worlds`)
 - **Developer setup:** [docs/DEV.md](docs/DEV.md)
 - **Code routing map:** [docs/CODEMAP-LITE.md](docs/CODEMAP-LITE.md)
 - **map-v2 archive:** [archive/map-v2/README.md](archive/map-v2/README.md)
-- **Starter redirect:** [STARTER_PACK.md](STARTER_PACK.md)
 
 ## License
 

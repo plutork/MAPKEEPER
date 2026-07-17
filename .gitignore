@@ -22,6 +22,8 @@ crates/desktop/gen/
 # Archived browser tooling may still be installed locally
 tests/node_modules/
 archive/map-v2/tests/node_modules/
+scripts/node_modules/
+scripts/.bench-npm/
 
 # Python bytecode (scripts/, CI helpers)
 **/__pycache__/

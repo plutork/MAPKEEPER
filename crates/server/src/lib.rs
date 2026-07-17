@@ -1,5 +1,6 @@
 //! Local product-shell server. Map-v2 APIs are archived and are not routed.
 
+mod atomic_io;
 mod presets;
 mod projects;
 mod spatial;

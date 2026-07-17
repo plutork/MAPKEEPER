@@ -59,6 +59,29 @@ impl SpatialConfig {
     pub fn alpha_default() -> Self {
         Self::from_preset(alpha_default_preset())
     }
+
+    /// Full preset validation (id + metric fields), not id-only.
+    pub fn assert_matches_catalog(&self) -> Result<(), String> {
+        let expected = Self::from_preset_id(&self.preset_id)?;
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-6;
+        if self.grid_id != expected.grid_id
+            || self.cols != expected.cols
+            || self.rows != expected.rows
+            || !close(self.width_m, expected.width_m)
+            || !close(self.height_m, expected.height_m)
+            || !close(
+                self.neighbor_center_distance_m,
+                expected.neighbor_center_distance_m,
+            )
+            || self.orientation != expected.orientation
+        {
+            return Err(format!(
+                "manifest/preset mismatch for `{}`",
+                self.preset_id
+            ));
+        }
+        Ok(())
+    }
 }
 
 pub fn manifest_toml(world_id: &str) -> String {

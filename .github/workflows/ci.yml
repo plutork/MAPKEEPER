@@ -46,12 +46,21 @@ jobs:
         run: python scripts/check_archive_isolation.py
       - name: Check text encoding (mojibake + alpha ps1 ASCII)
         run: python scripts/check_text_encoding.py
+      - name: Check doc drift (spatial vs identity-only)
+        run: python scripts/check_doc_drift.py
+      - name: Check render-scale bench structural (N-026)
+        run: python scripts/check_render_scale_bench.py
+      - name: Check web shell modules structural (N-027)
+        run: python scripts/check_web_shell_modules.py
+      - name: Web shell pure unit (N-027)
+        run: node scripts/web-shell-unit.mjs
 
   headless-smoke:
-    name: Headless product-shell smoke
+    name: Headless spatial product-shell smoke
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: -D warnings
+      MAPKEEPER_SMOKE_SKIP_WEB_BUILD: "1"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -59,7 +68,8 @@ jobs:
           targets: wasm32-unknown-unknown
       - run: rustup target add wasm32-unknown-unknown
       - run: cargo install wasm-bindgen-cli --version 0.2.100
-      - run: powershell -File crates/web/build.ps1
+      # ubuntu runners have pwsh, not Windows powershell.exe
+      - run: pwsh -File crates/web/build.ps1
       - run: pwsh -File scripts/smoke-headless.ps1
 
   windows-desktop-build:

@@ -121,18 +121,20 @@ When the app opens:
 
 - On **empty Home**, click **Create your first world**.
 - Worlds are stored under **`Documents/MAPKEEPER Worlds`** by default (not inside this repo).
--   Creation writes identity + spatial config; pick a **map size** card (Default
-  ≈2k cells; size fixed after create). Opens the five-mode product shell.
+- Creation writes identity + immutable `[spatial]` config and
+  `spatial/state.json`; pick a **map size** card (Default ≈2k cells; size fixed
+  after create). Opens the five-mode product shell.
   In **Editor**, tools sit on a strip under the mode tabs:
   **View** (default) and **Relief**. Left panel holds the active tool.
   **View** — drag to pan, wheel to zoom; layers **Empty** (contour grid) or
-  **relief** (elevation tint). **Relief** — Raise/Lower + **Edit ocean** on the
-  left; click hexes to paint. Height **0** is the ocean datum; with Edit ocean
+  **relief** (elevation tint). **Relief** — Raise/Lower with an adjustable
+  hard-disk brush (**Stamp** default, opt-in **Airbrush** + Rate) and
+  **Edit ocean** on the left. Height **0** is the ocean datum; with Edit ocean
   off, ocean cells (`h < 0`) stay frozen and land Lower floors at 0; turn Edit
   ocean on to dig or fill the sea. Cell heights clamp **−60…100**.
   The right panel is reserved for later details. View settings are not saved.
-  Reload re-reads disk; screen/camera are never persisted. Domain generators
-  and History are still out of scope.
+  Reload re-reads disk; screen/camera are never persisted. This is the active
+  thin map binding; domain catalogs, generators, and History still need Shape.
 
 ---
 
@@ -151,8 +153,9 @@ No installer download. No agent required for the happy path.
 ## 7. What this validates
 
 Open the MAPKEEPER workspace → prepare/run the desktop product shell from
-source → create/resume a portable identity-only world folder → switch among
-Editor, Generator, Wizard, Agent, and History without loading map-v2.
+source → create/resume a portable world folder (identity + spatial state) →
+paint relief in Editor → switch among Editor, Generator, Wizard, Agent, and
+History without loading map-v2.
 
 ---
 
