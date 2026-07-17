@@ -440,12 +440,10 @@ async fn close_project(State(server): State<Arc<ServerState>>) -> impl IntoRespo
 mod tests {
     use super::*;
     use axum::body::Body;
+    use crate::world_io::lock_appdata_env;
     use mapkeeper_core::spatial::alpha_default_preset;
     use std::fs;
-    use std::sync::Mutex;
     use tower::ServiceExt;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct AppDataGuard {
         prev: Option<String>,
@@ -488,7 +486,7 @@ mod tests {
 
     #[test]
     fn create_success_clears_marker_and_registers() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_appdata_env();
         let tmp = tempfile::tempdir().unwrap();
         let _guard = AppDataGuard::set(tmp.path());
         let server = test_server();
@@ -510,7 +508,7 @@ mod tests {
 
     #[test]
     fn create_rejects_existing_non_world_dir() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_appdata_env();
         let tmp = tempfile::tempdir().unwrap();
         let _guard = AppDataGuard::set(tmp.path());
         let server = test_server();
@@ -530,7 +528,7 @@ mod tests {
 
     #[test]
     fn create_retry_after_incomplete_marker() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_appdata_env();
         let tmp = tempfile::tempdir().unwrap();
         let _guard = AppDataGuard::set(tmp.path());
         let server = test_server();
@@ -558,7 +556,7 @@ mod tests {
 
     #[test]
     fn delete_rejects_wrong_id() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_appdata_env();
         let tmp = tempfile::tempdir().unwrap();
         let _guard = AppDataGuard::set(tmp.path());
         let server = test_server();
@@ -578,7 +576,7 @@ mod tests {
 
     #[test]
     fn delete_rejects_unregistered_planted_manifest() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_appdata_env();
         let tmp = tempfile::tempdir().unwrap();
         let _guard = AppDataGuard::set(tmp.path());
         let planted = tmp.path().join("planted");
@@ -594,7 +592,7 @@ mod tests {
 
     #[test]
     fn delete_moves_to_trash_not_purge() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_appdata_env();
         let tmp = tempfile::tempdir().unwrap();
         let _guard = AppDataGuard::set(tmp.path());
         let server = test_server();
@@ -622,7 +620,7 @@ mod tests {
 
     #[test]
     fn registry_corrupt_surfaces() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_appdata_env();
         let tmp = tempfile::tempdir().unwrap();
         let _guard = AppDataGuard::set(tmp.path());
         let path = world_io::projects_path();
@@ -634,7 +632,7 @@ mod tests {
 
     #[test]
     fn create_registry_write_failure_cleans_partial() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_appdata_env();
         let tmp = tempfile::tempdir().unwrap();
         let _guard = AppDataGuard::set(tmp.path());
         // Block %APPDATA%/mapkeeper/ as a directory so registry save fails.
@@ -653,7 +651,7 @@ mod tests {
 
     #[test]
     fn restart_after_interrupted_create_cleans_on_open() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_appdata_env();
         let tmp = tempfile::tempdir().unwrap();
         let _guard = AppDataGuard::set(tmp.path());
         let world = tmp.path().join("interrupted");
@@ -690,7 +688,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_api_rejects_wrong_id_and_unregistered() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_appdata_env();
         let tmp = tempfile::tempdir().unwrap();
         let _guard = AppDataGuard::set(tmp.path());
         let server = test_server();

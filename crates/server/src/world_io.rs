@@ -52,6 +52,15 @@ fn app_paths() -> (Option<String>, Option<String>) {
     (appdata, home)
 }
 
+/// Serialize tests that mutate process APPDATA (shared across server test mods).
+pub(crate) static APPDATA_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub(crate) fn lock_appdata_env() -> std::sync::MutexGuard<'static, ()> {
+    APPDATA_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 pub fn projects_path() -> PathBuf {
     let (appdata, home) = app_paths();
     PathBuf::from(projects_file_path(
@@ -194,9 +203,6 @@ pub fn move_world_to_trash(world_path: &Path, world_id: &str) -> Result<PathBuf,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct AppDataGuard {
         prev: Option<String>,
@@ -264,7 +270,7 @@ mod tests {
 
     #[test]
     fn trash_collision_safe_names() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_appdata_env();
         let dir = tempfile::tempdir().unwrap();
         let _guard = AppDataGuard::set(dir.path());
         let a = allocate_trash_dir("wid").unwrap();
@@ -275,7 +281,7 @@ mod tests {
 
     #[test]
     fn move_to_trash_leaves_origin_note() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_appdata_env();
         let dir = tempfile::tempdir().unwrap();
         let _guard = AppDataGuard::set(dir.path());
         let world = dir.path().join("worlds").join("w1");
