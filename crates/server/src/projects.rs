@@ -119,9 +119,7 @@ fn resolve_create_preset(preset_id: Option<&str>) -> Result<&'static mapkeeper_c
         },
     };
     // Full metric validation, not id-only.
-    SpatialConfig::from_preset(preset)
-        .assert_matches_catalog()
-        .map_err(|e| e)?;
+    SpatialConfig::from_preset(preset).assert_matches_catalog()?;
     Ok(preset)
 }
 

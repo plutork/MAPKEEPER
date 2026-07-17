@@ -53,8 +53,10 @@ fn app_paths() -> (Option<String>, Option<String>) {
 }
 
 /// Serialize tests that mutate process APPDATA (shared across server test mods).
+#[cfg(test)]
 pub(crate) static APPDATA_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+#[cfg(test)]
 pub(crate) fn lock_appdata_env() -> std::sync::MutexGuard<'static, ()> {
     APPDATA_ENV_LOCK
         .lock()
