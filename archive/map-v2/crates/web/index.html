@@ -1,0 +1,1754 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>mapkeeper — V0 flow</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    display: flex;
+    min-height: 100vh;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #161a1d;
+    color: #eee;
+  }
+  #map { display: block; width: 100%; height: 100%; background: #0e1113; cursor: pointer; }
+  .map-wrap { position: relative; width: 100%; height: 100vh; }
+  .row { display: flex; gap: 8px; }
+  button {
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+  }
+  #save { background: #3ac886; color: #04140b; }
+  #close { background: #2a2f36; color: #eee; }
+  #status { font-size: 12px; color: #7fc99a; min-height: 16px; }
+  #hint { position: absolute; top: 16px; left: 16px; font-size: 12px; color: #666f7a; max-width: calc(100% - 80px); z-index: 1; }
+
+  #tool-dock {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    display: flex;
+    z-index: 20;
+    pointer-events: none;
+  }
+  #dock-rail {
+    width: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 0;
+    gap: 6px;
+    box-sizing: border-box;
+    pointer-events: auto;
+    background: rgba(22, 26, 29, 0.94);
+    border-left: 1px solid #2a2f36;
+  }
+  .dock-btn {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 8px;
+    background: #20242a;
+    color: #cbd3dd;
+    border: 1px solid transparent;
+    font-size: 18px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .dock-btn:hover { background: #262b32; color: #eee; }
+  .dock-btn.active { border-color: #9fe3c4; color: #eafff5; box-shadow: 0 0 0 1px rgba(159, 227, 196, 0.15) inset; }
+  .dock-btn.tool-active::after {
+    content: "";
+    position: absolute;
+    bottom: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #9fe3c4;
+  }
+  #dock-drawer {
+    width: min(280px, 22vw);
+    min-width: 240px;
+    box-sizing: border-box;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    border-left: 1px solid #2a2f36;
+    pointer-events: auto;
+    background: rgba(22, 26, 29, 0.96);
+    box-shadow: -10px 0 28px rgba(0, 0, 0, 0.35);
+    transition: width 0.15s ease, min-width 0.15s ease, opacity 0.15s ease, padding 0.15s ease;
+  }
+  #dock-drawer.collapsed {
+    width: 0;
+    min-width: 0;
+    padding: 0;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+    border-left-color: transparent;
+  }
+  .drawer-pane { display: none; flex-direction: column; gap: 12px; }
+  .drawer-pane.active { display: flex; }
+  .drawer-pane h2 { margin: 0; font-size: 15px; color: #9fe3c4; font-weight: 600; }
+  .drawer-pane .pane-label {
+    margin: 0;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8a8f98;
+  }
+  .drawer-pane label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #8a8f98; }
+  .drawer-pane input, .drawer-pane textarea {
+    background: #20242a;
+    border: 1px solid #3a3f47;
+    color: #eee;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 14px;
+  }
+  .drawer-pane textarea { min-height: 120px; resize: vertical; }
+  .dock-empty { margin: 0; font-size: 13px; color: #666f7a; line-height: 1.45; }
+  .dock-note { margin: 0; font-size: 12px; color: #666f7a; line-height: 1.45; }
+  .water-gen-diagnostics {
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.35;
+    color: #9aa3ad;
+    white-space: pre-wrap;
+    margin: 8px 0;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid #2a2f36;
+    border-radius: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  #world-name { margin: 0; font-size: 14px; font-weight: 600; word-break: break-word; }
+  .swatch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .swatch {
+    padding: 8px 10px;
+    font-size: 12px;
+    background: #20242a;
+    color: #cbd3dd;
+    border: 1px solid transparent;
+    text-align: left;
+  }
+  .swatch.active { border-color: #9fe3c4; color: #eafff5; }
+  .swatch .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .swatch-row { display: flex; gap: 6px; margin-top: 4px; }
+  .swatch.disabled { opacity: 0.45; pointer-events: none; }
+  .legend-bar {
+    height: 12px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #1e5a8a 0%, #5a9a50 20%, #d4c832 55%, #dc3c28 100%);
+    border: 1px solid #3a3f47;
+  }
+
+  .view { display: none; width: 100%; }
+  .view.active { display: block; }
+  #editor.active { position: relative; height: 100vh; width: 100%; }
+
+  #home { max-width: 1140px; margin: 34px auto; padding: 0 24px 28px; }
+  .brand { text-align: center; margin-bottom: 24px; }
+  .brand h1 { font-size: 24px; margin: 0; letter-spacing: 0.02em; }
+  .brand .sub { color: #8a8f98; font-size: 12px; margin: 6px 0 0; }
+  .brand .version-row {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .brand .version { color: #66707c; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .brand .version-btn {
+    background: transparent;
+    border: 1px solid #3a4451;
+    color: #a8b3c0;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .brand .version-btn:hover { border-color: #4c5a6b; color: #d2d9e2; }
+  .brand .version-btn.hidden { display: none; }
+  .brand .version-status {
+    min-height: 16px;
+    margin: 6px 0 0;
+    color: #9aa5b1;
+    font-size: 12px;
+  }
+  .cards-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 1.2fr) minmax(280px, 1.2fr) minmax(160px, 0.65fr);
+    gap: 14px;
+    align-items: stretch;
+  }
+  .home-card {
+    background: #1c2126;
+    border: 1px solid #2a2f36;
+    border-radius: 12px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    min-height: 380px;
+  }
+  .home-card.active {
+    border-color: #3a4a58;
+    min-height: 470px;
+  }
+  .home-card.build-card {
+    min-height: 470px;
+  }
+  .home-card.emphasis {
+    background: #202a34;
+    border-color: #3f536a;
+    box-shadow: 0 0 0 1px rgba(114, 154, 202, 0.12) inset;
+  }
+  .home-card.disabled {
+    background: #1a1f24;
+    border-color: #2b3138;
+    opacity: 0.72;
+  }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .card-head h2 {
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #cbd3dd;
+    margin: 0;
+  }
+  .badge {
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    padding: 3px 8px;
+    background: #2e3540;
+    color: #c7d4e7;
+    border: 1px solid #424c5e;
+    white-space: nowrap;
+  }
+  .badge.draft-badge {
+    background: #2e4038;
+    color: #9fe3c4;
+    border-color: #4a6a58;
+  }
+  .build-hint {
+    font-size: 11px;
+    color: #8a8f98;
+    margin-top: 2px;
+  }
+  .card-sub {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: #8a8f98;
+  }
+  .card-note {
+    margin: 2px 0 0;
+    color: #8a8f98;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  #project-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  #project-list li {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    background: #1c2126;
+    border: 1px solid #2a2f36;
+    border-radius: 8px;
+  }
+  #project-list .main-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+  #project-list .actions { display: flex; gap: 8px; flex-shrink: 0; }
+  #project-list .open-btn { background: #2f6b4f; color: #e9fff2; }
+  #project-list .manage-btn { background: #2a2f36; color: #d2d7de; }
+  #project-list .remove-btn { background: #313840; color: #dce4f2; }
+  #project-list .delete-btn { background: #5c2a2a; color: #ffd9cd; }
+  #project-list .delete-btn.armed { background: #8a2727; color: #fff0ea; }
+  #project-list .info { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+  #project-list .id { font-weight: 600; }
+  #project-list .path { font-size: 11px; color: #666f7a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #project-list .missing { color: #d97757; font-size: 11px; }
+  #project-list .manage-row { display: none; width: 100%; gap: 8px; border-top: 1px solid #2a2f36; padding-top: 8px; }
+  #project-list li.manage-open .manage-row { display: flex; }
+  #project-empty { color: #666f7a; font-size: 13px; display: none; }
+  #project-empty.visible { display: block; }
+  .first-world-cta {
+    display: none;
+    margin-top: 10px;
+    padding: 12px;
+    border: 1px solid #3f536a;
+    border-radius: 10px;
+    background: rgba(47, 71, 96, 0.2);
+  }
+  .first-world-cta.visible { display: block; }
+  .first-world-cta h3 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    color: #d7e5f5;
+  }
+  .first-world-cta p {
+    margin: 0;
+    color: #9eb0c4;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .first-world-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .first-world-primary { background: #2f6b4f; color: #e9fff2; }
+  .first-world-secondary { background: #2a2f36; color: #d2d7de; }
+  #home input, #home select {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    background: #20242a;
+    border: 1px solid #3a3f47;
+    color: #eee;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 14px;
+    margin: 4px 0 12px;
+  }
+  #home label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #8a8f98; }
+  #home-status { font-size: 12px; color: #d97757; min-height: 16px; margin-top: 8px; }
+  .create-wrap { margin-top: 14px; padding-top: 12px; border-top: 1px solid #2a2f36; }
+  .create-wrap.demoted { display: none; }
+  .create-wrap h3 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8a8f98;
+  }
+  @media (max-width: 980px) {
+    .cards-grid { grid-template-columns: 1fr; }
+    .home-card { min-height: auto; }
+    .home-card.active { order: -1; }
+  }
+  /* Shown only inside the Tauri desktop shell (feature-detected below) — a
+     plain browser tab has no native folder dialog to call, so the path
+     input stays freeform text there. */
+  .native-only { display: none; }
+  #path-row { display: flex; gap: 8px; align-items: flex-start; }
+  #path-row input { flex: 1; }
+  #generate-path-row { display: flex; gap: 8px; align-items: flex-start; }
+  #generate-path-row input { flex: 1; }
+  #browse-folder, #browse-generate-folder { flex-shrink: 0; margin: 4px 0 12px; }
+  .preset-size-warn { font-size: 12px; min-height: 16px; margin: 4px 0 10px; }
+  .preset-size-warn.preset-warn-yellow { color: #d4a72c; }
+  .preset-size-warn.preset-warn-red { color: #e5534b; }
+
+  /* D-106 unified workspace shell (track 0) */
+  #editor.workspace-active {
+    display: grid;
+    grid-template-columns: var(--ws-left-w, minmax(168px, 200px)) 1fr var(--ws-right-w, minmax(240px, 280px));
+    grid-template-rows: 48px 1fr auto;
+    grid-template-areas:
+      "ws-top ws-top ws-top"
+      "ws-left map ws-right"
+      "history history history";
+    height: 100vh;
+    width: 100%;
+    position: relative;
+  }
+  #editor.workspace-active.workspace-left-collapsed {
+    --ws-left-w: 36px;
+  }
+  #editor.workspace-active.workspace-right-collapsed {
+    --ws-right-w: 36px;
+  }
+  #editor.workspace-active .workspace-top {
+    grid-area: ws-top;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    background: rgba(22, 26, 29, 0.97);
+    border-bottom: 1px solid #2a2f36;
+    /* Above side panels (z 25) so Layers/Settings popovers drop over them. */
+    z-index: 60;
+    min-height: 48px;
+  }
+  .workspace-top-start,
+  .workspace-top-end {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .workspace-top-start { justify-self: start; }
+  .workspace-top-center { justify-self: center; }
+  .workspace-top-end { justify-self: end; }
+  #editor.workspace-active .workspace-panel {
+    z-index: 25;
+    background: rgba(22, 26, 29, 0.96);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+  }
+  #editor.workspace-active #workspace-left {
+    grid-area: ws-left;
+    border-right: 1px solid #2a2f36;
+  }
+  #editor.workspace-active #workspace-right {
+    grid-area: ws-right;
+    border-left: 1px solid #2a2f36;
+  }
+  #editor.workspace-active .map-wrap {
+    grid-area: map;
+    height: 100%;
+    min-height: 0;
+    position: relative;
+  }
+  /* D-107 history timeline */
+  #history-bar {
+    grid-area: history;
+    background: rgba(22, 26, 29, 0.98);
+    border-top: 1px solid #2a2f36;
+    z-index: 26;
+    display: flex;
+    flex-direction: column;
+    min-height: 36px;
+  }
+  #history-bar.hidden { display: none !important; }
+  .history-collapsed-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 6px 12px;
+    min-height: 36px;
+  }
+  #history-toggle-btn {
+    background: transparent;
+    border: 0;
+    color: #c9d1d9;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 4px 8px;
+  }
+  #history-panel {
+    padding: 8px 12px 12px;
+    border-top: 1px solid #2a2f36;
+  }
+  #history-panel.hidden { display: none !important; }
+  .history-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  #history-timeline-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+  }
+  .history-state-list { display: flex; gap: 6px; flex-wrap: wrap; }
+  .history-state-btn {
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid #3a3f47;
+    background: #1c2128;
+    color: #c9d1d9;
+    cursor: pointer;
+  }
+  .history-state-btn.active { border-color: #58a6ff; background: #21262d; }
+  .history-event-marker {
+    font-size: 12px;
+    color: #8b949e;
+    padding: 2px 8px;
+    cursor: default;
+  }
+  .history-event-marker[data-result-state-id] { cursor: pointer; }
+  .history-event-marker[data-result-state-id]:hover { color: #c9d1d9; }
+  #history-divergence-banner {
+    background: rgba(180, 120, 40, 0.2);
+    border: 1px solid #b47828;
+    color: #e3b341;
+    font-size: 12px;
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    border-radius: 6px;
+  }
+  #history-divergence-banner.hidden { display: none !important; }
+  #history-divergence-review {
+    margin: 8px 0;
+    padding: 8px;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    background: #161b22;
+  }
+  #history-divergence-review.hidden { display: none !important; }
+  .history-divergence-row { margin-bottom: 8px; }
+  .history-divergence-msg { margin: 0 0 6px; font-size: 12px; color: #c9d1d9; }
+  .history-divergence-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .history-divergence-actions button {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid #30363d;
+    background: #21262d;
+    color: #c9d1d9;
+    cursor: pointer;
+  }
+  .history-divergence-others { margin: 6px 0 0; font-size: 11px; color: #8b949e; }
+  #history-delete-state-btn { font-size: 11px; color: #f85149; }
+  #unlock-history-btn {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 8px;
+    border: 1px solid #3a3f47;
+    background: rgba(28, 33, 40, 0.95);
+    color: #c9d1d9;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  }
+  #unlock-history-btn.hidden { display: none !important; }
+  #editor.workspace-mode-wizard #unlock-history-btn,
+  #editor.workspace-build #unlock-history-btn,
+  #editor.workspace-mode-wizard #history-bar,
+  #editor.workspace-build #history-bar { display: none !important; }
+  #editor.workspace-active #build-wizard { display: contents; }
+  #editor.workspace-active .wiz-left {
+    grid-area: ws-left;
+    overflow-y: auto;
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  #editor.workspace-active .wiz-right {
+    grid-area: ws-right;
+    overflow-y: auto;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  #editor.workspace-active #workspace-left,
+  #editor.workspace-active #workspace-right {
+    display: none;
+  }
+  #editor.workspace-active.workspace-mode-editor #dock-drawer {
+    position: relative;
+    top: auto;
+    right: auto;
+    width: auto;
+    min-width: 0;
+    flex: 1;
+    min-height: 0;
+    pointer-events: auto;
+    box-shadow: none;
+    border-left: 0;
+    opacity: 1;
+    padding: 12px 14px;
+    overflow-y: auto;
+  }
+  #editor.workspace-active.workspace-mode-editor #dock-drawer.collapsed {
+    width: auto;
+    min-width: 0;
+    padding: 12px 14px;
+    opacity: 1;
+    overflow-y: auto;
+    pointer-events: auto;
+  }
+  #editor.workspace-active.workspace-mode-wizard #dock-rail,
+  #editor.workspace-active.workspace-mode-wizard #dock-drawer,
+  #editor.workspace-active.workspace-mode-wizard #editor-object-panel {
+    display: none !important;
+  }
+  #editor.workspace-active.workspace-mode-wizard .wiz-left,
+  #editor.workspace-active.workspace-mode-wizard .wiz-right {
+    display: flex;
+  }
+  #editor.workspace-active.workspace-mode-editor .wiz-left,
+  #editor.workspace-active.workspace-mode-editor .wiz-right {
+    display: none !important;
+  }
+  #editor.workspace-active.workspace-mode-editor #workspace-left,
+  #editor.workspace-active.workspace-mode-editor #workspace-right {
+    display: flex;
+  }
+  /* Generator / Agent / History side panels (Track 1 stubs + history placeholder) */
+  #editor.workspace-active .mode-panel {
+    display: none;
+    z-index: 25;
+    background: rgba(22, 26, 29, 0.96);
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    overflow-y: auto;
+    min-height: 0;
+  }
+  #editor.workspace-active .mode-panel-left {
+    grid-area: ws-left;
+    border-right: 1px solid #2a2f36;
+  }
+  #editor.workspace-active .mode-panel-right {
+    grid-area: ws-right;
+    border-left: 1px solid #2a2f36;
+  }
+  #editor.workspace-active.workspace-mode-generator .mode-panel-generator,
+  #editor.workspace-active.workspace-mode-agent .mode-panel-agent,
+  #editor.workspace-active.workspace-mode-history .mode-panel-history {
+    display: flex;
+  }
+  /* In stub/history modes hide the wizard panels (editor panels stay hidden by base rule) */
+  #editor.workspace-active.workspace-mode-generator .wiz-left,
+  #editor.workspace-active.workspace-mode-generator .wiz-right,
+  #editor.workspace-active.workspace-mode-agent .wiz-left,
+  #editor.workspace-active.workspace-mode-agent .wiz-right,
+  #editor.workspace-active.workspace-mode-history .wiz-left,
+  #editor.workspace-active.workspace-mode-history .wiz-right {
+    display: none !important;
+  }
+  #editor.workspace-active #hint { display: none; }
+  #editor:not(.workspace-build) .workspace-build-only { display: none !important; }
+  .workspace-mode-nav {
+    display: inline-flex;
+    border: 1px solid #3a3f47;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+  }
+  .workspace-mode-nav button {
+    padding: 9px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+    background: #20242a;
+    color: #8a8f98;
+    border: none;
+    border-left: 1px solid #2a2f36;
+    border-radius: 0;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .workspace-mode-nav button:first-child { border-left: 0; }
+  .workspace-mode-nav button.active {
+    background: #2f4a3a;
+    color: #9fe3c4;
+  }
+  .workspace-world-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #c9d1d9;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .workspace-autosave { font-size: 12px; color: #8b949e; }
+  .workspace-mode-note { font-size: 12px; color: #d4a72c; }
+  .top-popover-wrap { position: relative; display: inline-flex; }
+  .top-popover-btn {
+    padding: 7px 12px;
+    font-size: 13px;
+    background: #20242a;
+    color: #c9d1d9;
+    border: 1px solid #3a3f47;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .top-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 40;
+    width: 260px;
+    max-height: 70vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    background: rgba(22, 26, 29, 0.99);
+    border: 1px solid #3a3f47;
+    border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  }
+  .top-popover.hidden { display: none !important; }
+  .panel-collapse-btn {
+    align-self: flex-end;
+    margin: 4px 6px 0;
+    padding: 2px 8px;
+    font-size: 11px;
+    background: #20242a;
+    color: #8a8f98;
+    border: 1px solid #3a3f47;
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  #editor.workspace-left-collapsed #dock-rail { display: none !important; }
+  #editor.workspace-right-collapsed #dock-drawer,
+  #editor.workspace-right-collapsed #editor-object-panel { display: none !important; }
+  #editor.workspace-left-collapsed .wiz-left { display: none !important; }
+  #editor.workspace-right-collapsed .wiz-right { display: none !important; }
+  .editor-categories {
+    list-style: none;
+    margin: 0;
+    padding: 0 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .editor-cat-btn {
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: #20242a;
+    color: #cbd3dd;
+    border: 1px solid transparent;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    position: relative;
+  }
+  .editor-cat-btn:hover { background: #262b32; color: #eee; }
+  .editor-cat-btn.active {
+    background: rgba(159, 227, 196, 0.12);
+    border-color: #3a4a58;
+    color: #9fe3c4;
+  }
+  .editor-cat-btn.tool-active::after {
+    content: "";
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #9fe3c4;
+  }
+  .editor-object-panel {
+    flex-shrink: 0;
+    max-height: 38%;
+    overflow-y: auto;
+    border-top: 1px solid #2a2f36;
+    padding: 10px 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .editor-object-panel.hidden { display: none; }
+  .editor-object-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .editor-object-head {
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8a8f98;
+    padding-top: 4px;
+  }
+  .editor-object-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 5px;
+    background: #20242a;
+    font-size: 12px;
+    color: #c4c8ce;
+  }
+  .editor-object-empty {
+    font-size: 12px;
+    color: #666f7a;
+    line-height: 1.4;
+    padding: 4px 0;
+  }
+  .editor-object-delete {
+    padding: 2px 8px;
+    font-size: 11px;
+    background: #3a2525;
+    color: #e8a0a0;
+    border: 1px solid #5a3535;
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  #editor:not(.workspace-active) #workspace-top,
+  #editor:not(.workspace-active) #workspace-left,
+  #editor:not(.workspace-active) #workspace-right {
+    display: none;
+  }
+  #editor:not(.workspace-active) .map-wrap {
+    height: 100vh;
+  }
+  #build-wizard { display: none; }
+  .post-finish-note {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid #3f536a;
+    border-radius: 8px;
+    background: rgba(20, 28, 36, 0.94);
+    color: #c9d8e8;
+    font-size: 12px;
+    line-height: 1.4;
+    z-index: 15;
+    display: none;
+  }
+  .post-finish-note.visible { display: block; }
+  .post-finish-note button {
+    margin-left: 10px;
+    background: transparent;
+    border: 1px solid #4f6176;
+    color: #d5e4f4;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .wiz-top {
+    display: none;
+  }
+  .wiz-crumb {
+    font-size: 13px;
+    color: #9fe3c4;
+    font-weight: 600;
+  }
+  #wizard-status {
+    font-size: 12px;
+    color: #8a8f98;
+    min-width: 120px;
+    flex: 1;
+    text-align: right;
+  }
+  #wizard-status.busy {
+    color: #c9e6ff;
+    font-weight: 600;
+  }
+  #wiz-layout-classes.wiz-busy {
+    opacity: 0.55;
+    pointer-events: none;
+  }
+  .wiz-left {
+    overflow-y: auto;
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .wiz-tier-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .wiz-tier {
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.12);
+  }
+  .wiz-tier-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-align: left;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #9aa8b8;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .wiz-tier-header:hover { color: #c5d0dc; background: rgba(255, 255, 255, 0.03); }
+  .wiz-tier.tier-complete .wiz-tier-header { color: #7fc99a; }
+  .wiz-tier-chevron {
+    display: inline-block;
+    width: 10px;
+    font-size: 9px;
+    transition: transform 0.15s ease;
+  }
+  .wiz-tier.collapsed .wiz-tier-chevron { transform: rotate(-90deg); }
+  .wiz-tier.collapsed .wiz-tier-body { display: none; }
+  .wiz-freeze-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 4px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .wiz-freeze-item {
+    border-radius: 6px;
+    font-size: 12px;
+  }
+  .wiz-freeze-btn {
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: #20242a;
+    color: #cbd3dd;
+    border: 1px solid transparent;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .wiz-freeze-item.pending .wiz-freeze-btn,
+  .wiz-freeze-item.pending {
+    opacity: 0.45;
+    color: #666f7a;
+  }
+  .wiz-freeze-item.active .wiz-freeze-btn {
+    background: rgba(159, 227, 196, 0.12);
+    border-color: #3a4a58;
+    color: #9fe3c4;
+    font-weight: 600;
+  }
+  .wiz-freeze-item.frozen .wiz-freeze-btn {
+    color: #7fc99a;
+    border-color: rgba(127, 201, 154, 0.25);
+  }
+  .wiz-freeze-item.stale .wiz-freeze-btn {
+    color: #e8b86d;
+    border-color: rgba(232, 184, 109, 0.35);
+  }
+  .wiz-freeze-item.locked .wiz-freeze-btn {
+    opacity: 0.72;
+    color: #8a93a0;
+    border-style: dashed;
+    border-color: #3a424c;
+    cursor: pointer;
+  }
+  .wiz-freeze-item.locked.viewing .wiz-freeze-btn {
+    background: rgba(138, 147, 160, 0.12);
+    border-color: #5a6470;
+    color: #b8c2ce;
+  }
+  .wiz-stub-badge {
+    display: inline-block;
+    margin: 0 0 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(138, 147, 160, 0.18);
+    color: #b8c2ce;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .wiz-stub-unavail {
+    color: #8a93a0;
+    font-style: italic;
+  }
+  #wiz-panel-stub.hidden { display: none; }
+  .wiz-stale-banner {
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: rgba(232, 184, 109, 0.12);
+    border: 1px solid rgba(232, 184, 109, 0.35);
+    color: #e8b86d;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .wiz-stale-banner.hidden { display: none; }
+  .wiz-gen-category {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid #2a2f36;
+  }
+  .wiz-gen-category:first-of-type {
+    padding-top: 0;
+    border-top: 0;
+  }
+  .wiz-right {
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .wiz-right h2 {
+    margin: 0;
+    font-size: 15px;
+    color: #9fe3c4;
+    font-weight: 600;
+  }
+  .wiz-hint {
+    margin: 0;
+    font-size: 13px;
+    color: #8a8f98;
+    line-height: 1.45;
+  }
+  .wiz-label {
+    margin: 0;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8a8f98;
+  }
+  .wiz-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .wiz-btn-row.hidden { display: none; }
+  .wiz-geo-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .wiz-geo-legend li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #c4c8ce;
+  }
+  .wiz-geo-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+  #wiz-panel-stub.hidden,
+  #wiz-panel-step1.hidden, #wiz-panel-step2.hidden,
+  #wiz-panel-step3.hidden, #wiz-panel-step4.hidden,
+  #wiz-panel-step5.hidden, #wiz-panel-step6.hidden { display: none; }
+  .wiz-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid #2a2f36;
+  }
+  .wiz-section:first-of-type {
+    padding-top: 0;
+    border-top: 0;
+  }
+  .wiz-section .wiz-label {
+    color: #9aa4b1;
+  }
+  .wiz-style-btn {
+    padding: 8px 10px;
+    font-size: 12px;
+    background: #20242a;
+    color: #cbd3dd;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .wiz-style-btn.active {
+    border-color: #9fe3c4;
+    color: #eafff5;
+  }
+  .wiz-bottom {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    margin-top: auto;
+    padding-top: 12px;
+    background: transparent;
+    border-top: 1px solid #2a2f36;
+  }
+  .wiz-bottom .wiz-btn-row {
+    justify-content: flex-end;
+    width: 100%;
+  }
+  .wiz-bottom .wiz-label { margin-right: 0; align-self: center; }
+  .wiz-bottom-variants {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .wiz-bottom-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .wiz-variant-btn {
+    min-width: 36px;
+    padding: 8px 12px;
+    background: #20242a;
+    color: #cbd3dd;
+    border: 1px solid #3a3f47;
+    border-radius: 6px;
+  }
+  .wiz-variant-btn.active {
+    border-color: #9fe3c4;
+    color: #eafff5;
+  }
+  .wiz-action-btn {
+    padding: 8px 14px;
+    background: #2a2f36;
+    color: #eee;
+    border-radius: 6px;
+  }
+  .wiz-action-btn.primary { background: #3ac886; color: #04140b; }
+  .wiz-action-btn.warn {
+    background: #c45a12;
+    color: #fff8f0;
+    border: 1px solid #e07a2f;
+  }
+  .wiz-back-top {
+    margin: 0 0 0.75rem;
+    padding-bottom: 0.65rem;
+    border-bottom: 1px solid #3a424c;
+  }
+  button:disabled, button.wiz-disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+  #wiz-save-draft { background: #2a3f4f; color: #dce8f8; }
+  #wiz-worlds { background: #2a2f36; color: #eee; }
+  /* D-69: in-app confirm — window.confirm is unreliable in Tauri/WebView2 */
+  #wiz-confirm-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: rgba(8, 10, 12, 0.55);
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  #wiz-confirm-overlay.open { display: flex; }
+  #wiz-confirm-dialog {
+    max-width: 360px;
+    width: 100%;
+    background: #1a1f24;
+    border: 1px solid #3a424c;
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  }
+  #wiz-confirm-msg {
+    margin: 0 0 14px;
+    font-size: 14px;
+    color: #e8eaed;
+    line-height: 1.45;
+  }
+  #wiz-confirm-dialog .wiz-btn-row { justify-content: flex-end; }
+</style>
+</head>
+<body>
+  <div id="home" class="view active">
+    <header class="brand">
+      <h1>mapkeeper</h1>
+      <p class="sub">Local worlds for author + agents</p>
+      <div class="version-row">
+        <span id="app-version" class="version">mapkeeper</span>
+      </div>
+    </header>
+
+    <div class="cards-grid">
+      <article class="home-card emphasis build-card">
+        <div class="card-head">
+          <h2>Build World</h2>
+        </div>
+        <p class="card-sub">Step-by-step assembly — silhouette, climate, water&hellip; You accept each layer.</p>
+        <label for="generate-id">World name</label>
+        <input id="generate-id" placeholder="My World" autocomplete="off" />
+        <p id="generate-id-preview" class="card-note"></p>
+        <p class="card-note">Folder id is auto-lowercased for paths and cell ids.</p>
+        <label for="generate-path">Folder</label>
+        <div id="generate-path-row">
+          <input id="generate-path" placeholder="C:\path\to\my-world" autocomplete="off" />
+          <button id="browse-generate-folder" class="native-only" type="button">Browse&hellip;</button>
+        </div>
+        <label for="generate-preset">Map size</label>
+        <select id="generate-preset">
+          <option value="small" selected>Small (~510 cells)</option>
+          <option value="medium">Medium (~1,508 cells)</option>
+          <option value="large">Large (~4,450 cells)</option>
+          <option value="epic">Epic (~13,485 cells)</option>
+          <option value="grand">Grand (~40,050 cells)</option>
+          <option value="world">World (~99,777 cells, not stable)</option>
+        </select>
+        <p id="generate-preset-warn" class="preset-size-warn"></p>
+        <button id="build-start" type="button">Start build</button>
+        <div id="generate-status"></div>
+      </article>
+
+      <article class="home-card active emphasis">
+        <div class="card-head">
+          <h2>Your worlds</h2>
+        </div>
+        <p class="card-sub">Pick an existing world or create one below.</p>
+        <p class="card-note">World data stays local. Agents read your world folder (`mapkeeper.toml` + `profiles/`).</p>
+        <ul id="project-list"></ul>
+        <p id="project-empty">No worlds yet — create one below.</p>
+        <section id="first-world-cta" class="first-world-cta" aria-live="polite">
+          <h3>Create your first world</h3>
+          <p id="first-world-hint">Start Build World with defaults (Small map in Documents) — then adjust if needed.</p>
+          <div class="first-world-actions">
+            <button id="first-world-start" class="first-world-primary" type="button">Create your first world</button>
+            <button id="first-world-advanced" class="first-world-secondary" type="button">Advanced options</button>
+          </div>
+        </section>
+
+        <div id="create-wrap" class="create-wrap">
+          <h3>Create a new world</h3>
+          <label for="new-id">World name</label>
+          <input id="new-id" placeholder="My World" autocomplete="off" />
+          <p id="new-id-preview" class="card-note"></p>
+          <p class="card-note">Folder id is auto-lowercased for paths and cell ids.</p>
+          <label for="new-path">Folder</label>
+          <div id="path-row">
+            <input id="new-path" placeholder="C:\path\to\my-world" autocomplete="off" />
+            <button id="browse-folder" class="native-only" type="button">Browse&hellip;</button>
+          </div>
+          <label for="new-preset">Map size</label>
+          <select id="new-preset">
+            <option value="small" selected>Small (~510 cells)</option>
+            <option value="medium">Medium (~1,508 cells)</option>
+            <option value="large">Large (~4,450 cells)</option>
+            <option value="epic">Epic (~13,485 cells)</option>
+            <option value="grand">Grand (~40,050 cells)</option>
+            <option value="world">World (~99,777 cells, not stable)</option>
+          </select>
+          <p id="new-preset-warn" class="preset-size-warn"></p>
+          <button id="create">Create</button>
+          <div id="home-status"></div>
+        </div>
+      </article>
+
+      <article class="home-card disabled unavailable" id="community-worlds-card">
+        <div class="card-head">
+          <h2>Community worlds</h2>
+          <span class="badge">soon</span>
+        </div>
+        <p class="card-sub">Browse and import shared worlds from the community.</p>
+        <p class="card-note">Coming later — not available in this version.</p>
+      </article>
+    </div>
+  </div>
+
+  <div id="editor" class="view">
+    <header id="workspace-top" class="workspace-top">
+      <div class="workspace-top-start">
+        <button id="wiz-worlds" type="button">&larr; Worlds</button>
+        <span id="workspace-world-label" class="workspace-world-label" title="Active world">&mdash;</span>
+        <button id="wiz-save-draft" class="workspace-build-only" type="button">Save Draft</button>
+        <span class="wiz-crumb workspace-crumb">—</span>
+      </div>
+      <nav id="workspace-mode-nav" class="workspace-mode-nav workspace-top-center" role="group" aria-label="Workspace mode">
+        <button type="button" data-workspace-mode="wizard">Wizard</button>
+        <button type="button" data-workspace-mode="generator">Generator</button>
+        <button type="button" data-workspace-mode="editor" class="active">Editor</button>
+        <button type="button" data-workspace-mode="agent">Agent</button>
+        <button type="button" data-workspace-mode="history">History</button>
+      </nav>
+      <div class="workspace-top-end">
+        <span id="workspace-mode-note" class="workspace-mode-note"></span>
+        <span id="workspace-autosave" class="workspace-autosave"></span>
+        <span id="wizard-status"></span>
+        <div class="top-popover-wrap">
+          <button id="layers-toggle" class="top-popover-btn" data-popover-toggle="layers-popover" type="button">Layers &#9662;</button>
+          <div id="layers-popover" class="top-popover hidden" role="menu" aria-label="Layers">
+            <p class="pane-label">Layers</p>
+            <button id="toggle-color-mode" class="swatch" data-view-toggle="color-mode" type="button">Color: Hydro</button>
+            <button id="toggle-grid" class="swatch" data-view-toggle="grid" type="button">Grid lines: Off</button>
+            <button id="toggle-elevation-labels" class="swatch" data-view-toggle="elevation-labels" type="button">Show elevation: Off</button>
+            <button id="toggle-peaks" class="swatch" data-view-toggle="peaks" type="button">Peaks: Off</button>
+            <p class="pane-label">Elevation legend</p>
+            <div class="legend-bar" title="Water blues → land green → yellow → red (cap 100); peaks ≥75"></div>
+            <p id="view-stats" class="dock-note">Zoom 1.00x · Draw 0 / 0 cells</p>
+            <p id="view-perf" class="dock-note">Perf: —</p>
+            <p class="dock-note">Sea level 0 · land tint 1–100 · peaks when elev &gt; 75. Overlays LOD: ≤2000 visible or zoom ≥1.6.</p>
+          </div>
+        </div>
+        <div class="top-popover-wrap">
+          <button id="settings-toggle" class="top-popover-btn" data-popover-toggle="settings-popover" type="button">Settings &#9662;</button>
+          <div id="settings-popover" class="top-popover hidden" role="menu" aria-label="Settings">
+            <p class="pane-label">World</p>
+            <p id="world-name">—</p>
+            <p id="legacy-map-note" class="dock-note"></p>
+            <p class="dock-note">World data stays local on disk.</p>
+          </div>
+        </div>
+      </div>
+    </header>
+    <aside id="workspace-left" class="workspace-panel">
+      <button id="workspace-left-collapse" class="panel-collapse-btn" type="button" aria-label="Collapse left panel">&#9664;</button>
+      <p class="wiz-label" style="padding: 0 10px; margin-top: 4px;">Categories</p>
+      <nav id="dock-rail" class="editor-categories" aria-label="Editor categories">
+        <button class="editor-cat-btn dock-btn active tool-active" data-dock="inspect" type="button">Inspect</button>
+        <button class="editor-cat-btn dock-btn" data-dock="terrain" type="button">Terrain</button>
+        <button class="editor-cat-btn dock-btn" data-dock="rivers" type="button">Lakes &amp; rivers</button>
+      </nav>
+    </aside>
+    <div class="map-wrap">
+      <canvas id="map" width="720" height="560"></canvas>
+      <div id="hint">mapkeeper — LMB drag pan, wheel zoom; editor categories left, settings and objects right</div>
+      <div id="post-finish-note" class="post-finish-note">
+        World saved. Reopen from Home with Open, then continue in Inspect/Terrain. If anything feels confusing, send feedback.
+        <button id="post-finish-dismiss" type="button">Dismiss</button>
+      </div>
+      <button id="unlock-history-btn" type="button" class="hidden">Unlock History</button>
+    </div>
+    <aside id="workspace-right" class="workspace-panel">
+      <button id="workspace-right-collapse" class="panel-collapse-btn" type="button" aria-label="Collapse right panel">&#9654;</button>
+      <div id="dock-drawer" class="editor-settings">
+        <div class="drawer-pane active" data-drawer="inspect">
+          <p class="pane-label">Inspect</p>
+          <h2 id="panel-cell">—</h2>
+          <p id="inspect-empty" class="dock-empty">Click a cell on the map to name it.</p>
+          <label for="title">Title</label>
+          <input id="title" type="text" placeholder="Place name" autocomplete="off" disabled />
+          <label for="notes">Notes</label>
+          <textarea id="notes" placeholder="Anything worth remembering" disabled></textarea>
+          <div class="row">
+            <button id="save" type="button">Save</button>
+            <button id="close" type="button">Close</button>
+          </div>
+          <div id="status"></div>
+        </div>
+        <div class="drawer-pane" data-drawer="terrain">
+          <p class="pane-label">Terrain</p>
+          <p class="dock-note">Paint elevation: presets, raise/lower, or inspect cell names.</p>
+          <div class="swatch-grid">
+            <button class="swatch" data-brush="land" type="button"><span class="dot" style="background:#6a7b43"></span>Land</button>
+            <button class="swatch" data-brush="water" type="button"><span class="dot" style="background:#2e5f8a"></span>Water</button>
+            <button class="swatch" data-brush="raise" type="button"><span class="dot" style="background:#8b7355"></span>Raise</button>
+            <button class="swatch" data-brush="lower" type="button"><span class="dot" style="background:#4a6a8a"></span>Lower</button>
+          </div>
+          <p class="pane-label">Step (raise/lower)</p>
+          <div class="swatch-row">
+            <button class="swatch active" data-brush-step="1" type="button">1</button>
+            <button class="swatch" data-brush-step="5" type="button">5</button>
+            <button class="swatch" data-brush-step="10" type="button">10</button>
+          </div>
+          <p class="pane-label">Brush size (follows zoom)</p>
+          <div class="swatch-row">
+            <button class="swatch active" data-brush-size="0" type="button">S</button>
+            <button class="swatch" data-brush-size="1" type="button">M</button>
+            <button class="swatch" data-brush-size="2" type="button">L</button>
+            <button class="swatch" data-brush-size="3" type="button">XL</button>
+          </div>
+          <p class="pane-label">Falloff (raise/lower, M–XL)</p>
+          <div class="swatch-row">
+            <button class="swatch active" data-falloff="even" type="button">Even</button>
+            <button class="swatch" data-falloff="hill" type="button">Hill</button>
+          </div>
+          <p class="dock-note">Tier <span id="brush-size-value">S</span> · effective ~<span id="brush-effective-radius">1</span> hex (zoom out = larger). Cap 24.</p>
+          <p class="dock-note">Autosave writes on a short cooldown and flushes on mouse release.</p>
+        </div>
+        <div class="drawer-pane" data-drawer="rivers">
+          <p class="pane-label">Lakes &amp; rivers</p>
+          <p class="dock-note">Generate lakes before rivers.</p>
+          <p class="dock-note">Lake density</p>
+          <div class="swatch-grid" id="editor-lake-densities">
+            <button class="swatch" type="button" data-editor-lake-density="sparse">Sparse</button>
+            <button class="swatch active" type="button" data-editor-lake-density="balanced">Balanced</button>
+            <button class="swatch" type="button" data-editor-lake-density="lake_rich">Lake-rich</button>
+          </div>
+          <button id="generate-lakes" class="swatch" type="button">Generate lakes</button>
+          <p class="dock-note">River density</p>
+          <div class="swatch-grid" id="editor-river-densities">
+            <button class="swatch" type="button" data-editor-river-density="few">Few</button>
+            <button class="swatch active" type="button" data-editor-river-density="balanced">Balanced</button>
+            <button class="swatch" type="button" data-editor-river-density="many">Many</button>
+          </div>
+          <p class="dock-note">Rebuilds from current elevation, lakes, and climate. Same inputs → same river network.</p>
+          <button id="generate-rivers" class="swatch" type="button">Rebuild rivers</button>
+          <p id="water-gen-status" class="dock-note"></p>
+          <p class="dock-note">Gen diagnostics (copy into /fix reports)</p>
+          <pre id="water-gen-diagnostics" class="water-gen-diagnostics"></pre>
+          <div id="manual-rivers-authoring">
+          <p class="pane-label">Manual rivers (legacy)</p>
+          <p class="dock-note">Click each hex in order — neighbor-only chain. Straight stroke overlay (v1).</p>
+          <div class="swatch-grid">
+            <button class="swatch" data-brush="river-pin" type="button"><span class="dot" style="background:#6eb5ff"></span>Pin river</button>
+            <button class="swatch" data-brush="river" type="button"><span class="dot" style="background:#4da6ff"></span>Draw river</button>
+            <button class="swatch" data-brush="river-erase" type="button"><span class="dot" style="background:#c44"></span>Erase river</button>
+          </div>
+          <p class="dock-note">Pin: click source, then mouth. Draw: neighbor chain click-by-click.</p>
+          <div class="row">
+            <button class="swatch" data-river-action="new" type="button">New river</button>
+            <button class="swatch" data-river-action="undo" type="button">Undo step</button>
+            <button class="swatch" id="detach-tributary" data-river-action="detach" type="button" disabled>Detach tributary</button>
+          </div>
+          <p class="dock-note">Erase removes the whole river on any of its cells.</p>
+          <p class="dock-note">Pin: click tributary to select, then Detach. Or pin a new mouth off the stem.</p>
+          </div>
+          <p id="manual-rivers-readonly-note" class="dock-note hidden">Generated rivers are read-only. Use <strong>Rebuild rivers</strong> to rebuild from current lakes and climate.</p>
+          <p id="river-migration-warning" class="dock-note hidden"></p>
+          <p id="river-status" class="dock-note">0 named rivers · 0 physical segments · 0 channel cells</p>
+        </div>
+      </div>
+      <section id="editor-object-panel" class="editor-object-panel hidden" aria-label="Category objects">
+        <p class="pane-label">Objects</p>
+        <ul id="editor-object-list" class="editor-object-list"></ul>
+      </section>
+    </aside>
+    <div id="build-wizard">
+      <nav class="wiz-left" aria-label="Build steps">
+        <button id="workspace-left-collapse-wiz" class="panel-collapse-btn wiz-panel-collapse" type="button" aria-label="Collapse left panel">&#9664;</button>
+        <p class="wiz-label">Pipeline</p>
+        <div id="wiz-tier-nav" class="wiz-tier-nav" aria-label="Pipeline tiers"></div>
+      </nav>
+      <aside class="wiz-right">
+        <button id="workspace-right-collapse-wiz" class="panel-collapse-btn wiz-panel-collapse" type="button" aria-label="Collapse right panel">&#9654;</button>
+        <p id="wiz-stale-banner" class="wiz-stale-banner hidden" role="status"></p>
+        <div id="wiz-panel-stub" class="hidden" data-stub-panel="1">
+          <h2 id="wiz-stub-title">—</h2>
+          <p class="wiz-stub-badge">Coming later</p>
+          <p class="wiz-hint" id="wiz-stub-desc">—</p>
+          <p class="wiz-hint wiz-stub-unavail">Generation is not available in this version.</p>
+        </div>
+        <div id="wiz-panel-step1">
+          <h2>Map size</h2>
+          <p class="wiz-hint">Pick a preset and check the blank hex grid. Continue when the scale looks right.</p>
+          <section class="wiz-section">
+            <p class="wiz-label">Preset</p>
+            <select id="wiz-preset">
+              <option value="small">Small (~510 cells)</option>
+              <option value="medium">Medium (~1,508 cells)</option>
+              <option value="large">Large (~4,450 cells)</option>
+              <option value="epic">Epic (~13,485 cells)</option>
+              <option value="grand">Grand (~40,050 cells)</option>
+              <option value="world">World (~99,777 cells, not stable)</option>
+            </select>
+            <p id="wiz-preset-warn" class="preset-size-warn"></p>
+            <p class="wiz-hint" id="wiz-size-meta">—</p>
+          </section>
+          <section class="wiz-section">
+            <div class="wiz-btn-row wiz-bottom-actions">
+              <button id="wiz-size-continue" class="wiz-action-btn primary" type="button">Continue</button>
+            </div>
+          </section>
+        </div>
+
+        <div id="wiz-panel-step2" class="hidden">
+        <div class="wiz-btn-row wiz-back-top">
+          <button id="wiz-sil-back" class="wiz-action-btn warn" type="button">Back</button>
+        </div>
+        <h2>Land silhouette</h2>
+        <p class="wiz-hint">Pick a layout class, then regenerate shapes within that class. Shore character is separate.</p>
+
+        <section class="wiz-section wiz-gen-category">
+          <p class="wiz-label">1. Shore character</p>
+          <div class="wiz-btn-row" id="wiz-chars">
+            <button class="wiz-style-btn active" type="button" data-wiz-char="smooth">Smooth shores</button>
+            <button class="wiz-style-btn" type="button" data-wiz-char="jagged">Jagged shores</button>
+          </div>
+        </section>
+
+        <section class="wiz-section wiz-gen-category">
+          <p class="wiz-label">2. Layout class</p>
+          <div id="wiz-layout-classes" class="wiz-btn-row" style="flex-wrap:wrap;gap:0.4rem;">
+            <button class="wiz-style-btn active" type="button" data-wiz-layout="pangea">Pangea</button>
+            <button class="wiz-style-btn" type="button" data-wiz-layout="continents">Continents</button>
+            <button class="wiz-style-btn" type="button" data-wiz-layout="archipelago">Archipelago</button>
+            <button class="wiz-style-btn" type="button" data-wiz-layout="island">Island</button>
+            <button class="wiz-style-btn" type="button" data-wiz-layout="continent_and_islands">Continent + islands</button>
+            <button class="wiz-style-btn" type="button" data-wiz-layout="mediterranean">Mediterranean</button>
+          </div>
+        </section>
+
+        <section class="wiz-section wiz-gen-category">
+          <p class="wiz-label">3. Shape of selected class</p>
+          <div class="wiz-btn-row">
+            <button id="wiz-regenerate" class="wiz-action-btn" type="button">Regenerate shape</button>
+          </div>
+          <p class="wiz-hint" id="wiz-gen-identity" style="font-family:ui-monospace,Consolas,monospace;font-size:0.72rem;word-break:break-all;">—</p>
+          <p class="wiz-hint">Regenerate changes the selected archetype’s form, not the archetype.</p>
+        </section>
+
+        <section class="wiz-section">
+          <p class="wiz-label">4. Accept, then Edit</p>
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-accept" class="wiz-action-btn" type="button">Accept</button>
+            <button id="wiz-edit" class="wiz-action-btn wiz-disabled" type="button" disabled>Edit</button>
+          </div>
+          <p class="wiz-hint">Edit unlocks after you accept the current shape.</p>
+          <p class="wiz-label">Edit brush</p>
+          <div class="wiz-btn-row hidden" id="wiz-edit-brushes">
+            <button id="wiz-edit-land" class="wiz-style-btn active" type="button" data-wiz-edit-brush="land">Land</button>
+            <button id="wiz-edit-ocean" class="wiz-style-btn" type="button" data-wiz-edit-brush="ocean">Ocean</button>
+          </div>
+          <p class="wiz-label hidden" id="wiz-edit-size-label">Brush size</p>
+          <div class="wiz-btn-row hidden" id="wiz-edit-sizes">
+            <button class="wiz-style-btn active" type="button" data-wiz-edit-size="0">S</button>
+            <button class="wiz-style-btn" type="button" data-wiz-edit-size="1">M</button>
+            <button class="wiz-style-btn" type="button" data-wiz-edit-size="2">L</button>
+            <button class="wiz-style-btn" type="button" data-wiz-edit-size="3">XL</button>
+          </div>
+          <p class="wiz-hint hidden" id="wiz-edit-size-hint">Size follows zoom — zoom out for a larger stamp (cap ~24 hex).</p>
+        </section>
+
+        <section class="wiz-section">
+          <p class="wiz-label">5. Next step</p>
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
+          </div>
+          <p class="wiz-hint" id="wiz-right-note">Pick a class, regenerate until you like the shape, accept, then continue. Orange Back (top) returns to size — confirm required; changing size resets Geo.</p>
+        </section>
+        </div>
+
+        <div id="wiz-panel-step3" class="hidden">
+        <div class="wiz-btn-row wiz-back-top">
+          <button id="wiz-geo-back" class="wiz-action-btn warn" type="button">Back</button>
+        </div>
+        <h2>Tectonics</h2>
+        <p class="wiz-hint">Generate geology belts that shape later elevation. Classes are color-coded on the map.</p>
+        <section class="wiz-section wiz-gen-category">
+          <p class="wiz-label">1. Geology style</p>
+          <div class="wiz-btn-row" id="wiz-geo-styles">
+            <button class="wiz-style-btn active" type="button" data-wiz-geo-style="belts">Belts</button>
+            <button class="wiz-style-btn" type="button" data-wiz-geo-style="shields">Shields</button>
+            <button class="wiz-style-btn" type="button" data-wiz-geo-style="arcs">Arcs</button>
+            <button class="wiz-style-btn" type="button" data-wiz-geo-style="random">Random</button>
+          </div>
+        </section>
+        <section class="wiz-section wiz-gen-category">
+          <p class="wiz-label">2. Generate</p>
+          <div class="wiz-btn-row">
+            <button id="wiz-geo-generate" class="wiz-action-btn" type="button">Generate geology</button>
+          </div>
+          <p class="wiz-hint">Map colors show structure on land. Regenerate to try another layout.</p>
+        </section>
+        <section class="wiz-section">
+          <p class="wiz-label">Legend</p>
+          <ul class="wiz-geo-legend" aria-label="Geology classes">
+            <li><span class="wiz-geo-swatch" style="background:#469655"></span>Stable land</li>
+            <li><span class="wiz-geo-swatch" style="background:#2d6ebe"></span>Basin (low)</li>
+            <li><span class="wiz-geo-swatch" style="background:#c45c2a"></span>Ridge (high)</li>
+            <li><span class="wiz-geo-swatch" style="background:#8c46b4"></span>Rift</li>
+            <li><span class="wiz-geo-swatch" style="background:#d2372d"></span>Volcanic arc</li>
+          </ul>
+        </section>
+        <section class="wiz-section">
+          <p class="wiz-label">3. Accept</p>
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-geo-accept" class="wiz-action-btn" type="button">Accept</button>
+          </div>
+        </section>
+        <section class="wiz-section">
+          <p class="wiz-label">4. Next step</p>
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-geo-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
+          </div>
+        </section>
+        </div>
+
+        <div id="wiz-panel-step4" class="hidden">
+        <div class="wiz-btn-row wiz-back-top">
+          <button id="wiz-elev-back" class="wiz-action-btn warn" type="button">Back</button>
+        </div>
+        <h2>Elevation</h2>
+        <p class="wiz-hint">Heights follow geology: ridges and arcs rise, basins stay low. Edit further in the editor after Finish.</p>
+        <section class="wiz-section wiz-gen-category">
+          <p class="wiz-label">1. Relief style</p>
+          <div class="wiz-btn-row" id="wiz-elev-styles">
+            <button class="wiz-style-btn active" type="button" data-wiz-elev-style="standard">Standard</button>
+            <button class="wiz-style-btn" type="button" data-wiz-elev-style="bold">Bold</button>
+            <button class="wiz-style-btn" type="button" data-wiz-elev-style="chaos">Chaos</button>
+          </div>
+        </section>
+        <section class="wiz-section wiz-gen-category">
+          <p class="wiz-label">2. Generate</p>
+          <div class="wiz-btn-row">
+            <button id="wiz-elev-generate" class="wiz-action-btn" type="button">Generate elevation</button>
+          </div>
+          <p class="wiz-hint">Regenerate to try another layout with the same style.</p>
+        </section>
+        <section class="wiz-section">
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-elev-continue" class="wiz-action-btn primary" type="button">Continue</button>
+          </div>
+        </section>
+        </div>
+
+        <div id="wiz-panel-step5" class="hidden">
+        <div class="wiz-btn-row wiz-back-top">
+          <button id="wiz-climate-back" class="wiz-action-btn warn" type="button">Back</button>
+        </div>
+        <h2>Climate</h2>
+        <p class="wiz-hint">Temperature and rainfall follow latitude, elevation, and coast distance. North is colder.</p>
+        <section class="wiz-section wiz-gen-category">
+          <p class="wiz-label">1. Precipitation style</p>
+          <div class="wiz-btn-row" id="wiz-climate-styles">
+            <button class="wiz-style-btn active" type="button" data-wiz-climate-style="balanced">Balanced</button>
+            <button class="wiz-style-btn" type="button" data-wiz-climate-style="wet_coasts">Wet coasts</button>
+            <button class="wiz-style-btn" type="button" data-wiz-climate-style="dry_interior">Dry interior</button>
+          </div>
+        </section>
+        <section class="wiz-section wiz-gen-category">
+          <p class="wiz-label">2. Generate</p>
+          <div class="wiz-btn-row">
+            <button id="wiz-climate-generate" class="wiz-action-btn" type="button">Generate climate</button>
+          </div>
+          <p class="wiz-hint">Regenerate to try another layout with the same style.</p>
+        </section>
+        <section class="wiz-section">
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-climate-continue" class="wiz-action-btn primary" type="button">Continue</button>
+          </div>
+        </section>
+        </div>
+
+        <div id="wiz-panel-step6" class="hidden">
+        <div class="wiz-btn-row wiz-back-top">
+          <button id="wiz-water-back" class="wiz-action-btn warn" type="button">Back</button>
+        </div>
+        <h2>Water</h2>
+        <p class="wiz-hint">Generate lakes before rivers. Lake seed affects tie-break ordering only.</p>
+        <section class="wiz-section">
+          <p class="wiz-label">1. Lake density</p>
+          <div class="wiz-btn-row" id="wiz-lake-densities">
+            <button class="wiz-style-btn" type="button" data-wiz-lake-density="sparse">Sparse</button>
+            <button class="wiz-style-btn active" type="button" data-wiz-lake-density="balanced">Balanced</button>
+            <button class="wiz-style-btn" type="button" data-wiz-lake-density="lake_rich">Lake-rich</button>
+          </div>
+          <div class="wiz-btn-row">
+            <button id="wiz-lake-generate" class="wiz-action-btn" type="button">Generate lakes</button>
+          </div>
+        </section>
+        <section class="wiz-section">
+          <p class="wiz-label">2. River density</p>
+          <div class="wiz-btn-row" id="wiz-river-densities">
+            <button class="wiz-style-btn" type="button" data-wiz-river-density="few">Few</button>
+            <button class="wiz-style-btn active" type="button" data-wiz-river-density="balanced">Balanced</button>
+            <button class="wiz-style-btn" type="button" data-wiz-river-density="many">Many</button>
+          </div>
+          <div class="wiz-btn-row">
+            <button id="wiz-water-generate" class="wiz-action-btn" type="button">Rebuild rivers</button>
+          </div>
+          <p class="wiz-hint">Rebuild from current terrain and lakes. Same inputs → same river network — change elevation, lakes, or climate first for a different result. Manual river drawing is not available for generated hydrology.</p>
+        </section>
+        <section class="wiz-section">
+          <p class="wiz-label">Diagnostics</p>
+          <p class="wiz-hint">Copy into /fix reports when dogfooding.</p>
+          <pre id="wizard-water-diagnostics" class="water-gen-diagnostics"></pre>
+        </section>
+        <section class="wiz-section">
+          <div class="wiz-btn-row wiz-bottom-actions">
+            <button id="wiz-finish" class="wiz-action-btn primary" type="button">Finish</button>
+          </div>
+        </section>
+        </div>
+
+      </aside>
+    </div>
+
+    <aside id="generator-left" class="mode-panel mode-panel-left mode-panel-generator" aria-label="Generators">
+      <p class="wiz-label">Generators</p>
+      <button class="swatch" type="button" disabled>Terrain</button>
+      <button class="swatch" type="button" disabled>Climate</button>
+      <button class="swatch" type="button" disabled>Hydrology</button>
+      <p class="dock-note">Coming later.</p>
+    </aside>
+    <aside id="generator-right" class="mode-panel mode-panel-right mode-panel-generator" aria-label="Generator details">
+      <h2>Generator</h2>
+      <p class="wiz-stub-badge">Coming later</p>
+      <p class="dock-note">A non-linear generation toolset will live here. It shares the same engine as Wizard, but lets you re-run specific stages. Not available in this version.</p>
+    </aside>
+
+    <aside id="agent-left" class="mode-panel mode-panel-left mode-panel-agent" aria-label="Agent zones">
+      <p class="wiz-label">Agent zones</p>
+      <button class="swatch" type="button" disabled>Mark zone</button>
+      <button class="swatch" type="button" disabled>Clear zone</button>
+      <p class="dock-note">Coming later.</p>
+    </aside>
+    <aside id="agent-right" class="mode-panel mode-panel-right mode-panel-agent" aria-label="Agent details">
+      <h2>Agent</h2>
+      <p class="wiz-stub-badge">Coming later</p>
+      <p class="dock-note">Mark areas for a Cursor agent to fill in from a prompt. Intent zones are a future non-canonical layer. Not available in this version.</p>
+    </aside>
+
+    <aside id="history-left" class="mode-panel mode-panel-left mode-panel-history" aria-label="History">
+      <p class="wiz-label">History</p>
+      <p class="dock-note">The timeline is shown at the bottom of the screen.</p>
+    </aside>
+    <aside id="history-right" class="mode-panel mode-panel-right mode-panel-history" aria-label="History details">
+      <h2>History</h2>
+      <p class="dock-note">Use the timeline bar below to add states, events, and review divergence.</p>
+    </aside>
+
+    <footer id="history-bar" class="history-bar hidden">
+      <div class="history-collapsed-row">
+        <button id="history-toggle-btn" type="button"><span id="history-collapsed-label">History ▴</span></button>
+      </div>
+      <div id="history-panel" class="hidden">
+        <div id="history-divergence-banner" class="hidden"><span id="history-divergence-text"></span></div>
+        <div id="history-divergence-review" class="hidden"></div>
+        <div class="history-actions">
+          <button id="history-earlier-btn" type="button">+ Earlier</button>
+          <button id="history-later-btn" type="button">+ Later</button>
+          <button id="history-event-btn" type="button">+ Event</button>
+          <button id="history-cataclysm-btn" type="button">+ Cataclysm</button>
+          <button id="history-lock-btn" type="button">Lock state</button>
+          <button id="history-delete-state-btn" type="button" class="hidden">Delete state</button>
+        </div>
+        <div id="history-timeline-list" class="history-timeline-list"></div>
+      </div>
+    </footer>
+  </div>
+
+  <div id="wiz-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="wiz-confirm-msg">
+    <div id="wiz-confirm-dialog">
+      <p id="wiz-confirm-msg">Confirm?</p>
+      <div class="wiz-btn-row">
+        <button id="wiz-confirm-cancel" class="wiz-action-btn" type="button">Cancel</button>
+        <button id="wiz-confirm-ok" class="wiz-action-btn warn" type="button">Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Desktop shell only (roadmap 5.9, D-29): `withGlobalTauri` exposes
+    // `window.__TAURI__`; a plain browser tab never has this, so the
+    // native-only button stays hidden and mapkeeper_web.js never calls it.
+    if (window.__TAURI__) {
+      document.querySelectorAll(".native-only").forEach((el) => { el.style.display = ""; });
+      window.mapkeeperPickFolder = () => window.__TAURI__.core.invoke("pick_folder");
+      window.mapkeeperOpenUrl = (url) => window.__TAURI__.opener.openUrl(url);
+    }
+  </script>
+  <script type="module">
+    import init from "./mapkeeper_web.js";
+    init();
+  </script>
+</body>
+</html>

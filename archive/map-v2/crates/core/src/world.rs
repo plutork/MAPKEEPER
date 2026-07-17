@@ -1,0 +1,141 @@
+//! World folder scaffold — pure data; `cli`/`server` perform the actual
+//! filesystem writes (roadmap 3.5). Cell existence = a profile file on disk;
+//! no separate "painted cells" list.
+//!
+//! **Single source of truth** (roadmap 5.2): every new world — wizard,
+//! launcher `/api/projects create`, or CLI `init` — gets the *same* static
+//! files as the GitHub Template (`toolchain/template/world/`, D-08),
+//! embedded here at compile time. No copy/drift between the two onboarding
+//! paths. `mapkeeper.toml` is the one exception — generated per-world by
+//! `manifest_toml()` because it needs the author's world id substituted in.
+
+/// Relative directories created for a new world project. `.cursor/commands`
+/// is included so `SCAFFOLD_FILES`' `user.md` has somewhere to land;
+/// `map/layers` holds the machine-readable map-state layers (D-36).
+pub const SCAFFOLD_DIRS: &[&str] = &[
+    "map",
+    "map/layers",
+    "canon",
+    "profiles",
+    "data",
+    "journal",
+    ".cursor/commands",
+];
+
+/// A static scaffold file: relative path inside the world folder + contents.
+pub struct ScaffoldFile {
+    pub rel_path: &'static str,
+    pub contents: &'static str,
+}
+
+/// Static files copied as-is from `toolchain/template/world/` into every new
+/// world. Keep in sync with that folder — it is the edited source (synced to
+/// `mapkeeper-world-template` via CI, D-10); this list just embeds it.
+pub const SCAFFOLD_FILES: &[ScaffoldFile] = &[
+    ScaffoldFile {
+        rel_path: "README.md",
+        contents: include_str!("../../../toolchain/template/world/README.md"),
+    },
+    ScaffoldFile {
+        rel_path: "AGENTS.md",
+        contents: include_str!("../../../toolchain/template/world/AGENTS.md"),
+    },
+    ScaffoldFile {
+        rel_path: ".gitignore",
+        contents: include_str!("../../../toolchain/template/world/.gitignore"),
+    },
+    ScaffoldFile {
+        rel_path: ".cursor/commands/user.md",
+        contents: include_str!("../../../toolchain/template/world/.cursor/commands/user.md"),
+    },
+    ScaffoldFile {
+        rel_path: "map/README.md",
+        contents: include_str!("../../../toolchain/template/world/map/README.md"),
+    },
+    ScaffoldFile {
+        rel_path: "map/manifest.json",
+        contents: include_str!("../../../toolchain/template/world/map/manifest.json"),
+    },
+    // scale-layers (D-46): layer files (`map/layers/<id>.json`) are dense and
+    // sized to the world bounds, so they are created on first write by
+    // server/cli (GET returns an empty typed layer) rather than shipped as a
+    // fixed-size scaffold file. `map/layers/` itself is still created (SCAFFOLD_DIRS).
+    ScaffoldFile {
+        rel_path: "canon/README.md",
+        contents: include_str!("../../../toolchain/template/world/canon/README.md"),
+    },
+    ScaffoldFile {
+        rel_path: "profiles/README.md",
+        contents: include_str!("../../../toolchain/template/world/profiles/README.md"),
+    },
+    ScaffoldFile {
+        rel_path: "data/README.md",
+        contents: include_str!("../../../toolchain/template/world/data/README.md"),
+    },
+    ScaffoldFile {
+        rel_path: "journal/README.md",
+        contents: include_str!("../../../toolchain/template/world/journal/README.md"),
+    },
+];
+
+/// `mapkeeper.toml` content for a freshly scaffolded world — same shape as
+/// the static template's `mapkeeper.toml`, with the author's id substituted.
+pub fn manifest_toml(world_id: &str) -> String {
+    format!(
+        "# mapkeeper world project\n\n[world]\nid = \"{world_id}\"\nname = \"{world_id}\"\nversion = \"0.2.1\"\n"
+    )
+}
+
+/// World id must be filesystem- and `cell_id`-safe: lowercase alnum + `-`/`_`,
+/// and must not contain '.' (used as a separator in `cell_id`).
+pub fn is_valid_world_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
+/// Author-facing input → stored `world_id` (trim, lowercase, non-alnum → `-`).
+pub fn normalize_world_id(input: &str) -> Result<String, &'static str> {
+    let mut out = String::new();
+    let mut prev_sep = false;
+    for ch in input.trim().chars() {
+        let lower = ch.to_ascii_lowercase();
+        if lower.is_ascii_alphanumeric() || lower == '_' {
+            out.push(lower);
+            prev_sep = false;
+        } else if !prev_sep {
+            out.push('-');
+            prev_sep = true;
+        }
+    }
+    let trimmed = out.trim_matches('-').trim_matches('_');
+    if trimmed.is_empty() || !is_valid_world_id(trimmed) {
+        Err("invalid world id after normalization: use letters, digits, '-', '_'")
+    } else {
+        Ok(trimmed.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_empty_and_dotted_ids() {
+        assert!(!is_valid_world_id(""));
+        assert!(!is_valid_world_id("my.world"));
+        assert!(!is_valid_world_id("My-World"));
+        assert!(is_valid_world_id("main"));
+        assert!(is_valid_world_id("north-continent_2"));
+    }
+
+    #[test]
+    fn normalize_slugifies_author_input() {
+        assert_eq!(normalize_world_id("DOGGOD").unwrap(), "doggod");
+        assert_eq!(normalize_world_id("My World").unwrap(), "my-world");
+        assert_eq!(normalize_world_id("  North_2  ").unwrap(), "north_2");
+        assert!(normalize_world_id("").is_err());
+        assert!(normalize_world_id("!!!").is_err());
+    }
+}

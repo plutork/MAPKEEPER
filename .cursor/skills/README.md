@@ -1,14 +1,7 @@
 # Product skills (MAPKEEPER)
 
-Build-time depth for V0 — these skills auto-load by file path.
+No active domain-specific product skills are installed during the product-shell reset.
 
-| Skill | When | Complements |
-|-------|------|-------------|
-| [mapkeeper-cell-schema](mapkeeper-cell-schema/SKILL.md) | `schemas/**` | D-12 profiles + `/real` after Shape |
-| [mapkeeper-hex-ui](mapkeeper-hex-ui/SKILL.md) | `src/**` web UI | D-12 hex editor; adapted from anthropics frontend-design |
-| [mapkeeper-web-tests](mapkeeper-web-tests/SKILL.md) | `tests/**`, `e2e/**` | V0 dogfood; adapted from anthropics webapp-testing |
-| [mapkeeper-world-template](mapkeeper-world-template/SKILL.md) | `toolchain/template/world/**` | D-26 embedded scaffold (D-84: no GitHub template sync) |
-
-**Gate:** product skills do not bypass approved decision/todo build flow.
-
-**Upstream:** UI/test patterns adapted from [anthropics/skills](https://github.com/anthropics/skills) (see repo LICENSE).
+The previous map, cell-schema, world-template, and map browser-test skills are
+preserved under `archive/map-v2/.cursor/skills/` as read-only reference. They
+must not guide active implementation or bypass a future architecture decision.

@@ -1,119 +1,136 @@
-//! World folder scaffold — pure data; `cli`/`server` perform the actual
-//! filesystem writes (roadmap 3.5). Cell existence = a profile file on disk;
-//! no separate "painted cells" list.
-//!
-//! **Single source of truth** (roadmap 5.2): every new world — wizard,
-//! launcher `/api/projects create`, or CLI `init` — gets the *same* static
-//! files as the GitHub Template (`toolchain/template/world/`, D-08),
-//! embedded here at compile time. No copy/drift between the two onboarding
-//! paths. `mapkeeper.toml` is the one exception — generated per-world by
-//! `manifest_toml()` because it needs the author's world id substituted in.
+use serde::{Deserialize, Serialize};
 
-/// Relative directories created for a new world project. `.cursor/commands`
-/// is included so `SCAFFOLD_FILES`' `user.md` has somewhere to land;
-/// `map/layers` holds the machine-readable map-state layers (D-36).
-pub const SCAFFOLD_DIRS: &[&str] = &[
-    "map",
-    "map/layers",
-    "canon",
-    "profiles",
-    "data",
-    "journal",
-    ".cursor/commands",
-];
+use crate::spatial::{
+    alpha_default_preset, preset_by_id, MapExtentPreset, ALPHA_NEIGHBOR_CENTER_DISTANCE_M,
+};
 
-/// A static scaffold file: relative path inside the world folder + contents.
-pub struct ScaffoldFile {
-    pub rel_path: &'static str,
-    pub contents: &'static str,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorldManifest {
+    pub world: WorldIdentity,
+    /// Immutable spatial configuration (N-014). Absent → ensure writes default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spatial: Option<SpatialConfig>,
 }
 
-/// Static files copied as-is from `toolchain/template/world/` into every new
-/// world. Keep in sync with that folder — it is the edited source (synced to
-/// `mapkeeper-world-template` via CI, D-10); this list just embeds it.
-pub const SCAFFOLD_FILES: &[ScaffoldFile] = &[
-    ScaffoldFile {
-        rel_path: "README.md",
-        contents: include_str!("../../../toolchain/template/world/README.md"),
-    },
-    ScaffoldFile {
-        rel_path: "AGENTS.md",
-        contents: include_str!("../../../toolchain/template/world/AGENTS.md"),
-    },
-    ScaffoldFile {
-        rel_path: ".gitignore",
-        contents: include_str!("../../../toolchain/template/world/.gitignore"),
-    },
-    ScaffoldFile {
-        rel_path: ".cursor/commands/user.md",
-        contents: include_str!("../../../toolchain/template/world/.cursor/commands/user.md"),
-    },
-    ScaffoldFile {
-        rel_path: "map/README.md",
-        contents: include_str!("../../../toolchain/template/world/map/README.md"),
-    },
-    ScaffoldFile {
-        rel_path: "map/manifest.json",
-        contents: include_str!("../../../toolchain/template/world/map/manifest.json"),
-    },
-    // scale-layers (D-46): layer files (`map/layers/<id>.json`) are dense and
-    // sized to the world bounds, so they are created on first write by
-    // server/cli (GET returns an empty typed layer) rather than shipped as a
-    // fixed-size scaffold file. `map/layers/` itself is still created (SCAFFOLD_DIRS).
-    ScaffoldFile {
-        rel_path: "canon/README.md",
-        contents: include_str!("../../../toolchain/template/world/canon/README.md"),
-    },
-    ScaffoldFile {
-        rel_path: "profiles/README.md",
-        contents: include_str!("../../../toolchain/template/world/profiles/README.md"),
-    },
-    ScaffoldFile {
-        rel_path: "data/README.md",
-        contents: include_str!("../../../toolchain/template/world/data/README.md"),
-    },
-    ScaffoldFile {
-        rel_path: "journal/README.md",
-        contents: include_str!("../../../toolchain/template/world/journal/README.md"),
-    },
-];
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldIdentity {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+}
 
-/// `mapkeeper.toml` content for a freshly scaffolded world — same shape as
-/// the static template's `mapkeeper.toml`, with the author's id substituted.
+/// Immutable per-world spatial configuration stored in `mapkeeper.toml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpatialConfig {
+    pub preset_id: String,
+    pub grid_id: String,
+    pub width_m: f64,
+    pub height_m: f64,
+    pub cols: u32,
+    pub rows: u32,
+    pub neighbor_center_distance_m: f64,
+    pub origin_x_m: f64,
+    pub origin_y_m: f64,
+    pub orientation: String,
+}
+
+impl SpatialConfig {
+    pub fn from_preset_id(preset_id: &str) -> Result<Self, String> {
+        let preset = preset_by_id(preset_id)
+            .ok_or_else(|| format!("unknown map extent preset `{preset_id}`"))?;
+        Ok(Self::from_preset(preset))
+    }
+
+    pub fn from_preset(preset: &MapExtentPreset) -> Self {
+        Self {
+            preset_id: preset.id.to_string(),
+            grid_id: "primary".to_string(),
+            width_m: preset.width_m,
+            height_m: preset.height_m,
+            cols: preset.cols,
+            rows: preset.rows,
+            neighbor_center_distance_m: ALPHA_NEIGHBOR_CENTER_DISTANCE_M,
+            origin_x_m: 0.0,
+            origin_y_m: 0.0,
+            orientation: "pointy-top".to_string(),
+        }
+    }
+
+    pub fn alpha_default() -> Self {
+        Self::from_preset(alpha_default_preset())
+    }
+}
+
 pub fn manifest_toml(world_id: &str) -> String {
+    manifest_toml_with_preset(world_id, alpha_default_preset())
+}
+
+pub fn manifest_toml_with_preset(world_id: &str, preset: &MapExtentPreset) -> String {
+    let spatial = SpatialConfig::from_preset(preset);
     format!(
-        "# mapkeeper world project\n\n[world]\nid = \"{world_id}\"\nname = \"{world_id}\"\nversion = \"0.2.1\"\n"
+        "# mapkeeper world workspace\n\n\
+         [world]\n\
+         id = \"{world_id}\"\n\
+         name = \"{world_id}\"\n\
+         version = \"0.3.0\"\n\n\
+         [spatial]\n\
+         preset_id = \"{preset}\"\n\
+         grid_id = \"{grid}\"\n\
+         width_m = {width}\n\
+         height_m = {height}\n\
+         cols = {cols}\n\
+         rows = {rows}\n\
+         neighbor_center_distance_m = {neighbor}\n\
+         origin_x_m = {ox}\n\
+         origin_y_m = {oy}\n\
+         orientation = \"{orientation}\"\n",
+        preset = spatial.preset_id,
+        grid = spatial.grid_id,
+        width = spatial.width_m,
+        height = spatial.height_m,
+        cols = spatial.cols,
+        rows = spatial.rows,
+        neighbor = spatial.neighbor_center_distance_m,
+        ox = spatial.origin_x_m,
+        oy = spatial.origin_y_m,
+        orientation = spatial.orientation,
     )
 }
 
-/// World id must be filesystem- and `cell_id`-safe: lowercase alnum + `-`/`_`,
-/// and must not contain '.' (used as a separator in `cell_id`).
+pub fn parse_manifest(raw: &str) -> Result<WorldManifest, toml::de::Error> {
+    toml::from_str(raw)
+}
+
+pub fn render_manifest(manifest: &WorldManifest) -> Result<String, toml::ser::Error> {
+    let body = toml::to_string_pretty(manifest)?;
+    Ok(format!("# mapkeeper world workspace\n\n{body}"))
+}
+
 pub fn is_valid_world_id(id: &str) -> bool {
     !id.is_empty()
         && id
             .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_')
 }
 
-/// Author-facing input → stored `world_id` (trim, lowercase, non-alnum → `-`).
 pub fn normalize_world_id(input: &str) -> Result<String, &'static str> {
-    let mut out = String::new();
-    let mut prev_sep = false;
+    let mut output = String::new();
+    let mut previous_separator = false;
     for ch in input.trim().chars() {
         let lower = ch.to_ascii_lowercase();
         if lower.is_ascii_alphanumeric() || lower == '_' {
-            out.push(lower);
-            prev_sep = false;
-        } else if !prev_sep {
-            out.push('-');
-            prev_sep = true;
+            output.push(lower);
+            previous_separator = false;
+        } else if !previous_separator {
+            output.push('-');
+            previous_separator = true;
         }
     }
-    let trimmed = out.trim_matches('-').trim_matches('_');
-    if trimmed.is_empty() || !is_valid_world_id(trimmed) {
-        Err("invalid world id after normalization: use letters, digits, '-', '_'")
+    let normalized = output.trim_matches(['-', '_']);
+    if normalized.is_empty() || !is_valid_world_id(normalized) {
+        Err("world name must contain letters or digits")
     } else {
-        Ok(trimmed.to_string())
+        Ok(normalized.to_string())
     }
 }
 
@@ -122,20 +139,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_empty_and_dotted_ids() {
-        assert!(!is_valid_world_id(""));
-        assert!(!is_valid_world_id("my.world"));
-        assert!(!is_valid_world_id("My-World"));
-        assert!(is_valid_world_id("main"));
-        assert!(is_valid_world_id("north-continent_2"));
+    fn identity_manifest_includes_spatial_config() {
+        let raw = manifest_toml("my-world");
+        let manifest = parse_manifest(&raw).unwrap();
+        assert_eq!(manifest.world.id, "my-world");
+        assert_eq!(manifest.world.version, "0.3.0");
+        let spatial = manifest.spatial.expect("spatial section");
+        assert_eq!(spatial.preset_id, "wide_2000");
+        assert_eq!(spatial.cols, 55);
+        assert_eq!(spatial.rows, 36);
+        assert_eq!(spatial.neighbor_center_distance_m, 1000.0);
+        assert!(!raw.contains("[map]"));
+        assert!(!raw.contains("[build]"));
+        assert!(!raw.contains("[history]"));
     }
 
     #[test]
-    fn normalize_slugifies_author_input() {
-        assert_eq!(normalize_world_id("DOGGOD").unwrap(), "doggod");
-        assert_eq!(normalize_world_id("My World").unwrap(), "my-world");
-        assert_eq!(normalize_world_id("  North_2  ").unwrap(), "north_2");
-        assert!(normalize_world_id("").is_err());
+    fn author_name_normalizes_to_safe_id() {
+        assert_eq!(normalize_world_id(" My World ").unwrap(), "my-world");
         assert!(normalize_world_id("!!!").is_err());
     }
 }

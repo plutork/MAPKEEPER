@@ -6,20 +6,16 @@ Developer-oriented setup for working on mapkeeper itself.
 
 ## Repo layout
 
-Cargo workspace, Rust everywhere (core, CLI, local server, WASM UI):
+Cargo workspace for the active product shell:
 
 | Path | Owns |
 |------|------|
-| `crates/core` | platform-neutral rules, geometry, profiles, layers |
-| `crates/cli` | `mapkeeper` CLI and filesystem commands |
-| `crates/server` | local HTTP API + world/project I/O |
-| `crates/web` | Rust -> WASM UI |
+| `crates/core` | project registry and identity-only world contract |
+| `crates/server` | local health/projects API + static UI |
+| `crates/web` | Rust -> WASM bootstrap + five-mode shell UI |
 | `crates/desktop` | Windows desktop shell (Tauri) |
-| `schemas/` | JSON Schema contracts |
-| `fixtures/` | shared test fixtures |
-| `toolchain/` | world scaffold source |
-| `tests/` | e2e/dev tooling (Playwright) |
-| `setup.ps1` / `run.ps1` / `update.ps1` | Windows alpha bootstrap / daily launch (D-86 pull-in-run) / explicit update |
+| `archive/map-v2/` | excluded read-only reference; never an active dependency |
+| `setup.ps1` / `run.ps1` / `update.ps1` | Windows alpha bootstrap / daily launch with clean-tree pull / explicit update |
 
 ## Local server + web UI
 
@@ -30,14 +26,9 @@ cargo run -p mapkeeper-server -- --port 4000 --web-dist crates/web/dist
 
 Then open `http://127.0.0.1:4000`.
 
-CLI query examples:
-
-```powershell
-cargo run -p mapkeeper-cli -- profile get demo.hex.q0.r0 --world .tmp-world
-cargo run -p mapkeeper-cli -- terrain get demo.hex.q0.r0 --world .tmp-world
-```
-
-`mapkeeper-server` without `--world` starts launcher mode (`/api/projects` list/create/open).
+`mapkeeper-server` without `--world` starts launcher mode. The active API is
+limited to `/api/health` and `/api/projects` create/open/close/forget/delete.
+Map, layer, profile, generator, hydrology, and History APIs are archived.
 
 ## Desktop shell (Windows) — source-run
 
@@ -73,7 +64,9 @@ Before `git push` (or automatically via hook after `.\setup.ps1`):
 .\scripts\check.ps1
 ```
 
-Runs `cargo test --workspace --exclude mapkeeper-desktop` with `RUSTFLAGS=-Dwarnings` and codemap drift check (same subset as CI). If `CODEMAP.md` is stale:
+Runs `cargo test --workspace --exclude mapkeeper-desktop` with
+`RUSTFLAGS=-Dwarnings`, clippy, codemap, archive-isolation, and encoding checks.
+If `CODEMAP.md` is stale:
 
 ```powershell
 python scripts/gen_codemap.py
@@ -86,7 +79,7 @@ Requires: Rust (MSVC), `wasm32-unknown-unknown`, WebView2, and Visual Studio Bui
 
 ## NSIS installer (Later — not alpha path)
 
-Consumer NSIS packaging is **not** the alpha distribution channel (D-80/D-81). Do not add installer-first docs/tests/links unless a future decision restores that path.
+Consumer NSIS packaging is **not** the alpha distribution channel. Do not add installer-first docs/tests/links unless a future decision restores that path.
 
 Maintainer-only local bundle (optional):
 

@@ -1,6 +1,6 @@
 # Cursor alpha (Windows)
 
-Workspace-first alpha for mapkeeper (D-80 direction, **D-83** surface).
+Workspace-first alpha for the mapkeeper product shell.
 
 **Audience:** writer / GM with **no prior Git or Cursor** experience.  
 **Time:** first run ~30–90 minutes (downloads + MSVC if needed).
@@ -121,6 +121,18 @@ When the app opens:
 
 - On **empty Home**, click **Create your first world**.
 - Worlds are stored under **`Documents/MAPKEEPER Worlds`** by default (not inside this repo).
+-   Creation writes identity + spatial config; pick a **map size** card (Default
+  ≈2k cells; size fixed after create). Opens the five-mode product shell.
+  In **Editor**, tools sit on a strip under the mode tabs:
+  **View** (default) and **Relief**. Left panel holds the active tool.
+  **View** — drag to pan, wheel to zoom; layers **Empty** (contour grid) or
+  **relief** (elevation tint). **Relief** — Raise/Lower + **Edit ocean** on the
+  left; click hexes to paint. Height **0** is the ocean datum; with Edit ocean
+  off, ocean cells (`h < 0`) stay frozen and land Lower floors at 0; turn Edit
+  ocean on to dig or fill the sea. Cell heights clamp **−60…100**.
+  The right panel is reserved for later details. View settings are not saved.
+  Reload re-reads disk; screen/camera are never persisted. Domain generators
+  and History are still out of scope.
 
 ---
 
@@ -138,14 +150,16 @@ No installer download. No agent required for the happy path.
 
 ## 7. What this validates
 
-Open the MAPKEEPER workspace → prepare/run the visual editor from source → author creates/resumes a world → agents can use the same world data.
+Open the MAPKEEPER workspace → prepare/run the desktop product shell from
+source → create/resume a portable identity-only world folder → switch among
+Editor, Generator, Wizard, Agent, and History without loading map-v2.
 
 ---
 
 ## Safety
 
 - `setup.ps1` asks before heavy changes; never silent-installs MSVC; does not git pull.
-- `run.ps1` (D-86): on a **clean** tree, fetch + `git pull --ff-only` when behind upstream; **dirty** tree skips pull; pull/fetch failure **stops** before build; always rebuilds web + launches; no toolchain installs.
+- `run.ps1`: on a **clean** tree, fetch + `git pull --ff-only` when behind upstream; **dirty** tree skips pull; pull/fetch failure **stops** before build; always rebuilds web + launches; no toolchain installs.
 - `update.ps1` stops on a dirty tree; pull + rebuild only (no launch).
 - `/doctor` asks before heavy installs; never deletes world folders.
 

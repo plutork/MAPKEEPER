@@ -1,40 +1,6 @@
-//! Platform-neutral rules: cell_id, hex geometry, profile + validation model.
-//! No filesystem, UI, Tauri, or browser assumptions — see `server`/`cli`/`web` for I/O.
+//! Product-shell contracts. The archived map-v2 domain is intentionally
+//! absent from the active crate.
 
-pub mod build_state;
-pub mod cell_id;
-pub mod hex;
-pub mod history;
-pub mod hydro;
-pub mod integrity;
-pub mod lakes;
-pub mod layer;
-pub mod map_preset;
-pub mod profile;
 pub mod projects;
-pub mod rivers;
-pub mod river_pin;
-pub mod river_detach;
+pub mod spatial;
 pub mod world;
-
-pub mod worldgen;
-
-// Legacy module paths (D-92) — prefer `worldgen::*` for new pipeline work.
-pub mod land_mask {
-    pub use crate::worldgen::land::*;
-}
-pub mod coast_distance {
-    pub use crate::worldgen::coast::*;
-}
-pub mod plates {
-    pub use crate::worldgen::plates::*;
-}
-pub mod geology {
-    pub use crate::worldgen::geology::*;
-}
-pub mod elevation_gen {
-    pub use crate::worldgen::elevation::*;
-}
-pub mod climate {
-    pub use crate::worldgen::climate::*;
-}

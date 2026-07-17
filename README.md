@@ -1,14 +1,20 @@
 # mapkeeper
 
-Generic **local** world editor built for the age of AI agents.
-
-The map is not only a picture — it is the interface to a machine-readable world.
+Local world-workspace shell for writers and game masters.
 
 <a id="product"></a>
 
 ## Product
 
-**mapkeeper** helps a **writer / game master** build a portable world folder: hex map, machine-readable layers, and cell profiles that both the editor and agents can query — without an AI runtime inside the app.
+**mapkeeper** currently provides the working desktop shell around portable world
+folders. Spatial concept (asymmetric hybrid: world space + hex lattice) is
+accepted; base map topology is a bounded planar chart with height (edges do
+not wrap). Editor Raise/Lower relief on hexes is the first author-facing
+map gesture (`spatial/state.json` + canvas).
+
+The previous hex/layer implementation is suspended and available only as
+read-only reference in [`archive/map-v2/`](archive/map-v2/README.md). It is not
+compiled, tested, shipped, or used by the active application.
 
 Your lore lives in your world folder, not in this product repository.
 
@@ -44,29 +50,59 @@ Details, GitHub Desktop method, safety: [docs/CURSOR-ALPHA.md](docs/CURSOR-ALPHA
 ## Create your first world
 
 - On empty Home, click **Create your first world**.
-- Default path is `Documents/MAPKEEPER Worlds`; default size is **Small**.
-- Flow opens **Build World wizard** directly.
-- Blank **Create** remains available under advanced options.
+- The default root is `Documents/MAPKEEPER Worlds`.
+- Creation writes `mapkeeper.toml` (identity + immutable `[spatial]`) and a
+  minimal map state. Pick a **map size** card at Create (Default ≈2k cells);
+  size is fixed afterward.
+- The world opens in the five-mode workspace shell: **Editor, Generator,
+  Wizard, Agent, History**.
+- Opening a world loads the hex map; Raise/Lower relief with an adjustable
+  hard-disk brush (Stamp | Airbrush, Rate 1|5|10|20) in Editor.
+  Domain catalogs, generators, and map History are still out of scope.
 
 Your lore stays in the world folder (usually under `Documents/MAPKEEPER Worlds`), not in this product repository.
 
-## Invariants
+## Active invariants
 
 <a id="invariants"></a>
 
-- **Map -> machine-readable state**, not only a decorative image.
-- **Same data** for author UI and agent queries.
+- **World ≠ product repository** — author data remains in portable world folders.
 - **No AI runtime in product** — agents run outside.
-- **Core stays world-agnostic** — private lore remains in world folders.
-- **Layer-first map state** (`map/manifest.json` + `map/layers/...`) is separate from human profiles.
-- **Local-only** — no remote telemetry in core.
+- **Asymmetric hybrid spatial concept** — persisted world space is
+  authoritative for continuous position/geometry; hex is the primary discrete
+  authoring/simulation lattice and authoritative for grid-bound data; derived
+  membership/indexes must not compete as truth. Immutable spatial config lives
+  in `mapkeeper.toml` `[spatial]`; mutable content is `spatial/state.json`
+  (no screen coordinates). Domain catalogs, map history, and archived map-v2
+  contracts are not implied.
+- **Local metric world frame** — horizontal world coordinates are meters;
+  primary-grid resolution is neighbour-center distance (alpha default 1000 m);
+  map size is an extent preset (cols/rows derived). Create offers validated
+  wide preset cards (catalog ≤50k cells; Default ≈2k). Silent rescale after
+  data exists is forbidden.
+- **Base map topology** — bounded planar `(x, y)` chart with single-valued
+  height over `(x, y)`; opposite edges do not connect; not a sphere, cylinder,
+  or torus. Outside bounds means outside the map.
+- **Author relief brush** — first map gesture is Raise/Lower integer relief on
+  hex cells with an adjustable hard-disk brush (Stamp default; opt-in Airbrush
+  with timed epochs; radius, hover footprint, drag stroke; not soft falloff /
+  Flatten / a full terrain editor).
+- **Elevation surface SoT** — one grid-bound elevation field; plateaus, ridges,
+  and steep neighbour transitions are forms of that field, not separate cliff
+  objects. Meshes, shading, and oblique views are display-only.
+- **Alpha ocean** — elevation **0** is the coast/land floor; below 0 reads as
+  ocean. Relief **Edit ocean** (default off) freezes `h < 0`; on unlocks dig/fill
+  ocean; land Lower floors at 0. Not a full water domain or hydrology model.
+- **Archived code is reference only** — active code cannot import or copy it
+  without a separate architecture decision.
+- **Local-only** — no remote telemetry.
 
 ## Docs & deeper
 
 - **Cursor alpha guide:** [docs/CURSOR-ALPHA.md](docs/CURSOR-ALPHA.md)
 - **Developer setup:** [docs/DEV.md](docs/DEV.md)
 - **Code routing map:** [docs/CODEMAP-LITE.md](docs/CODEMAP-LITE.md)
-- **World template details:** [toolchain/template/README.md](toolchain/template/README.md)
+- **map-v2 archive:** [archive/map-v2/README.md](archive/map-v2/README.md)
 - **Starter redirect:** [STARTER_PACK.md](STARTER_PACK.md)
 
 ## License

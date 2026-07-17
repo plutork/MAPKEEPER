@@ -1,0 +1,373 @@
+//! WASM UI — calls mapkeeper-core for hex geometry + profile rules;
+//! filesystem goes through the `mapkeeper-server` HTTP API, never direct
+//! FS access. WASM framework choice: none — plain `wasm-bindgen` + `web-sys`
+//! canvas, deliberately minimal for the flow-first pass (roadmap D-21).
+//!
+//! Flow: Home screen lists/creates worlds (roadmap D-12/5.7 launcher) ->
+//! open a world -> render a blank hex grid -> click a cell -> edit a
+//! placeholder profile (title + notes) -> save -> cell is "painted". No
+//! real cell schema (roadmap 3.2) yet — that is the point of this pass.
+
+mod api;
+mod brush;
+mod canvas;
+mod dom;
+mod editor;
+mod elevation_view;
+mod history;
+mod home;
+mod mutate_retry;
+mod state;
+mod water_diag;
+mod wizard;
+
+use canvas::redraw;
+use dom::set_text;
+use editor::{
+    attach_brush_hover_preview, attach_canvas_click, attach_close_click, attach_dock_click,
+    attach_escape_key, attach_generate_lakes_click, attach_generate_rivers_click,
+    attach_paint_drag, attach_pan_drag, attach_save_click, attach_top_popovers, attach_wheel_zoom,
+    attach_window_resize,
+};
+use history::attach_history_handlers;
+use home::{
+    attach_browse_folder_click, attach_build_start_click, attach_create_click,
+    attach_first_world_handlers, attach_generate_id_input, attach_generate_path_input,
+    attach_new_id_input, attach_new_path_input, attach_post_finish_note_dismiss,
+    attach_preset_warn_handlers, attach_project_list_click,
+};
+use wizard::attach_wizard_handlers;
+
+use api::refresh_projects;
+use state::{
+    fresh_elevation_layer, AppState, Brush, PerfMetrics, PerfTimers, WaterGenTrace, APP_VERSION,
+};
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use elevation_view::ColorMode;
+use mapkeeper_core::lakes::LakeCatalog;
+use mapkeeper_core::map_preset::MapPreset;
+use mapkeeper_core::rivers::RiverCatalog;
+use mapkeeper_core::worldgen::hydrology::RiverRenderPaths;
+use wasm_bindgen::prelude::*;
+
+pub(crate) fn perf_emit(metrics: &PerfMetrics) {
+    set_text("view-perf", &metrics.view_line());
+    web_sys::console::log_1(&format!("[perf] {}", metrics.console_line()).into());
+}
+
+#[wasm_bindgen(start)]
+pub fn start() {
+    console_error_panic_hook::set_once();
+    set_text("app-version", &format!("mapkeeper {APP_VERSION}"));
+
+    let initial_bounds = MapPreset::Small.bounds();
+    let state = Rc::new(RefCell::new(AppState {
+        cells: HashMap::new(),
+        elevation: fresh_elevation_layer(initial_bounds),
+        brush: Brush::Inspect,
+        last_paint_brush: Brush::SetLand,
+        last_river_brush: Brush::River,
+        active_river_id: None,
+        river_pin_source: None,
+        rivers: RiverCatalog::default(),
+        river_render_paths: RiverRenderPaths::default(),
+        rivers_read_only: false,
+        channel_segment_count: None,
+        channel_cell_count: None,
+        named_rivers: Vec::new(),
+        name_migration: Vec::new(),
+        lakes: LakeCatalog::default(),
+        precip_layer_present: None,
+        precip_input_state: None,
+        precip_source: None,
+        rivers_compatibility_projection: false,
+        water_gen_trace: WaterGenTrace::default(),
+        selected: None,
+        map_bounds: initial_bounds,
+        zoom: 1.0,
+        pan_x: 0.0,
+        pan_y: 0.0,
+        drag_active: false,
+        drag_moved: false,
+        drag_last_x: 0.0,
+        drag_last_y: 0.0,
+        paint_active: false,
+        paint_moved: false,
+        paint_last_cell: None,
+        brush_radius: 0,
+        brush_step: 1,
+        falloff_even: true,
+        color_mode: ColorMode::Hydro,
+        show_elevation_labels: false,
+        show_peaks: false,
+        pending_paints: HashMap::new(),
+        paint_flush_scheduled: false,
+        paint_flush_in_flight: false,
+        paint_autosave_blocked: false,
+        paint_retry_attempts: 0,
+        paint_rebased_after_conflict: false,
+        hover_cell: None,
+        show_grid: false,
+        suppress_next_click: false,
+        legacy_map: false,
+        scoped_world_id: None,
+        map_revision: 0,
+        default_worlds_root: None,
+        path_touched: false,
+        build_path_touched: false,
+        perf: PerfMetrics::default(),
+        perf_timers: PerfTimers::default(),
+        content_rev: 0,
+        last_draw_snapshot: None,
+        redraw_dirty: false,
+        redraw_raf_pending: false,
+        wizard_character: "smooth".to_string(),
+        wizard_layout_class: "pangea".to_string(),
+        wizard_regenerate_nonce: 0,
+        wizard_recipe_id: String::new(),
+        wizard_gen_seed: None,
+        wizard_accepted: false,
+        wizard_edit_mode: false,
+        wizard_edit_brush: "land".to_string(),
+        wizard_brush_radius: 0,
+        pending_wizard_stamps: HashMap::new(),
+        wizard_stamp_flush_scheduled: false,
+        wizard_stamp_flush_in_flight: false,
+        wizard_stamp_retry_attempts: 0,
+        wizard_stamp_autosave_blocked: false,
+        wizard_stamp_last_center: None,
+        wizard_step: 1,
+        wizard_peak_step: 1,
+        wizard_geo_style: "belts".to_string(),
+        wizard_geo_nonce: 0,
+        wizard_elev_style: "standard".to_string(),
+        wizard_elev_nonce: 0,
+        wizard_climate_style: "balanced".to_string(),
+        wizard_climate_nonce: 0,
+        wizard_geo_accepted: false,
+        wizard_invalidation_from: None,
+        wizard_viewed_stub: None,
+        geology: None,
+        build_draft_active: false,
+        workspace_mode: state::WorkspaceMode::Editor,
+        history_enabled: false,
+        history_unlock_available: false,
+        history_expanded: false,
+        history_selected_id: String::new(),
+        history_states: Vec::new(),
+        history_events: Vec::new(),
+        history_divergence: Vec::new(),
+        history_divergence_review: Vec::new(),
+        history_selected_can_delete: false,
+    }));
+
+    redraw(&state.borrow());
+    attach_canvas_click(state.clone());
+    attach_save_click(state.clone());
+    attach_close_click(state.clone());
+    attach_create_click(state.clone());
+    attach_build_start_click(state.clone());
+    attach_wizard_handlers(state.clone());
+    attach_history_handlers(state.clone());
+    attach_generate_rivers_click(state.clone());
+    attach_generate_lakes_click(state.clone());
+    attach_preset_warn_handlers();
+    attach_project_list_click(state.clone());
+    attach_dock_click(state.clone());
+    attach_top_popovers();
+    attach_escape_key(state.clone());
+    attach_pan_drag(state.clone());
+    attach_paint_drag(state.clone());
+    attach_brush_hover_preview(state.clone());
+    attach_wheel_zoom(state.clone());
+    attach_window_resize(state.clone());
+    attach_browse_folder_click(state.clone());
+    attach_new_id_input(state.clone());
+    attach_new_path_input(state.clone());
+    attach_generate_id_input(state.clone());
+    attach_generate_path_input(state.clone());
+    attach_first_world_handlers(state.clone());
+    attach_post_finish_note_dismiss();
+
+    wasm_bindgen_futures::spawn_local(refresh_projects(state));
+}
+
+#[cfg(test)]
+mod wizard_stamp_pending_tests {
+    use crate::wizard::merge_wizard_stamp_pending;
+    use std::collections::HashMap;
+
+    #[test]
+    fn merge_overwrites_same_cell_with_latest_kind() {
+        let mut pending = HashMap::new();
+        merge_wizard_stamp_pending(&mut pending, &[(0, 0), (1, 0)], true);
+        merge_wizard_stamp_pending(&mut pending, &[(1, 0), (2, 0)], false);
+        assert_eq!(pending.get(&(0, 0)).copied(), Some(true));
+        assert_eq!(pending.get(&(1, 0)).copied(), Some(false));
+        assert_eq!(pending.get(&(2, 0)).copied(), Some(false));
+        assert_eq!(pending.len(), 3);
+    }
+
+    #[test]
+    fn every_new_center_may_stamp_without_radius_gap() {
+        // Guard: do not reintroduce center-skip by effective radius.
+        // paint_last_cell already dedupes identical centers; M/L/XL short
+        // strokes must still stamp on every new hex under the cursor.
+        let centers = [(0, 0), (1, 0), (2, 0), (3, 0)];
+        assert_eq!(centers.len(), 4);
+    }
+
+    #[test]
+    fn large_brush_preview_uses_circle_not_hex_walk() {
+        use crate::brush::brush_preview_uses_circle;
+        assert!(!brush_preview_uses_circle(0));
+        assert!(!brush_preview_uses_circle(2));
+        assert!(brush_preview_uses_circle(3));
+        assert!(brush_preview_uses_circle(24));
+    }
+
+    #[test]
+    fn brush_tiers_stay_distinct_when_zoomed_in() {
+        use crate::brush::effective_brush_radius_from_hex_size;
+        // Large hex px → zoom-derived radius floors to 0; tier floor keeps S<M<L<XL.
+        let hex_px = 80.0;
+        let s = effective_brush_radius_from_hex_size(0, hex_px);
+        let m = effective_brush_radius_from_hex_size(1, hex_px);
+        let l = effective_brush_radius_from_hex_size(2, hex_px);
+        let xl = effective_brush_radius_from_hex_size(3, hex_px);
+        assert_eq!((s, m, l, xl), (0, 1, 2, 3));
+    }
+
+    #[test]
+    fn zoom_max_grows_when_base_hex_is_small() {
+        use crate::canvas::max_zoom_for_base_hex;
+        // World-like tiny base → high max; Small-like large base → max ≈ 1.
+        assert!(max_zoom_for_base_hex(5.0) > 5.0);
+        assert_eq!(max_zoom_for_base_hex(40.0), 1.0);
+        assert_eq!(max_zoom_for_base_hex(80.0), 1.0);
+    }
+
+    #[test]
+    fn wizard_invalidation_clears_accepted_flags() {
+        use crate::state::{fresh_elevation_layer, AppState, PerfMetrics, PerfTimers, WaterGenTrace};
+        use crate::wizard::{advance_invalidation_after_regen, invalidate_wizard_downstream};
+        use crate::elevation_view::ColorMode;
+        use mapkeeper_core::lakes::LakeCatalog;
+        use mapkeeper_core::map_preset::MapPreset;
+        use mapkeeper_core::rivers::RiverCatalog;
+        use mapkeeper_core::worldgen::hydrology::RiverRenderPaths;
+        use std::collections::HashMap;
+
+        let bounds = MapPreset::Small.bounds();
+        let mut state = AppState {
+            cells: HashMap::new(),
+            elevation: fresh_elevation_layer(bounds),
+            brush: crate::state::Brush::Inspect,
+            last_paint_brush: crate::state::Brush::SetLand,
+            last_river_brush: crate::state::Brush::River,
+            active_river_id: None,
+            river_pin_source: None,
+            rivers: RiverCatalog::default(),
+            river_render_paths: RiverRenderPaths::default(),
+            rivers_read_only: false,
+            channel_segment_count: None,
+            channel_cell_count: None,
+            named_rivers: Vec::new(),
+            name_migration: Vec::new(),
+            lakes: LakeCatalog::default(),
+            precip_layer_present: None,
+            precip_input_state: None,
+            precip_source: None,
+            rivers_compatibility_projection: false,
+            water_gen_trace: WaterGenTrace::default(),
+            selected: None,
+            map_bounds: bounds,
+            zoom: 1.0,
+            pan_x: 0.0,
+            pan_y: 0.0,
+            drag_active: false,
+            drag_moved: false,
+            drag_last_x: 0.0,
+            drag_last_y: 0.0,
+            paint_active: false,
+            paint_moved: false,
+            paint_last_cell: None,
+            brush_radius: 0,
+            brush_step: 1,
+            falloff_even: true,
+            color_mode: ColorMode::Hydro,
+            show_elevation_labels: false,
+            show_peaks: false,
+            pending_paints: HashMap::new(),
+            paint_flush_scheduled: false,
+            paint_flush_in_flight: false,
+            paint_autosave_blocked: false,
+            paint_retry_attempts: 0,
+            paint_rebased_after_conflict: false,
+            hover_cell: None,
+            show_grid: false,
+            suppress_next_click: false,
+            legacy_map: false,
+            scoped_world_id: None,
+            map_revision: 0,
+            default_worlds_root: None,
+            path_touched: false,
+            build_path_touched: false,
+            perf: PerfMetrics::default(),
+            perf_timers: PerfTimers::default(),
+            content_rev: 0,
+            last_draw_snapshot: None,
+            redraw_dirty: false,
+            redraw_raf_pending: false,
+            wizard_character: "smooth".to_string(),
+            wizard_layout_class: "pangea".to_string(),
+            wizard_regenerate_nonce: 0,
+            wizard_recipe_id: String::new(),
+            wizard_gen_seed: None,
+            wizard_accepted: true,
+            wizard_edit_mode: false,
+            wizard_edit_brush: "land".to_string(),
+            wizard_brush_radius: 0,
+            pending_wizard_stamps: HashMap::new(),
+            wizard_stamp_flush_scheduled: false,
+            wizard_stamp_flush_in_flight: false,
+            wizard_stamp_retry_attempts: 0,
+            wizard_stamp_autosave_blocked: false,
+            wizard_stamp_last_center: None,
+            wizard_step: 3,
+            wizard_peak_step: 5,
+            wizard_geo_style: "belts".to_string(),
+            wizard_geo_nonce: 0,
+            wizard_elev_style: "standard".to_string(),
+            wizard_elev_nonce: 0,
+            wizard_climate_style: "balanced".to_string(),
+            wizard_climate_nonce: 0,
+            wizard_geo_accepted: true,
+            wizard_invalidation_from: None,
+            wizard_viewed_stub: None,
+            geology: None,
+            build_draft_active: false,
+            workspace_mode: crate::state::WorkspaceMode::Editor,
+            history_enabled: false,
+            history_unlock_available: false,
+            history_expanded: false,
+            history_selected_id: String::new(),
+            history_states: Vec::new(),
+            history_events: Vec::new(),
+            history_divergence: Vec::new(),
+            history_divergence_review: Vec::new(),
+            history_selected_can_delete: false,
+        };
+        invalidate_wizard_downstream(&mut state, 2);
+        assert_eq!(state.wizard_invalidation_from, Some(3));
+        assert!(!state.wizard_accepted);
+        assert!(!state.wizard_geo_accepted);
+        state.wizard_invalidation_from = Some(3);
+        advance_invalidation_after_regen(&mut state, 3);
+        assert_eq!(state.wizard_invalidation_from, Some(4));
+    }
+}

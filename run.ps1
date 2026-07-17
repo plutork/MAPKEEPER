@@ -1,4 +1,4 @@
-# alpha-scripts--run-with-pull (D-86): daily - best-effort pull + rebuild + launch
+# Alpha daily path: clean-tree pull + rebuild + launch
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
 Set-Location $Root
@@ -59,10 +59,10 @@ function Try-PullIfClean {
 
 Write-Host "mapkeeper run (Windows source-run)"
 Write-Host "repo: $Root"
-Write-Host "Build policy: warnings are errors (D-97, same as CI)."
+Write-Host "Build policy: warnings are errors (same as CI)."
 Write-Host ""
 
-# D-97: inherited by build.ps1 child and cargo run below.
+# Inherited by the web build and cargo run below.
 $env:RUSTFLAGS = "-Dwarnings"
 
 if (-not (Test-Path (Join-Path $Root "Cargo.toml"))) {

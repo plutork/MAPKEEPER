@@ -1,1754 +1,1320 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>mapkeeper — V0 flow</title>
-<style>
-  :root { color-scheme: dark; }
-  body {
-    margin: 0;
-    display: flex;
-    min-height: 100vh;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-    background: #161a1d;
-    color: #eee;
-  }
-  #map { display: block; width: 100%; height: 100%; background: #0e1113; cursor: pointer; }
-  .map-wrap { position: relative; width: 100%; height: 100vh; }
-  .row { display: flex; gap: 8px; }
-  button {
-    padding: 8px 14px;
-    border-radius: 6px;
-    border: none;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 13px;
-  }
-  #save { background: #3ac886; color: #04140b; }
-  #close { background: #2a2f36; color: #eee; }
-  #status { font-size: 12px; color: #7fc99a; min-height: 16px; }
-  #hint { position: absolute; top: 16px; left: 16px; font-size: 12px; color: #666f7a; max-width: calc(100% - 80px); z-index: 1; }
-
-  #tool-dock {
-    position: absolute;
-    top: 0;
-    right: 0;
-    height: 100%;
-    display: flex;
-    z-index: 20;
-    pointer-events: none;
-  }
-  #dock-rail {
-    width: 52px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 10px 0;
-    gap: 6px;
-    box-sizing: border-box;
-    pointer-events: auto;
-    background: rgba(22, 26, 29, 0.94);
-    border-left: 1px solid #2a2f36;
-  }
-  .dock-btn {
-    position: relative;
-    width: 40px;
-    height: 40px;
-    padding: 0;
-    border-radius: 8px;
-    background: #20242a;
-    color: #cbd3dd;
-    border: 1px solid transparent;
-    font-size: 18px;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .dock-btn:hover { background: #262b32; color: #eee; }
-  .dock-btn.active { border-color: #9fe3c4; color: #eafff5; box-shadow: 0 0 0 1px rgba(159, 227, 196, 0.15) inset; }
-  .dock-btn.tool-active::after {
-    content: "";
-    position: absolute;
-    bottom: 4px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #9fe3c4;
-  }
-  #dock-drawer {
-    width: min(280px, 22vw);
-    min-width: 240px;
-    box-sizing: border-box;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    overflow-y: auto;
-    border-left: 1px solid #2a2f36;
-    pointer-events: auto;
-    background: rgba(22, 26, 29, 0.96);
-    box-shadow: -10px 0 28px rgba(0, 0, 0, 0.35);
-    transition: width 0.15s ease, min-width 0.15s ease, opacity 0.15s ease, padding 0.15s ease;
-  }
-  #dock-drawer.collapsed {
-    width: 0;
-    min-width: 0;
-    padding: 0;
-    opacity: 0;
-    overflow: hidden;
-    pointer-events: none;
-    border-left-color: transparent;
-  }
-  .drawer-pane { display: none; flex-direction: column; gap: 12px; }
-  .drawer-pane.active { display: flex; }
-  .drawer-pane h2 { margin: 0; font-size: 15px; color: #9fe3c4; font-weight: 600; }
-  .drawer-pane .pane-label {
-    margin: 0;
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #8a8f98;
-  }
-  .drawer-pane label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #8a8f98; }
-  .drawer-pane input, .drawer-pane textarea {
-    background: #20242a;
-    border: 1px solid #3a3f47;
-    color: #eee;
-    padding: 8px 10px;
-    border-radius: 6px;
-    font: inherit;
-    font-size: 14px;
-  }
-  .drawer-pane textarea { min-height: 120px; resize: vertical; }
-  .dock-empty { margin: 0; font-size: 13px; color: #666f7a; line-height: 1.45; }
-  .dock-note { margin: 0; font-size: 12px; color: #666f7a; line-height: 1.45; }
-  .water-gen-diagnostics {
-    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-    font-size: 11px;
-    line-height: 1.35;
-    color: #9aa3ad;
-    white-space: pre-wrap;
-    margin: 8px 0;
-    padding: 8px;
-    background: rgba(0, 0, 0, 0.28);
-    border: 1px solid #2a2f36;
-    border-radius: 4px;
-    max-height: 220px;
-    overflow-y: auto;
-  }
-  #world-name { margin: 0; font-size: 14px; font-weight: 600; word-break: break-word; }
-  .swatch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .swatch {
-    padding: 8px 10px;
-    font-size: 12px;
-    background: #20242a;
-    color: #cbd3dd;
-    border: 1px solid transparent;
-    text-align: left;
-  }
-  .swatch.active { border-color: #9fe3c4; color: #eafff5; }
-  .swatch .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
-  .swatch-row { display: flex; gap: 6px; margin-top: 4px; }
-  .swatch.disabled { opacity: 0.45; pointer-events: none; }
-  .legend-bar {
-    height: 12px;
-    border-radius: 4px;
-    background: linear-gradient(90deg, #1e5a8a 0%, #5a9a50 20%, #d4c832 55%, #dc3c28 100%);
-    border: 1px solid #3a3f47;
-  }
-
-  .view { display: none; width: 100%; }
-  .view.active { display: block; }
-  #editor.active { position: relative; height: 100vh; width: 100%; }
-
-  #home { max-width: 1140px; margin: 34px auto; padding: 0 24px 28px; }
-  .brand { text-align: center; margin-bottom: 24px; }
-  .brand h1 { font-size: 24px; margin: 0; letter-spacing: 0.02em; }
-  .brand .sub { color: #8a8f98; font-size: 12px; margin: 6px 0 0; }
-  .brand .version-row {
-    margin-top: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-  .brand .version { color: #66707c; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
-  .brand .version-btn {
-    background: transparent;
-    border: 1px solid #3a4451;
-    color: #a8b3c0;
-    border-radius: 999px;
-    padding: 4px 10px;
-    font: inherit;
-    font-size: 11px;
-    cursor: pointer;
-  }
-  .brand .version-btn:hover { border-color: #4c5a6b; color: #d2d9e2; }
-  .brand .version-btn.hidden { display: none; }
-  .brand .version-status {
-    min-height: 16px;
-    margin: 6px 0 0;
-    color: #9aa5b1;
-    font-size: 12px;
-  }
-  .cards-grid {
-    display: grid;
-    grid-template-columns: minmax(280px, 1.2fr) minmax(280px, 1.2fr) minmax(160px, 0.65fr);
-    gap: 14px;
-    align-items: stretch;
-  }
-  .home-card {
-    background: #1c2126;
-    border: 1px solid #2a2f36;
-    border-radius: 12px;
-    padding: 14px;
-    display: flex;
-    flex-direction: column;
-    min-height: 380px;
-  }
-  .home-card.active {
-    border-color: #3a4a58;
-    min-height: 470px;
-  }
-  .home-card.build-card {
-    min-height: 470px;
-  }
-  .home-card.emphasis {
-    background: #202a34;
-    border-color: #3f536a;
-    box-shadow: 0 0 0 1px rgba(114, 154, 202, 0.12) inset;
-  }
-  .home-card.disabled {
-    background: #1a1f24;
-    border-color: #2b3138;
-    opacity: 0.72;
-  }
-  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-  .card-head h2 {
-    font-size: 14px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #cbd3dd;
-    margin: 0;
-  }
-  .badge {
-    font-size: 10px;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    border-radius: 999px;
-    padding: 3px 8px;
-    background: #2e3540;
-    color: #c7d4e7;
-    border: 1px solid #424c5e;
-    white-space: nowrap;
-  }
-  .badge.draft-badge {
-    background: #2e4038;
-    color: #9fe3c4;
-    border-color: #4a6a58;
-  }
-  .build-hint {
-    font-size: 11px;
-    color: #8a8f98;
-    margin-top: 2px;
-  }
-  .card-sub {
-    margin: 0 0 10px;
-    font-size: 12px;
-    color: #8a8f98;
-  }
-  .card-note {
-    margin: 2px 0 0;
-    color: #8a8f98;
-    font-size: 12px;
-    line-height: 1.4;
-  }
-  #project-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-  #project-list li {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 10px 12px;
-    background: #1c2126;
-    border: 1px solid #2a2f36;
-    border-radius: 8px;
-  }
-  #project-list .main-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
-  #project-list .actions { display: flex; gap: 8px; flex-shrink: 0; }
-  #project-list .open-btn { background: #2f6b4f; color: #e9fff2; }
-  #project-list .manage-btn { background: #2a2f36; color: #d2d7de; }
-  #project-list .remove-btn { background: #313840; color: #dce4f2; }
-  #project-list .delete-btn { background: #5c2a2a; color: #ffd9cd; }
-  #project-list .delete-btn.armed { background: #8a2727; color: #fff0ea; }
-  #project-list .info { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
-  #project-list .id { font-weight: 600; }
-  #project-list .path { font-size: 11px; color: #666f7a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #project-list .missing { color: #d97757; font-size: 11px; }
-  #project-list .manage-row { display: none; width: 100%; gap: 8px; border-top: 1px solid #2a2f36; padding-top: 8px; }
-  #project-list li.manage-open .manage-row { display: flex; }
-  #project-empty { color: #666f7a; font-size: 13px; display: none; }
-  #project-empty.visible { display: block; }
-  .first-world-cta {
-    display: none;
-    margin-top: 10px;
-    padding: 12px;
-    border: 1px solid #3f536a;
-    border-radius: 10px;
-    background: rgba(47, 71, 96, 0.2);
-  }
-  .first-world-cta.visible { display: block; }
-  .first-world-cta h3 {
-    margin: 0 0 8px;
-    font-size: 14px;
-    color: #d7e5f5;
-  }
-  .first-world-cta p {
-    margin: 0;
-    color: #9eb0c4;
-    font-size: 12px;
-    line-height: 1.4;
-  }
-  .first-world-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-  .first-world-primary { background: #2f6b4f; color: #e9fff2; }
-  .first-world-secondary { background: #2a2f36; color: #d2d7de; }
-  #home input, #home select {
-    display: block;
-    width: 100%;
-    box-sizing: border-box;
-    background: #20242a;
-    border: 1px solid #3a3f47;
-    color: #eee;
-    padding: 8px 10px;
-    border-radius: 6px;
-    font: inherit;
-    font-size: 14px;
-    margin: 4px 0 12px;
-  }
-  #home label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #8a8f98; }
-  #home-status { font-size: 12px; color: #d97757; min-height: 16px; margin-top: 8px; }
-  .create-wrap { margin-top: 14px; padding-top: 12px; border-top: 1px solid #2a2f36; }
-  .create-wrap.demoted { display: none; }
-  .create-wrap h3 {
-    margin: 0 0 10px;
-    font-size: 12px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #8a8f98;
-  }
-  @media (max-width: 980px) {
-    .cards-grid { grid-template-columns: 1fr; }
-    .home-card { min-height: auto; }
-    .home-card.active { order: -1; }
-  }
-  /* Shown only inside the Tauri desktop shell (feature-detected below) — a
-     plain browser tab has no native folder dialog to call, so the path
-     input stays freeform text there. */
-  .native-only { display: none; }
-  #path-row { display: flex; gap: 8px; align-items: flex-start; }
-  #path-row input { flex: 1; }
-  #generate-path-row { display: flex; gap: 8px; align-items: flex-start; }
-  #generate-path-row input { flex: 1; }
-  #browse-folder, #browse-generate-folder { flex-shrink: 0; margin: 4px 0 12px; }
-  .preset-size-warn { font-size: 12px; min-height: 16px; margin: 4px 0 10px; }
-  .preset-size-warn.preset-warn-yellow { color: #d4a72c; }
-  .preset-size-warn.preset-warn-red { color: #e5534b; }
-
-  /* D-106 unified workspace shell (track 0) */
-  #editor.workspace-active {
-    display: grid;
-    grid-template-columns: var(--ws-left-w, minmax(168px, 200px)) 1fr var(--ws-right-w, minmax(240px, 280px));
-    grid-template-rows: 48px 1fr auto;
-    grid-template-areas:
-      "ws-top ws-top ws-top"
-      "ws-left map ws-right"
-      "history history history";
-    height: 100vh;
-    width: 100%;
-    position: relative;
-  }
-  #editor.workspace-active.workspace-left-collapsed {
-    --ws-left-w: 36px;
-  }
-  #editor.workspace-active.workspace-right-collapsed {
-    --ws-right-w: 36px;
-  }
-  #editor.workspace-active .workspace-top {
-    grid-area: ws-top;
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    gap: 10px;
-    padding: 0 12px;
-    background: rgba(22, 26, 29, 0.97);
-    border-bottom: 1px solid #2a2f36;
-    /* Above side panels (z 25) so Layers/Settings popovers drop over them. */
-    z-index: 60;
-    min-height: 48px;
-  }
-  .workspace-top-start,
-  .workspace-top-end {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-  .workspace-top-start { justify-self: start; }
-  .workspace-top-center { justify-self: center; }
-  .workspace-top-end { justify-self: end; }
-  #editor.workspace-active .workspace-panel {
-    z-index: 25;
-    background: rgba(22, 26, 29, 0.96);
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
-    position: relative;
-  }
-  #editor.workspace-active #workspace-left {
-    grid-area: ws-left;
-    border-right: 1px solid #2a2f36;
-  }
-  #editor.workspace-active #workspace-right {
-    grid-area: ws-right;
-    border-left: 1px solid #2a2f36;
-  }
-  #editor.workspace-active .map-wrap {
-    grid-area: map;
-    height: 100%;
-    min-height: 0;
-    position: relative;
-  }
-  /* D-107 history timeline */
-  #history-bar {
-    grid-area: history;
-    background: rgba(22, 26, 29, 0.98);
-    border-top: 1px solid #2a2f36;
-    z-index: 26;
-    display: flex;
-    flex-direction: column;
-    min-height: 36px;
-  }
-  #history-bar.hidden { display: none !important; }
-  .history-collapsed-row {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    padding: 6px 12px;
-    min-height: 36px;
-  }
-  #history-toggle-btn {
-    background: transparent;
-    border: 0;
-    color: #c9d1d9;
-    font-size: 13px;
-    cursor: pointer;
-    padding: 4px 8px;
-  }
-  #history-panel {
-    padding: 8px 12px 12px;
-    border-top: 1px solid #2a2f36;
-  }
-  #history-panel.hidden { display: none !important; }
-  .history-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-  #history-timeline-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    align-items: flex-start;
-  }
-  .history-state-list { display: flex; gap: 6px; flex-wrap: wrap; }
-  .history-state-btn {
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 6px;
-    border: 1px solid #3a3f47;
-    background: #1c2128;
-    color: #c9d1d9;
-    cursor: pointer;
-  }
-  .history-state-btn.active { border-color: #58a6ff; background: #21262d; }
-  .history-event-marker {
-    font-size: 12px;
-    color: #8b949e;
-    padding: 2px 8px;
-    cursor: default;
-  }
-  .history-event-marker[data-result-state-id] { cursor: pointer; }
-  .history-event-marker[data-result-state-id]:hover { color: #c9d1d9; }
-  #history-divergence-banner {
-    background: rgba(180, 120, 40, 0.2);
-    border: 1px solid #b47828;
-    color: #e3b341;
-    font-size: 12px;
-    padding: 6px 10px;
-    margin-bottom: 8px;
-    border-radius: 6px;
-  }
-  #history-divergence-banner.hidden { display: none !important; }
-  #history-divergence-review {
-    margin: 8px 0;
-    padding: 8px;
-    border: 1px solid #30363d;
-    border-radius: 6px;
-    background: #161b22;
-  }
-  #history-divergence-review.hidden { display: none !important; }
-  .history-divergence-row { margin-bottom: 8px; }
-  .history-divergence-msg { margin: 0 0 6px; font-size: 12px; color: #c9d1d9; }
-  .history-divergence-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-  .history-divergence-actions button {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 4px;
-    border: 1px solid #30363d;
-    background: #21262d;
-    color: #c9d1d9;
-    cursor: pointer;
-  }
-  .history-divergence-others { margin: 6px 0 0; font-size: 11px; color: #8b949e; }
-  #history-delete-state-btn { font-size: 11px; color: #f85149; }
-  #unlock-history-btn {
-    position: absolute;
-    bottom: 14px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 30;
-    padding: 8px 18px;
-    font-size: 13px;
-    font-weight: 600;
-    border-radius: 8px;
-    border: 1px solid #3a3f47;
-    background: rgba(28, 33, 40, 0.95);
-    color: #c9d1d9;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
-  }
-  #unlock-history-btn.hidden { display: none !important; }
-  #editor.workspace-mode-wizard #unlock-history-btn,
-  #editor.workspace-build #unlock-history-btn,
-  #editor.workspace-mode-wizard #history-bar,
-  #editor.workspace-build #history-bar { display: none !important; }
-  #editor.workspace-active #build-wizard { display: contents; }
-  #editor.workspace-active .wiz-left {
-    grid-area: ws-left;
-    overflow-y: auto;
-    padding: 10px 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  #editor.workspace-active .wiz-right {
-    grid-area: ws-right;
-    overflow-y: auto;
-    padding: 12px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  #editor.workspace-active #workspace-left,
-  #editor.workspace-active #workspace-right {
-    display: none;
-  }
-  #editor.workspace-active.workspace-mode-editor #dock-drawer {
-    position: relative;
-    top: auto;
-    right: auto;
-    width: auto;
-    min-width: 0;
-    flex: 1;
-    min-height: 0;
-    pointer-events: auto;
-    box-shadow: none;
-    border-left: 0;
-    opacity: 1;
-    padding: 12px 14px;
-    overflow-y: auto;
-  }
-  #editor.workspace-active.workspace-mode-editor #dock-drawer.collapsed {
-    width: auto;
-    min-width: 0;
-    padding: 12px 14px;
-    opacity: 1;
-    overflow-y: auto;
-    pointer-events: auto;
-  }
-  #editor.workspace-active.workspace-mode-wizard #dock-rail,
-  #editor.workspace-active.workspace-mode-wizard #dock-drawer,
-  #editor.workspace-active.workspace-mode-wizard #editor-object-panel {
-    display: none !important;
-  }
-  #editor.workspace-active.workspace-mode-wizard .wiz-left,
-  #editor.workspace-active.workspace-mode-wizard .wiz-right {
-    display: flex;
-  }
-  #editor.workspace-active.workspace-mode-editor .wiz-left,
-  #editor.workspace-active.workspace-mode-editor .wiz-right {
-    display: none !important;
-  }
-  #editor.workspace-active.workspace-mode-editor #workspace-left,
-  #editor.workspace-active.workspace-mode-editor #workspace-right {
-    display: flex;
-  }
-  /* Generator / Agent / History side panels (Track 1 stubs + history placeholder) */
-  #editor.workspace-active .mode-panel {
-    display: none;
-    z-index: 25;
-    background: rgba(22, 26, 29, 0.96);
-    flex-direction: column;
-    gap: 10px;
-    padding: 12px 14px;
-    overflow-y: auto;
-    min-height: 0;
-  }
-  #editor.workspace-active .mode-panel-left {
-    grid-area: ws-left;
-    border-right: 1px solid #2a2f36;
-  }
-  #editor.workspace-active .mode-panel-right {
-    grid-area: ws-right;
-    border-left: 1px solid #2a2f36;
-  }
-  #editor.workspace-active.workspace-mode-generator .mode-panel-generator,
-  #editor.workspace-active.workspace-mode-agent .mode-panel-agent,
-  #editor.workspace-active.workspace-mode-history .mode-panel-history {
-    display: flex;
-  }
-  /* In stub/history modes hide the wizard panels (editor panels stay hidden by base rule) */
-  #editor.workspace-active.workspace-mode-generator .wiz-left,
-  #editor.workspace-active.workspace-mode-generator .wiz-right,
-  #editor.workspace-active.workspace-mode-agent .wiz-left,
-  #editor.workspace-active.workspace-mode-agent .wiz-right,
-  #editor.workspace-active.workspace-mode-history .wiz-left,
-  #editor.workspace-active.workspace-mode-history .wiz-right {
-    display: none !important;
-  }
-  #editor.workspace-active #hint { display: none; }
-  #editor:not(.workspace-build) .workspace-build-only { display: none !important; }
-  .workspace-mode-nav {
-    display: inline-flex;
-    border: 1px solid #3a3f47;
-    border-radius: 10px;
-    overflow: hidden;
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
-  }
-  .workspace-mode-nav button {
-    padding: 9px 16px;
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.2;
-    background: #20242a;
-    color: #8a8f98;
-    border: none;
-    border-left: 1px solid #2a2f36;
-    border-radius: 0;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .workspace-mode-nav button:first-child { border-left: 0; }
-  .workspace-mode-nav button.active {
-    background: #2f4a3a;
-    color: #9fe3c4;
-  }
-  .workspace-world-label {
-    font-size: 13px;
-    font-weight: 600;
-    color: #c9d1d9;
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .workspace-autosave { font-size: 12px; color: #8b949e; }
-  .workspace-mode-note { font-size: 12px; color: #d4a72c; }
-  .top-popover-wrap { position: relative; display: inline-flex; }
-  .top-popover-btn {
-    padding: 7px 12px;
-    font-size: 13px;
-    background: #20242a;
-    color: #c9d1d9;
-    border: 1px solid #3a3f47;
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  .top-popover {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: 40;
-    width: 260px;
-    max-height: 70vh;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 12px 14px;
-    background: rgba(22, 26, 29, 0.99);
-    border: 1px solid #3a3f47;
-    border-radius: 10px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
-  }
-  .top-popover.hidden { display: none !important; }
-  .panel-collapse-btn {
-    align-self: flex-end;
-    margin: 4px 6px 0;
-    padding: 2px 8px;
-    font-size: 11px;
-    background: #20242a;
-    color: #8a8f98;
-    border: 1px solid #3a3f47;
-    border-radius: 4px;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  #editor.workspace-left-collapsed #dock-rail { display: none !important; }
-  #editor.workspace-right-collapsed #dock-drawer,
-  #editor.workspace-right-collapsed #editor-object-panel { display: none !important; }
-  #editor.workspace-left-collapsed .wiz-left { display: none !important; }
-  #editor.workspace-right-collapsed .wiz-right { display: none !important; }
-  .editor-categories {
-    list-style: none;
-    margin: 0;
-    padding: 0 8px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-  }
-  .editor-cat-btn {
-    width: 100%;
-    text-align: left;
-    padding: 8px 10px;
-    border-radius: 6px;
-    background: #20242a;
-    color: #cbd3dd;
-    border: 1px solid transparent;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    position: relative;
-  }
-  .editor-cat-btn:hover { background: #262b32; color: #eee; }
-  .editor-cat-btn.active {
-    background: rgba(159, 227, 196, 0.12);
-    border-color: #3a4a58;
-    color: #9fe3c4;
-  }
-  .editor-cat-btn.tool-active::after {
-    content: "";
-    position: absolute;
-    right: 8px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #9fe3c4;
-  }
-  .editor-object-panel {
-    flex-shrink: 0;
-    max-height: 38%;
-    overflow-y: auto;
-    border-top: 1px solid #2a2f36;
-    padding: 10px 14px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .editor-object-panel.hidden { display: none; }
-  .editor-object-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .editor-object-head {
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #8a8f98;
-    padding-top: 4px;
-  }
-  .editor-object-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 6px 8px;
-    border-radius: 5px;
-    background: #20242a;
-    font-size: 12px;
-    color: #c4c8ce;
-  }
-  .editor-object-empty {
-    font-size: 12px;
-    color: #666f7a;
-    line-height: 1.4;
-    padding: 4px 0;
-  }
-  .editor-object-delete {
-    padding: 2px 8px;
-    font-size: 11px;
-    background: #3a2525;
-    color: #e8a0a0;
-    border: 1px solid #5a3535;
-    border-radius: 4px;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  #editor:not(.workspace-active) #workspace-top,
-  #editor:not(.workspace-active) #workspace-left,
-  #editor:not(.workspace-active) #workspace-right {
-    display: none;
-  }
-  #editor:not(.workspace-active) .map-wrap {
-    height: 100vh;
-  }
-  #build-wizard { display: none; }
-  .post-finish-note {
-    position: absolute;
-    left: 14px;
-    right: 14px;
-    bottom: 12px;
-    padding: 10px 12px;
-    border: 1px solid #3f536a;
-    border-radius: 8px;
-    background: rgba(20, 28, 36, 0.94);
-    color: #c9d8e8;
-    font-size: 12px;
-    line-height: 1.4;
-    z-index: 15;
-    display: none;
-  }
-  .post-finish-note.visible { display: block; }
-  .post-finish-note button {
-    margin-left: 10px;
-    background: transparent;
-    border: 1px solid #4f6176;
-    color: #d5e4f4;
-    border-radius: 999px;
-    padding: 2px 8px;
-    font-size: 11px;
-    cursor: pointer;
-  }
-
-  .wiz-top {
-    display: none;
-  }
-  .wiz-crumb {
-    font-size: 13px;
-    color: #9fe3c4;
-    font-weight: 600;
-  }
-  #wizard-status {
-    font-size: 12px;
-    color: #8a8f98;
-    min-width: 120px;
-    flex: 1;
-    text-align: right;
-  }
-  #wizard-status.busy {
-    color: #c9e6ff;
-    font-weight: 600;
-  }
-  #wiz-layout-classes.wiz-busy {
-    opacity: 0.55;
-    pointer-events: none;
-  }
-  .wiz-left {
-    overflow-y: auto;
-    padding: 10px 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .wiz-tier-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .wiz-tier {
-    border-radius: 6px;
-    background: rgba(0, 0, 0, 0.12);
-  }
-  .wiz-tier-header {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    text-align: left;
-    padding: 7px 8px;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    color: #9aa8b8;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    cursor: pointer;
-  }
-  .wiz-tier-header:hover { color: #c5d0dc; background: rgba(255, 255, 255, 0.03); }
-  .wiz-tier.tier-complete .wiz-tier-header { color: #7fc99a; }
-  .wiz-tier-chevron {
-    display: inline-block;
-    width: 10px;
-    font-size: 9px;
-    transition: transform 0.15s ease;
-  }
-  .wiz-tier.collapsed .wiz-tier-chevron { transform: rotate(-90deg); }
-  .wiz-tier.collapsed .wiz-tier-body { display: none; }
-  .wiz-freeze-list {
-    list-style: none;
-    margin: 0;
-    padding: 0 4px 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-  .wiz-freeze-item {
-    border-radius: 6px;
-    font-size: 12px;
-  }
-  .wiz-freeze-btn {
-    width: 100%;
-    text-align: left;
-    padding: 8px 10px;
-    border-radius: 6px;
-    background: #20242a;
-    color: #cbd3dd;
-    border: 1px solid transparent;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .wiz-freeze-item.pending .wiz-freeze-btn,
-  .wiz-freeze-item.pending {
-    opacity: 0.45;
-    color: #666f7a;
-  }
-  .wiz-freeze-item.active .wiz-freeze-btn {
-    background: rgba(159, 227, 196, 0.12);
-    border-color: #3a4a58;
-    color: #9fe3c4;
-    font-weight: 600;
-  }
-  .wiz-freeze-item.frozen .wiz-freeze-btn {
-    color: #7fc99a;
-    border-color: rgba(127, 201, 154, 0.25);
-  }
-  .wiz-freeze-item.stale .wiz-freeze-btn {
-    color: #e8b86d;
-    border-color: rgba(232, 184, 109, 0.35);
-  }
-  .wiz-freeze-item.locked .wiz-freeze-btn {
-    opacity: 0.72;
-    color: #8a93a0;
-    border-style: dashed;
-    border-color: #3a424c;
-    cursor: pointer;
-  }
-  .wiz-freeze-item.locked.viewing .wiz-freeze-btn {
-    background: rgba(138, 147, 160, 0.12);
-    border-color: #5a6470;
-    color: #b8c2ce;
-  }
-  .wiz-stub-badge {
-    display: inline-block;
-    margin: 0 0 10px;
-    padding: 3px 8px;
-    border-radius: 4px;
-    background: rgba(138, 147, 160, 0.18);
-    color: #b8c2ce;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-  }
-  .wiz-stub-unavail {
-    color: #8a93a0;
-    font-style: italic;
-  }
-  #wiz-panel-stub.hidden { display: none; }
-  .wiz-stale-banner {
-    margin: 0;
-    padding: 10px 12px;
-    border-radius: 6px;
-    background: rgba(232, 184, 109, 0.12);
-    border: 1px solid rgba(232, 184, 109, 0.35);
-    color: #e8b86d;
-    font-size: 13px;
-    line-height: 1.4;
-  }
-  .wiz-stale-banner.hidden { display: none; }
-  .wiz-gen-category {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-top: 10px;
-    border-top: 1px solid #2a2f36;
-  }
-  .wiz-gen-category:first-of-type {
-    padding-top: 0;
-    border-top: 0;
-  }
-  .wiz-right {
-    overflow-y: auto;
-    padding: 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .wiz-right h2 {
-    margin: 0;
-    font-size: 15px;
-    color: #9fe3c4;
-    font-weight: 600;
-  }
-  .wiz-hint {
-    margin: 0;
-    font-size: 13px;
-    color: #8a8f98;
-    line-height: 1.45;
-  }
-  .wiz-label {
-    margin: 0;
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #8a8f98;
-  }
-  .wiz-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
-  .wiz-btn-row.hidden { display: none; }
-  .wiz-geo-legend {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .wiz-geo-legend li {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: #c4c8ce;
-  }
-  .wiz-geo-swatch {
-    width: 12px;
-    height: 12px;
-    border-radius: 2px;
-    flex-shrink: 0;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-  }
-  #wiz-panel-stub.hidden,
-  #wiz-panel-step1.hidden, #wiz-panel-step2.hidden,
-  #wiz-panel-step3.hidden, #wiz-panel-step4.hidden,
-  #wiz-panel-step5.hidden, #wiz-panel-step6.hidden { display: none; }
-  .wiz-section {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-top: 10px;
-    border-top: 1px solid #2a2f36;
-  }
-  .wiz-section:first-of-type {
-    padding-top: 0;
-    border-top: 0;
-  }
-  .wiz-section .wiz-label {
-    color: #9aa4b1;
-  }
-  .wiz-style-btn {
-    padding: 8px 10px;
-    font-size: 12px;
-    background: #20242a;
-    color: #cbd3dd;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .wiz-style-btn.active {
-    border-color: #9fe3c4;
-    color: #eafff5;
-  }
-  .wiz-bottom {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 8px;
-    margin-top: auto;
-    padding-top: 12px;
-    background: transparent;
-    border-top: 1px solid #2a2f36;
-  }
-  .wiz-bottom .wiz-btn-row {
-    justify-content: flex-end;
-    width: 100%;
-  }
-  .wiz-bottom .wiz-label { margin-right: 0; align-self: center; }
-  .wiz-bottom-variants {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .wiz-bottom-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .wiz-variant-btn {
-    min-width: 36px;
-    padding: 8px 12px;
-    background: #20242a;
-    color: #cbd3dd;
-    border: 1px solid #3a3f47;
-    border-radius: 6px;
-  }
-  .wiz-variant-btn.active {
-    border-color: #9fe3c4;
-    color: #eafff5;
-  }
-  .wiz-action-btn {
-    padding: 8px 14px;
-    background: #2a2f36;
-    color: #eee;
-    border-radius: 6px;
-  }
-  .wiz-action-btn.primary { background: #3ac886; color: #04140b; }
-  .wiz-action-btn.warn {
-    background: #c45a12;
-    color: #fff8f0;
-    border: 1px solid #e07a2f;
-  }
-  .wiz-back-top {
-    margin: 0 0 0.75rem;
-    padding-bottom: 0.65rem;
-    border-bottom: 1px solid #3a424c;
-  }
-  button:disabled, button.wiz-disabled {
-    opacity: 0.42;
-    cursor: not-allowed;
-  }
-  #wiz-save-draft { background: #2a3f4f; color: #dce8f8; }
-  #wiz-worlds { background: #2a2f36; color: #eee; }
-  /* D-69: in-app confirm — window.confirm is unreliable in Tauri/WebView2 */
-  #wiz-confirm-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    z-index: 80;
-    background: rgba(8, 10, 12, 0.55);
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
-  }
-  #wiz-confirm-overlay.open { display: flex; }
-  #wiz-confirm-dialog {
-    max-width: 360px;
-    width: 100%;
-    background: #1a1f24;
-    border: 1px solid #3a424c;
-    border-radius: 8px;
-    padding: 16px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  }
-  #wiz-confirm-msg {
-    margin: 0 0 14px;
-    font-size: 14px;
-    color: #e8eaed;
-    line-height: 1.45;
-  }
-  #wiz-confirm-dialog .wiz-btn-row { justify-content: flex-end; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mapkeeper</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      --bg: #0e1116;
+      --panel: #171c24;
+      --panel-2: #1d2430;
+      --line: #303a49;
+      --text: #edf2f7;
+      --muted: #97a3b4;
+      --accent: #e9a23b;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 720px; background: var(--bg); color: var(--text); }
+    button, input { font: inherit; }
+    button { color: inherit; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+    button:hover { border-color: #66758a; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #17110a; font-weight: 700; }
+    button.danger { color: #ffaaa3; }
+    input { width: 100%; color: inherit; background: #10151c; border: 1px solid var(--line); border-radius: 7px; padding: 9px 10px; }
+    .hidden { display: none !important; }
+    .home { min-height: 100vh; padding: 48px clamp(28px, 7vw, 100px); }
+    .brand { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; }
+    .brand h1 { margin: 0; font-size: 32px; letter-spacing: .04em; }
+    .version, .muted { color: var(--muted); }
+    .hero { margin: 56px 0 30px; max-width: 720px; }
+    .hero h2 { margin: 0 0 12px; font-size: 28px; }
+    .hero p { color: var(--muted); line-height: 1.6; }
+    .worlds-header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 0 0 14px; }
+    .worlds-header h2 { margin: 0; font-size: 22px; }
+    .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .project-card { padding: 18px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+    .project-card h3 { margin: 0 0 8px; }
+    .project-card p { min-height: 40px; overflow-wrap: anywhere; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .manage { position: relative; }
+    .manage-menu {
+      position: absolute; top: calc(100% + 4px); left: 0; z-index: 5;
+      min-width: 140px; padding: 6px; display: grid; gap: 4px;
+      background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+      box-shadow: 0 10px 28px rgb(0 0 0 / .35);
+    }
+    .manage-menu button { width: 100%; text-align: left; }
+    .workspace { height: 100vh; display: grid; grid-template-rows: auto 1fr; }
+    .chrome { z-index: 2; border-bottom: 1px solid var(--line); background: #131821; }
+    .topbar {
+      display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+      gap: 16px; padding: 8px 14px; min-height: 52px;
+    }
+    .world-meta { min-width: 0; display: flex; align-items: center; gap: 12px; }
+    .world-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mode-nav { display: flex; gap: 4px; }
+    .mode-nav button { border-color: transparent; background: transparent; font-size: 12px; letter-spacing: .08em; }
+    .mode-nav button.active { color: var(--accent); border-color: #6b512a; background: #251e14; }
+    .top-actions { justify-self: end; }
+    .tool-strip {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 6px 14px 10px; border-top: 1px solid #1c2430;
+    }
+    .tool-strip .strip-label { color: var(--muted); font-size: 12px; letter-spacing: .06em; margin-right: 4px; }
+    .tool-strip button { font-size: 13px; font-weight: 600; letter-spacing: .04em; padding: 6px 12px; }
+    .tool-strip button.active { color: var(--accent); border-color: #6b512a; background: #251e14; }
+    .tool-strip .strip-stub { color: var(--muted); font-size: 13px; }
+    .workspace-grid { min-height: 0; display: grid; grid-template-columns: 260px minmax(300px, 1fr) 280px; }
+    .side-panel { padding: 20px; background: var(--panel); overflow: auto; }
+    .side-panel.left { border-right: 1px solid var(--line); }
+    .side-panel.right { border-left: 1px solid var(--line); }
+    .side-panel h2 { margin: 0 0 14px; font-size: 16px; }
+    .empty-card { border: 1px dashed #435064; border-radius: 10px; padding: 16px; color: var(--muted); line-height: 1.5; }
+    .workspace-host { min-height: 0; display: grid; place-items: stretch; padding: 0; background: #0b0e13; }
+    .workspace-host canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+    .workspace-host canvas.paint { cursor: crosshair; }
+    .tool-stack { display: grid; gap: 10px; }
+    .tool-stack p { margin: 0; color: var(--muted); line-height: 1.5; font-size: 13px; }
+    .choice-stack { display: grid; gap: 6px; }
+    .choice-stack button {
+      width: 100%; text-align: left; font-weight: 600; letter-spacing: .04em;
+      padding: 8px 12px;
+    }
+    .choice-stack button.active {
+      color: var(--accent); border-color: #6b512a; background: #251e14;
+    }
+    dialog {
+      width: min(820px, calc(100vw - 32px)); max-height: min(94vh, 920px);
+      color: var(--text); background: var(--panel); border: 1px solid var(--line);
+      border-radius: 12px; padding: 18px 20px; overflow: auto;
+    }
+    dialog::backdrop { background: rgb(0 0 0 / .68); }
+    dialog h2 { margin: 0 0 8px; }
+    dialog > form > p.muted { margin: 0 0 8px; }
+    label { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 13px; }
+    .preset-grid {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px; margin-top: 4px; overflow: visible;
+    }
+    .preset-card {
+      display: grid; gap: 2px; text-align: left; padding: 6px 8px; border-radius: 6px;
+      border: 1px solid var(--line); background: #141a22; color: var(--text); cursor: pointer;
+    }
+    .preset-card.active { border-color: #6b512a; background: #251e14; color: var(--accent); }
+    .preset-card .title-row {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 4px; min-width: 0;
+    }
+    .preset-card .title { font-weight: 700; font-size: 13px; letter-spacing: .02em; min-width: 0; }
+    .preset-card .extent { font-size: 11px; color: var(--muted); }
+    .preset-card .stats { font-size: 11px; color: var(--muted); line-height: 1.25; }
+    .preset-card .badge {
+      flex: 0 0 auto; font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent);
+    }
+    @media (max-width: 640px) {
+      .preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    .error { min-height: 20px; color: #ffaaa3; margin-top: 10px; }
+    #home-error { min-height: 20px; color: #ffaaa3; margin: 12px 0 0; }
+    @media (max-width: 980px) {
+      .workspace-grid { grid-template-columns: 210px minmax(280px, 1fr) 200px; }
+    }
+  </style>
 </head>
 <body>
-  <div id="home" class="view active">
+  <main id="home" class="home">
     <header class="brand">
-      <h1>mapkeeper</h1>
-      <p class="sub">Local worlds for author + agents</p>
-      <div class="version-row">
-        <span id="app-version" class="version">mapkeeper</span>
-      </div>
+      <h1>MAPKEEPER</h1>
+      <span id="app-version" class="version">mapkeeper</span>
     </header>
+    <section class="hero">
+      <h2>Your world workspace</h2>
+      <p>Open a world, use View to explore the map, or Relief to Raise/Lower elevation. Create a portable world folder to begin.</p>
+      <button id="create-first" class="primary">Create your first world</button>
+    </section>
+    <section>
+      <div class="worlds-header">
+        <h2>Worlds</h2>
+        <button id="create-another">New world</button>
+      </div>
+      <p id="project-empty" class="muted">No worlds yet.</p>
+      <div id="project-grid" class="project-grid"></div>
+      <p id="home-error" class="error" aria-live="polite"></p>
+    </section>
+  </main>
 
-    <div class="cards-grid">
-      <article class="home-card emphasis build-card">
-        <div class="card-head">
-          <h2>Build World</h2>
+  <main id="workspace" class="workspace hidden">
+    <div class="chrome">
+      <header class="topbar">
+        <div class="world-meta">
+          <button id="back-worlds">← Worlds</button>
+          <strong id="world-name" class="world-name">World</strong>
         </div>
-        <p class="card-sub">Step-by-step assembly — silhouette, climate, water&hellip; You accept each layer.</p>
-        <label for="generate-id">World name</label>
-        <input id="generate-id" placeholder="My World" autocomplete="off" />
-        <p id="generate-id-preview" class="card-note"></p>
-        <p class="card-note">Folder id is auto-lowercased for paths and cell ids.</p>
-        <label for="generate-path">Folder</label>
-        <div id="generate-path-row">
-          <input id="generate-path" placeholder="C:\path\to\my-world" autocomplete="off" />
-          <button id="browse-generate-folder" class="native-only" type="button">Browse&hellip;</button>
+        <nav id="mode-nav" class="mode-nav" aria-label="Product modes">
+          <button data-mode="editor" class="active">EDITOR</button>
+          <button data-mode="generator">GENERATOR</button>
+          <button data-mode="wizard">WIZARD</button>
+          <button data-mode="agent">AGENT</button>
+          <button data-mode="history">HISTORY</button>
+        </nav>
+        <div class="top-actions"><span id="world-path" class="muted"></span></div>
+      </header>
+      <div id="tool-strip" class="tool-strip" role="toolbar" aria-label="Mode tools">
+        <span class="strip-label">TOOLS</span>
+        <div id="editor-tool-strip" class="actions">
+          <button type="button" id="tool-view" class="active" data-tool="view">View</button>
+          <button type="button" id="tool-relief" data-tool="relief">Relief</button>
         </div>
-        <label for="generate-preset">Map size</label>
-        <select id="generate-preset">
-          <option value="small" selected>Small (~510 cells)</option>
-          <option value="medium">Medium (~1,508 cells)</option>
-          <option value="large">Large (~4,450 cells)</option>
-          <option value="epic">Epic (~13,485 cells)</option>
-          <option value="grand">Grand (~40,050 cells)</option>
-          <option value="world">World (~99,777 cells, not stable)</option>
-        </select>
-        <p id="generate-preset-warn" class="preset-size-warn"></p>
-        <button id="build-start" type="button">Start build</button>
-        <div id="generate-status"></div>
-      </article>
-
-      <article class="home-card active emphasis">
-        <div class="card-head">
-          <h2>Your worlds</h2>
-        </div>
-        <p class="card-sub">Pick an existing world or create one below.</p>
-        <p class="card-note">World data stays local. Agents read your world folder (`mapkeeper.toml` + `profiles/`).</p>
-        <ul id="project-list"></ul>
-        <p id="project-empty">No worlds yet — create one below.</p>
-        <section id="first-world-cta" class="first-world-cta" aria-live="polite">
-          <h3>Create your first world</h3>
-          <p id="first-world-hint">Start Build World with defaults (Small map in Documents) — then adjust if needed.</p>
-          <div class="first-world-actions">
-            <button id="first-world-start" class="first-world-primary" type="button">Create your first world</button>
-            <button id="first-world-advanced" class="first-world-secondary" type="button">Advanced options</button>
-          </div>
-        </section>
-
-        <div id="create-wrap" class="create-wrap">
-          <h3>Create a new world</h3>
-          <label for="new-id">World name</label>
-          <input id="new-id" placeholder="My World" autocomplete="off" />
-          <p id="new-id-preview" class="card-note"></p>
-          <p class="card-note">Folder id is auto-lowercased for paths and cell ids.</p>
-          <label for="new-path">Folder</label>
-          <div id="path-row">
-            <input id="new-path" placeholder="C:\path\to\my-world" autocomplete="off" />
-            <button id="browse-folder" class="native-only" type="button">Browse&hellip;</button>
-          </div>
-          <label for="new-preset">Map size</label>
-          <select id="new-preset">
-            <option value="small" selected>Small (~510 cells)</option>
-            <option value="medium">Medium (~1,508 cells)</option>
-            <option value="large">Large (~4,450 cells)</option>
-            <option value="epic">Epic (~13,485 cells)</option>
-            <option value="grand">Grand (~40,050 cells)</option>
-            <option value="world">World (~99,777 cells, not stable)</option>
-          </select>
-          <p id="new-preset-warn" class="preset-size-warn"></p>
-          <button id="create">Create</button>
-          <div id="home-status"></div>
-        </div>
-      </article>
-
-      <article class="home-card disabled unavailable" id="community-worlds-card">
-        <div class="card-head">
-          <h2>Community worlds</h2>
-          <span class="badge">soon</span>
-        </div>
-        <p class="card-sub">Browse and import shared worlds from the community.</p>
-        <p class="card-note">Coming later — not available in this version.</p>
-      </article>
+        <span id="mode-tool-stub" class="strip-stub hidden">No tools in this mode yet.</span>
+      </div>
     </div>
-  </div>
-
-  <div id="editor" class="view">
-    <header id="workspace-top" class="workspace-top">
-      <div class="workspace-top-start">
-        <button id="wiz-worlds" type="button">&larr; Worlds</button>
-        <span id="workspace-world-label" class="workspace-world-label" title="Active world">&mdash;</span>
-        <button id="wiz-save-draft" class="workspace-build-only" type="button">Save Draft</button>
-        <span class="wiz-crumb workspace-crumb">—</span>
-      </div>
-      <nav id="workspace-mode-nav" class="workspace-mode-nav workspace-top-center" role="group" aria-label="Workspace mode">
-        <button type="button" data-workspace-mode="wizard">Wizard</button>
-        <button type="button" data-workspace-mode="generator">Generator</button>
-        <button type="button" data-workspace-mode="editor" class="active">Editor</button>
-        <button type="button" data-workspace-mode="agent">Agent</button>
-        <button type="button" data-workspace-mode="history">History</button>
-      </nav>
-      <div class="workspace-top-end">
-        <span id="workspace-mode-note" class="workspace-mode-note"></span>
-        <span id="workspace-autosave" class="workspace-autosave"></span>
-        <span id="wizard-status"></span>
-        <div class="top-popover-wrap">
-          <button id="layers-toggle" class="top-popover-btn" data-popover-toggle="layers-popover" type="button">Layers &#9662;</button>
-          <div id="layers-popover" class="top-popover hidden" role="menu" aria-label="Layers">
-            <p class="pane-label">Layers</p>
-            <button id="toggle-color-mode" class="swatch" data-view-toggle="color-mode" type="button">Color: Hydro</button>
-            <button id="toggle-grid" class="swatch" data-view-toggle="grid" type="button">Grid lines: Off</button>
-            <button id="toggle-elevation-labels" class="swatch" data-view-toggle="elevation-labels" type="button">Show elevation: Off</button>
-            <button id="toggle-peaks" class="swatch" data-view-toggle="peaks" type="button">Peaks: Off</button>
-            <p class="pane-label">Elevation legend</p>
-            <div class="legend-bar" title="Water blues → land green → yellow → red (cap 100); peaks ≥75"></div>
-            <p id="view-stats" class="dock-note">Zoom 1.00x · Draw 0 / 0 cells</p>
-            <p id="view-perf" class="dock-note">Perf: —</p>
-            <p class="dock-note">Sea level 0 · land tint 1–100 · peaks when elev &gt; 75. Overlays LOD: ≤2000 visible or zoom ≥1.6.</p>
-          </div>
-        </div>
-        <div class="top-popover-wrap">
-          <button id="settings-toggle" class="top-popover-btn" data-popover-toggle="settings-popover" type="button">Settings &#9662;</button>
-          <div id="settings-popover" class="top-popover hidden" role="menu" aria-label="Settings">
-            <p class="pane-label">World</p>
-            <p id="world-name">—</p>
-            <p id="legacy-map-note" class="dock-note"></p>
-            <p class="dock-note">World data stays local on disk.</p>
-          </div>
-        </div>
-      </div>
-    </header>
-    <aside id="workspace-left" class="workspace-panel">
-      <button id="workspace-left-collapse" class="panel-collapse-btn" type="button" aria-label="Collapse left panel">&#9664;</button>
-      <p class="wiz-label" style="padding: 0 10px; margin-top: 4px;">Categories</p>
-      <nav id="dock-rail" class="editor-categories" aria-label="Editor categories">
-        <button class="editor-cat-btn dock-btn active tool-active" data-dock="inspect" type="button">Inspect</button>
-        <button class="editor-cat-btn dock-btn" data-dock="terrain" type="button">Terrain</button>
-        <button class="editor-cat-btn dock-btn" data-dock="rivers" type="button">Lakes &amp; rivers</button>
-      </nav>
-    </aside>
-    <div class="map-wrap">
-      <canvas id="map" width="720" height="560"></canvas>
-      <div id="hint">mapkeeper — LMB drag pan, wheel zoom; editor categories left, settings and objects right</div>
-      <div id="post-finish-note" class="post-finish-note">
-        World saved. Reopen from Home with Open, then continue in Inspect/Terrain. If anything feels confusing, send feedback.
-        <button id="post-finish-dismiss" type="button">Dismiss</button>
-      </div>
-      <button id="unlock-history-btn" type="button" class="hidden">Unlock History</button>
-    </div>
-    <aside id="workspace-right" class="workspace-panel">
-      <button id="workspace-right-collapse" class="panel-collapse-btn" type="button" aria-label="Collapse right panel">&#9654;</button>
-      <div id="dock-drawer" class="editor-settings">
-        <div class="drawer-pane active" data-drawer="inspect">
-          <p class="pane-label">Inspect</p>
-          <h2 id="panel-cell">—</h2>
-          <p id="inspect-empty" class="dock-empty">Click a cell on the map to name it.</p>
-          <label for="title">Title</label>
-          <input id="title" type="text" placeholder="Place name" autocomplete="off" disabled />
-          <label for="notes">Notes</label>
-          <textarea id="notes" placeholder="Anything worth remembering" disabled></textarea>
-          <div class="row">
-            <button id="save" type="button">Save</button>
-            <button id="close" type="button">Close</button>
-          </div>
-          <div id="status"></div>
-        </div>
-        <div class="drawer-pane" data-drawer="terrain">
-          <p class="pane-label">Terrain</p>
-          <p class="dock-note">Paint elevation: presets, raise/lower, or inspect cell names.</p>
-          <div class="swatch-grid">
-            <button class="swatch" data-brush="land" type="button"><span class="dot" style="background:#6a7b43"></span>Land</button>
-            <button class="swatch" data-brush="water" type="button"><span class="dot" style="background:#2e5f8a"></span>Water</button>
-            <button class="swatch" data-brush="raise" type="button"><span class="dot" style="background:#8b7355"></span>Raise</button>
-            <button class="swatch" data-brush="lower" type="button"><span class="dot" style="background:#4a6a8a"></span>Lower</button>
-          </div>
-          <p class="pane-label">Step (raise/lower)</p>
-          <div class="swatch-row">
-            <button class="swatch active" data-brush-step="1" type="button">1</button>
-            <button class="swatch" data-brush-step="5" type="button">5</button>
-            <button class="swatch" data-brush-step="10" type="button">10</button>
-          </div>
-          <p class="pane-label">Brush size (follows zoom)</p>
-          <div class="swatch-row">
-            <button class="swatch active" data-brush-size="0" type="button">S</button>
-            <button class="swatch" data-brush-size="1" type="button">M</button>
-            <button class="swatch" data-brush-size="2" type="button">L</button>
-            <button class="swatch" data-brush-size="3" type="button">XL</button>
-          </div>
-          <p class="pane-label">Falloff (raise/lower, M–XL)</p>
-          <div class="swatch-row">
-            <button class="swatch active" data-falloff="even" type="button">Even</button>
-            <button class="swatch" data-falloff="hill" type="button">Hill</button>
-          </div>
-          <p class="dock-note">Tier <span id="brush-size-value">S</span> · effective ~<span id="brush-effective-radius">1</span> hex (zoom out = larger). Cap 24.</p>
-          <p class="dock-note">Autosave writes on a short cooldown and flushes on mouse release.</p>
-        </div>
-        <div class="drawer-pane" data-drawer="rivers">
-          <p class="pane-label">Lakes &amp; rivers</p>
-          <p class="dock-note">Generate lakes before rivers.</p>
-          <p class="dock-note">Lake density</p>
-          <div class="swatch-grid" id="editor-lake-densities">
-            <button class="swatch" type="button" data-editor-lake-density="sparse">Sparse</button>
-            <button class="swatch active" type="button" data-editor-lake-density="balanced">Balanced</button>
-            <button class="swatch" type="button" data-editor-lake-density="lake_rich">Lake-rich</button>
-          </div>
-          <button id="generate-lakes" class="swatch" type="button">Generate lakes</button>
-          <p class="dock-note">River density</p>
-          <div class="swatch-grid" id="editor-river-densities">
-            <button class="swatch" type="button" data-editor-river-density="few">Few</button>
-            <button class="swatch active" type="button" data-editor-river-density="balanced">Balanced</button>
-            <button class="swatch" type="button" data-editor-river-density="many">Many</button>
-          </div>
-          <p class="dock-note">Rebuilds from current elevation, lakes, and climate. Same inputs → same river network.</p>
-          <button id="generate-rivers" class="swatch" type="button">Rebuild rivers</button>
-          <p id="water-gen-status" class="dock-note"></p>
-          <p class="dock-note">Gen diagnostics (copy into /fix reports)</p>
-          <pre id="water-gen-diagnostics" class="water-gen-diagnostics"></pre>
-          <div id="manual-rivers-authoring">
-          <p class="pane-label">Manual rivers (legacy)</p>
-          <p class="dock-note">Click each hex in order — neighbor-only chain. Straight stroke overlay (v1).</p>
-          <div class="swatch-grid">
-            <button class="swatch" data-brush="river-pin" type="button"><span class="dot" style="background:#6eb5ff"></span>Pin river</button>
-            <button class="swatch" data-brush="river" type="button"><span class="dot" style="background:#4da6ff"></span>Draw river</button>
-            <button class="swatch" data-brush="river-erase" type="button"><span class="dot" style="background:#c44"></span>Erase river</button>
-          </div>
-          <p class="dock-note">Pin: click source, then mouth. Draw: neighbor chain click-by-click.</p>
-          <div class="row">
-            <button class="swatch" data-river-action="new" type="button">New river</button>
-            <button class="swatch" data-river-action="undo" type="button">Undo step</button>
-            <button class="swatch" id="detach-tributary" data-river-action="detach" type="button" disabled>Detach tributary</button>
-          </div>
-          <p class="dock-note">Erase removes the whole river on any of its cells.</p>
-          <p class="dock-note">Pin: click tributary to select, then Detach. Or pin a new mouth off the stem.</p>
-          </div>
-          <p id="manual-rivers-readonly-note" class="dock-note hidden">Generated rivers are read-only. Use <strong>Rebuild rivers</strong> to rebuild from current lakes and climate.</p>
-          <p id="river-migration-warning" class="dock-note hidden"></p>
-          <p id="river-status" class="dock-note">0 named rivers · 0 physical segments · 0 channel cells</p>
-        </div>
-      </div>
-      <section id="editor-object-panel" class="editor-object-panel hidden" aria-label="Category objects">
-        <p class="pane-label">Objects</p>
-        <ul id="editor-object-list" class="editor-object-list"></ul>
-      </section>
-    </aside>
-    <div id="build-wizard">
-      <nav class="wiz-left" aria-label="Build steps">
-        <button id="workspace-left-collapse-wiz" class="panel-collapse-btn wiz-panel-collapse" type="button" aria-label="Collapse left panel">&#9664;</button>
-        <p class="wiz-label">Pipeline</p>
-        <div id="wiz-tier-nav" class="wiz-tier-nav" aria-label="Pipeline tiers"></div>
-      </nav>
-      <aside class="wiz-right">
-        <button id="workspace-right-collapse-wiz" class="panel-collapse-btn wiz-panel-collapse" type="button" aria-label="Collapse right panel">&#9654;</button>
-        <p id="wiz-stale-banner" class="wiz-stale-banner hidden" role="status"></p>
-        <div id="wiz-panel-stub" class="hidden" data-stub-panel="1">
-          <h2 id="wiz-stub-title">—</h2>
-          <p class="wiz-stub-badge">Coming later</p>
-          <p class="wiz-hint" id="wiz-stub-desc">—</p>
-          <p class="wiz-hint wiz-stub-unavail">Generation is not available in this version.</p>
-        </div>
-        <div id="wiz-panel-step1">
-          <h2>Map size</h2>
-          <p class="wiz-hint">Pick a preset and check the blank hex grid. Continue when the scale looks right.</p>
-          <section class="wiz-section">
-            <p class="wiz-label">Preset</p>
-            <select id="wiz-preset">
-              <option value="small">Small (~510 cells)</option>
-              <option value="medium">Medium (~1,508 cells)</option>
-              <option value="large">Large (~4,450 cells)</option>
-              <option value="epic">Epic (~13,485 cells)</option>
-              <option value="grand">Grand (~40,050 cells)</option>
-              <option value="world">World (~99,777 cells, not stable)</option>
-            </select>
-            <p id="wiz-preset-warn" class="preset-size-warn"></p>
-            <p class="wiz-hint" id="wiz-size-meta">—</p>
-          </section>
-          <section class="wiz-section">
-            <div class="wiz-btn-row wiz-bottom-actions">
-              <button id="wiz-size-continue" class="wiz-action-btn primary" type="button">Continue</button>
+    <section class="workspace-grid">
+      <aside class="side-panel left">
+        <h2 id="left-title">View</h2>
+        <div id="left-body" class="tool-stack">
+          <div id="view-tool-panel" class="tool-stack">
+            <p>Explore the map. Drag to pan, wheel to zoom. Layers are display-only.</p>
+            <p class="muted">Layers</p>
+            <div id="map-layer-stack" class="choice-stack" role="radiogroup" aria-label="Map layers">
+              <button type="button" class="active" data-layer="empty">Empty</button>
+              <button type="button" data-layer="relief">relief</button>
             </div>
-          </section>
+            <p class="muted">Display</p>
+            <div class="choice-stack" aria-label="Display overlays">
+              <button type="button" id="view-hex-grid" class="active" aria-pressed="true">Grid — outlines</button>
+            </div>
+            <p id="view-help">Empty: contour hex grid only. Switch to relief to see elevation tint.</p>
+            <p id="spatial-status" class="muted"></p>
+            <p id="hover-relief" class="muted">Elevation: —</p>
+          </div>
+          <div id="relief-tool-panel" class="tool-stack hidden">
+            <p>Raise/Lower with a hard-disk brush. Drag to paint a stroke.</p>
+            <div class="actions" style="gap:0.5rem;flex-wrap:wrap">
+              <label><input type="radio" name="relief-mode" value="raise" checked> Raise</label>
+              <label><input type="radio" name="relief-mode" value="lower"> Lower</label>
+            </div>
+            <p class="muted">Stroke</p>
+            <div class="choice-stack" aria-label="Stroke mode">
+              <button type="button" id="stroke-stamp" class="active" aria-pressed="true">Stamp</button>
+              <button type="button" id="stroke-airbrush" aria-pressed="false">Airbrush</button>
+            </div>
+            <p class="muted">Brush radius</p>
+            <div class="actions" style="gap:0.5rem;align-items:center;flex-wrap:wrap">
+              <input id="brush-radius" type="range" min="0" max="24" value="0" style="flex:1;min-width:8rem">
+              <input id="brush-radius-num" type="number" min="0" max="24" value="0" style="width:3.5rem">
+            </div>
+            <p id="brush-radius-meta" class="muted">r=0 · ~1 cell · max 24 · [ ] to nudge</p>
+            <div id="airbrush-rate-block" class="hidden">
+              <p class="muted">Rate (steps/s)</p>
+              <div class="choice-stack" id="airbrush-rate-stack" aria-label="Airbrush rate">
+                <button type="button" data-rate="1">1</button>
+                <button type="button" data-rate="5" class="active" aria-pressed="true">5</button>
+                <button type="button" data-rate="10">10</button>
+                <button type="button" data-rate="20">20</button>
+              </div>
+              <p id="airbrush-rate-meta" class="muted">Airbrush · 5/s</p>
+            </div>
+            <p class="muted">Ocean</p>
+            <div class="choice-stack" aria-label="Ocean unlock">
+              <button type="button" id="edit-ocean" aria-pressed="false">Edit ocean</button>
+            </div>
+            <button id="reload-spatial" type="button">Reload map</button>
+            <p class="muted">Entering Relief turns on the relief display layer.</p>
+            <p id="relief-hint" class="muted">Edit ocean off: freeze h &lt; 0; land Lower floors at 0. On: dig/fill ocean.</p>
+          </div>
+          <div id="mode-stub" class="empty-card hidden">This mode is a stub in the alpha shell.</div>
         </div>
-
-        <div id="wiz-panel-step2" class="hidden">
-        <div class="wiz-btn-row wiz-back-top">
-          <button id="wiz-sil-back" class="wiz-action-btn warn" type="button">Back</button>
-        </div>
-        <h2>Land silhouette</h2>
-        <p class="wiz-hint">Pick a layout class, then regenerate shapes within that class. Shore character is separate.</p>
-
-        <section class="wiz-section wiz-gen-category">
-          <p class="wiz-label">1. Shore character</p>
-          <div class="wiz-btn-row" id="wiz-chars">
-            <button class="wiz-style-btn active" type="button" data-wiz-char="smooth">Smooth shores</button>
-            <button class="wiz-style-btn" type="button" data-wiz-char="jagged">Jagged shores</button>
-          </div>
-        </section>
-
-        <section class="wiz-section wiz-gen-category">
-          <p class="wiz-label">2. Layout class</p>
-          <div id="wiz-layout-classes" class="wiz-btn-row" style="flex-wrap:wrap;gap:0.4rem;">
-            <button class="wiz-style-btn active" type="button" data-wiz-layout="pangea">Pangea</button>
-            <button class="wiz-style-btn" type="button" data-wiz-layout="continents">Continents</button>
-            <button class="wiz-style-btn" type="button" data-wiz-layout="archipelago">Archipelago</button>
-            <button class="wiz-style-btn" type="button" data-wiz-layout="island">Island</button>
-            <button class="wiz-style-btn" type="button" data-wiz-layout="continent_and_islands">Continent + islands</button>
-            <button class="wiz-style-btn" type="button" data-wiz-layout="mediterranean">Mediterranean</button>
-          </div>
-        </section>
-
-        <section class="wiz-section wiz-gen-category">
-          <p class="wiz-label">3. Shape of selected class</p>
-          <div class="wiz-btn-row">
-            <button id="wiz-regenerate" class="wiz-action-btn" type="button">Regenerate shape</button>
-          </div>
-          <p class="wiz-hint" id="wiz-gen-identity" style="font-family:ui-monospace,Consolas,monospace;font-size:0.72rem;word-break:break-all;">—</p>
-          <p class="wiz-hint">Regenerate changes the selected archetype’s form, not the archetype.</p>
-        </section>
-
-        <section class="wiz-section">
-          <p class="wiz-label">4. Accept, then Edit</p>
-          <div class="wiz-btn-row wiz-bottom-actions">
-            <button id="wiz-accept" class="wiz-action-btn" type="button">Accept</button>
-            <button id="wiz-edit" class="wiz-action-btn wiz-disabled" type="button" disabled>Edit</button>
-          </div>
-          <p class="wiz-hint">Edit unlocks after you accept the current shape.</p>
-          <p class="wiz-label">Edit brush</p>
-          <div class="wiz-btn-row hidden" id="wiz-edit-brushes">
-            <button id="wiz-edit-land" class="wiz-style-btn active" type="button" data-wiz-edit-brush="land">Land</button>
-            <button id="wiz-edit-ocean" class="wiz-style-btn" type="button" data-wiz-edit-brush="ocean">Ocean</button>
-          </div>
-          <p class="wiz-label hidden" id="wiz-edit-size-label">Brush size</p>
-          <div class="wiz-btn-row hidden" id="wiz-edit-sizes">
-            <button class="wiz-style-btn active" type="button" data-wiz-edit-size="0">S</button>
-            <button class="wiz-style-btn" type="button" data-wiz-edit-size="1">M</button>
-            <button class="wiz-style-btn" type="button" data-wiz-edit-size="2">L</button>
-            <button class="wiz-style-btn" type="button" data-wiz-edit-size="3">XL</button>
-          </div>
-          <p class="wiz-hint hidden" id="wiz-edit-size-hint">Size follows zoom — zoom out for a larger stamp (cap ~24 hex).</p>
-        </section>
-
-        <section class="wiz-section">
-          <p class="wiz-label">5. Next step</p>
-          <div class="wiz-btn-row wiz-bottom-actions">
-            <button id="wiz-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
-          </div>
-          <p class="wiz-hint" id="wiz-right-note">Pick a class, regenerate until you like the shape, accept, then continue. Orange Back (top) returns to size — confirm required; changing size resets Geo.</p>
-        </section>
-        </div>
-
-        <div id="wiz-panel-step3" class="hidden">
-        <div class="wiz-btn-row wiz-back-top">
-          <button id="wiz-geo-back" class="wiz-action-btn warn" type="button">Back</button>
-        </div>
-        <h2>Tectonics</h2>
-        <p class="wiz-hint">Generate geology belts that shape later elevation. Classes are color-coded on the map.</p>
-        <section class="wiz-section wiz-gen-category">
-          <p class="wiz-label">1. Geology style</p>
-          <div class="wiz-btn-row" id="wiz-geo-styles">
-            <button class="wiz-style-btn active" type="button" data-wiz-geo-style="belts">Belts</button>
-            <button class="wiz-style-btn" type="button" data-wiz-geo-style="shields">Shields</button>
-            <button class="wiz-style-btn" type="button" data-wiz-geo-style="arcs">Arcs</button>
-            <button class="wiz-style-btn" type="button" data-wiz-geo-style="random">Random</button>
-          </div>
-        </section>
-        <section class="wiz-section wiz-gen-category">
-          <p class="wiz-label">2. Generate</p>
-          <div class="wiz-btn-row">
-            <button id="wiz-geo-generate" class="wiz-action-btn" type="button">Generate geology</button>
-          </div>
-          <p class="wiz-hint">Map colors show structure on land. Regenerate to try another layout.</p>
-        </section>
-        <section class="wiz-section">
-          <p class="wiz-label">Legend</p>
-          <ul class="wiz-geo-legend" aria-label="Geology classes">
-            <li><span class="wiz-geo-swatch" style="background:#469655"></span>Stable land</li>
-            <li><span class="wiz-geo-swatch" style="background:#2d6ebe"></span>Basin (low)</li>
-            <li><span class="wiz-geo-swatch" style="background:#c45c2a"></span>Ridge (high)</li>
-            <li><span class="wiz-geo-swatch" style="background:#8c46b4"></span>Rift</li>
-            <li><span class="wiz-geo-swatch" style="background:#d2372d"></span>Volcanic arc</li>
-          </ul>
-        </section>
-        <section class="wiz-section">
-          <p class="wiz-label">3. Accept</p>
-          <div class="wiz-btn-row wiz-bottom-actions">
-            <button id="wiz-geo-accept" class="wiz-action-btn" type="button">Accept</button>
-          </div>
-        </section>
-        <section class="wiz-section">
-          <p class="wiz-label">4. Next step</p>
-          <div class="wiz-btn-row wiz-bottom-actions">
-            <button id="wiz-geo-continue" class="wiz-action-btn primary wiz-disabled" type="button" disabled>Continue</button>
-          </div>
-        </section>
-        </div>
-
-        <div id="wiz-panel-step4" class="hidden">
-        <div class="wiz-btn-row wiz-back-top">
-          <button id="wiz-elev-back" class="wiz-action-btn warn" type="button">Back</button>
-        </div>
-        <h2>Elevation</h2>
-        <p class="wiz-hint">Heights follow geology: ridges and arcs rise, basins stay low. Edit further in the editor after Finish.</p>
-        <section class="wiz-section wiz-gen-category">
-          <p class="wiz-label">1. Relief style</p>
-          <div class="wiz-btn-row" id="wiz-elev-styles">
-            <button class="wiz-style-btn active" type="button" data-wiz-elev-style="standard">Standard</button>
-            <button class="wiz-style-btn" type="button" data-wiz-elev-style="bold">Bold</button>
-            <button class="wiz-style-btn" type="button" data-wiz-elev-style="chaos">Chaos</button>
-          </div>
-        </section>
-        <section class="wiz-section wiz-gen-category">
-          <p class="wiz-label">2. Generate</p>
-          <div class="wiz-btn-row">
-            <button id="wiz-elev-generate" class="wiz-action-btn" type="button">Generate elevation</button>
-          </div>
-          <p class="wiz-hint">Regenerate to try another layout with the same style.</p>
-        </section>
-        <section class="wiz-section">
-          <div class="wiz-btn-row wiz-bottom-actions">
-            <button id="wiz-elev-continue" class="wiz-action-btn primary" type="button">Continue</button>
-          </div>
-        </section>
-        </div>
-
-        <div id="wiz-panel-step5" class="hidden">
-        <div class="wiz-btn-row wiz-back-top">
-          <button id="wiz-climate-back" class="wiz-action-btn warn" type="button">Back</button>
-        </div>
-        <h2>Climate</h2>
-        <p class="wiz-hint">Temperature and rainfall follow latitude, elevation, and coast distance. North is colder.</p>
-        <section class="wiz-section wiz-gen-category">
-          <p class="wiz-label">1. Precipitation style</p>
-          <div class="wiz-btn-row" id="wiz-climate-styles">
-            <button class="wiz-style-btn active" type="button" data-wiz-climate-style="balanced">Balanced</button>
-            <button class="wiz-style-btn" type="button" data-wiz-climate-style="wet_coasts">Wet coasts</button>
-            <button class="wiz-style-btn" type="button" data-wiz-climate-style="dry_interior">Dry interior</button>
-          </div>
-        </section>
-        <section class="wiz-section wiz-gen-category">
-          <p class="wiz-label">2. Generate</p>
-          <div class="wiz-btn-row">
-            <button id="wiz-climate-generate" class="wiz-action-btn" type="button">Generate climate</button>
-          </div>
-          <p class="wiz-hint">Regenerate to try another layout with the same style.</p>
-        </section>
-        <section class="wiz-section">
-          <div class="wiz-btn-row wiz-bottom-actions">
-            <button id="wiz-climate-continue" class="wiz-action-btn primary" type="button">Continue</button>
-          </div>
-        </section>
-        </div>
-
-        <div id="wiz-panel-step6" class="hidden">
-        <div class="wiz-btn-row wiz-back-top">
-          <button id="wiz-water-back" class="wiz-action-btn warn" type="button">Back</button>
-        </div>
-        <h2>Water</h2>
-        <p class="wiz-hint">Generate lakes before rivers. Lake seed affects tie-break ordering only.</p>
-        <section class="wiz-section">
-          <p class="wiz-label">1. Lake density</p>
-          <div class="wiz-btn-row" id="wiz-lake-densities">
-            <button class="wiz-style-btn" type="button" data-wiz-lake-density="sparse">Sparse</button>
-            <button class="wiz-style-btn active" type="button" data-wiz-lake-density="balanced">Balanced</button>
-            <button class="wiz-style-btn" type="button" data-wiz-lake-density="lake_rich">Lake-rich</button>
-          </div>
-          <div class="wiz-btn-row">
-            <button id="wiz-lake-generate" class="wiz-action-btn" type="button">Generate lakes</button>
-          </div>
-        </section>
-        <section class="wiz-section">
-          <p class="wiz-label">2. River density</p>
-          <div class="wiz-btn-row" id="wiz-river-densities">
-            <button class="wiz-style-btn" type="button" data-wiz-river-density="few">Few</button>
-            <button class="wiz-style-btn active" type="button" data-wiz-river-density="balanced">Balanced</button>
-            <button class="wiz-style-btn" type="button" data-wiz-river-density="many">Many</button>
-          </div>
-          <div class="wiz-btn-row">
-            <button id="wiz-water-generate" class="wiz-action-btn" type="button">Rebuild rivers</button>
-          </div>
-          <p class="wiz-hint">Rebuild from current terrain and lakes. Same inputs → same river network — change elevation, lakes, or climate first for a different result. Manual river drawing is not available for generated hydrology.</p>
-        </section>
-        <section class="wiz-section">
-          <p class="wiz-label">Diagnostics</p>
-          <p class="wiz-hint">Copy into /fix reports when dogfooding.</p>
-          <pre id="wizard-water-diagnostics" class="water-gen-diagnostics"></pre>
-        </section>
-        <section class="wiz-section">
-          <div class="wiz-btn-row wiz-bottom-actions">
-            <button id="wiz-finish" class="wiz-action-btn primary" type="button">Finish</button>
-          </div>
-        </section>
-        </div>
-
       </aside>
-    </div>
-
-    <aside id="generator-left" class="mode-panel mode-panel-left mode-panel-generator" aria-label="Generators">
-      <p class="wiz-label">Generators</p>
-      <button class="swatch" type="button" disabled>Terrain</button>
-      <button class="swatch" type="button" disabled>Climate</button>
-      <button class="swatch" type="button" disabled>Hydrology</button>
-      <p class="dock-note">Coming later.</p>
-    </aside>
-    <aside id="generator-right" class="mode-panel mode-panel-right mode-panel-generator" aria-label="Generator details">
-      <h2>Generator</h2>
-      <p class="wiz-stub-badge">Coming later</p>
-      <p class="dock-note">A non-linear generation toolset will live here. It shares the same engine as Wizard, but lets you re-run specific stages. Not available in this version.</p>
-    </aside>
-
-    <aside id="agent-left" class="mode-panel mode-panel-left mode-panel-agent" aria-label="Agent zones">
-      <p class="wiz-label">Agent zones</p>
-      <button class="swatch" type="button" disabled>Mark zone</button>
-      <button class="swatch" type="button" disabled>Clear zone</button>
-      <p class="dock-note">Coming later.</p>
-    </aside>
-    <aside id="agent-right" class="mode-panel mode-panel-right mode-panel-agent" aria-label="Agent details">
-      <h2>Agent</h2>
-      <p class="wiz-stub-badge">Coming later</p>
-      <p class="dock-note">Mark areas for a Cursor agent to fill in from a prompt. Intent zones are a future non-canonical layer. Not available in this version.</p>
-    </aside>
-
-    <aside id="history-left" class="mode-panel mode-panel-left mode-panel-history" aria-label="History">
-      <p class="wiz-label">History</p>
-      <p class="dock-note">The timeline is shown at the bottom of the screen.</p>
-    </aside>
-    <aside id="history-right" class="mode-panel mode-panel-right mode-panel-history" aria-label="History details">
-      <h2>History</h2>
-      <p class="dock-note">Use the timeline bar below to add states, events, and review divergence.</p>
-    </aside>
-
-    <footer id="history-bar" class="history-bar hidden">
-      <div class="history-collapsed-row">
-        <button id="history-toggle-btn" type="button"><span id="history-collapsed-label">History ▴</span></button>
-      </div>
-      <div id="history-panel" class="hidden">
-        <div id="history-divergence-banner" class="hidden"><span id="history-divergence-text"></span></div>
-        <div id="history-divergence-review" class="hidden"></div>
-        <div class="history-actions">
-          <button id="history-earlier-btn" type="button">+ Earlier</button>
-          <button id="history-later-btn" type="button">+ Later</button>
-          <button id="history-event-btn" type="button">+ Event</button>
-          <button id="history-cataclysm-btn" type="button">+ Cataclysm</button>
-          <button id="history-lock-btn" type="button">Lock state</button>
-          <button id="history-delete-state-btn" type="button" class="hidden">Delete state</button>
+      <section class="workspace-host" aria-label="Map Workspace Host">
+        <canvas id="spatial-canvas" width="960" height="640"></canvas>
+      </section>
+      <aside class="side-panel right">
+        <h2 id="right-title">Details</h2>
+        <div id="details-body" class="tool-stack">
+          <p id="details-lead" class="muted">Hover a cell while Relief is active.</p>
+          <p id="details-cell-id" class="muted">Cell: —</p>
+          <p id="details-cell-elev" class="muted">Elevation: —</p>
+          <p id="details-hint" class="muted">Deep inspector later. Elevation readout is Relief-only for now.</p>
         </div>
-        <div id="history-timeline-list" class="history-timeline-list"></div>
-      </div>
-    </footer>
-  </div>
+      </aside>
+    </section>
+  </main>
 
-  <div id="wiz-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="wiz-confirm-msg">
-    <div id="wiz-confirm-dialog">
-      <p id="wiz-confirm-msg">Confirm?</p>
-      <div class="wiz-btn-row">
-        <button id="wiz-confirm-cancel" class="wiz-action-btn" type="button">Cancel</button>
-        <button id="wiz-confirm-ok" class="wiz-action-btn warn" type="button">Continue</button>
+  <dialog id="create-dialog">
+    <form id="create-form">
+      <h2>Create world workspace</h2>
+      <p class="muted">Creates identity <code>mapkeeper.toml</code> plus a minimal spatial map state. Map size is fixed after create.</p>
+      <label for="world-id">World name</label>
+      <input id="world-id" autocomplete="off" required placeholder="My world">
+      <label for="world-folder">Folder</label>
+      <div class="actions">
+        <input id="world-folder" required>
+        <button id="browse-folder" type="button">Browse…</button>
       </div>
-    </div>
-  </div>
+      <label>Map size</label>
+      <div id="preset-grid" class="preset-grid" role="radiogroup" aria-label="Map size presets"></div>
+      <input type="hidden" id="create-preset-id" value="">
+      <div id="create-error" class="error"></div>
+      <div class="actions">
+        <button type="button" id="cancel-create">Cancel</button>
+        <button type="submit" class="primary">Create</button>
+      </div>
+    </form>
+  </dialog>
 
-  <script>
-    // Desktop shell only (roadmap 5.9, D-29): `withGlobalTauri` exposes
-    // `window.__TAURI__`; a plain browser tab never has this, so the
-    // native-only button stays hidden and mapkeeper_web.js never calls it.
-    if (window.__TAURI__) {
-      document.querySelectorAll(".native-only").forEach((el) => { el.style.display = ""; });
-      window.mapkeeperPickFolder = () => window.__TAURI__.core.invoke("pick_folder");
-      window.mapkeeperOpenUrl = (url) => window.__TAURI__.opener.openUrl(url);
-    }
-  </script>
+  <dialog id="delete-dialog">
+    <form id="delete-form" method="dialog">
+      <h2>Delete world permanently?</h2>
+      <p class="muted">This removes the world folder from disk. It cannot be undone.</p>
+      <p id="delete-target" class="muted"></p>
+      <div id="delete-error" class="error"></div>
+      <div class="actions">
+        <button type="submit" value="cancel">Cancel</button>
+        <button type="submit" value="confirm" class="danger">Delete</button>
+      </div>
+    </form>
+  </dialog>
+
   <script type="module">
-    import init from "./mapkeeper_web.js";
-    init();
+    import init, {
+      probe_world_to_axial,
+      probe_axial_to_world,
+      probe_hex_distance,
+      probe_max_brush_radius,
+      probe_disk_cells,
+      probe_pulse_interval_ms,
+    } from "./mapkeeper_web.js";
+    await init();
+
+    const home = document.querySelector("#home");
+    const workspace = document.querySelector("#workspace");
+    const grid = document.querySelector("#project-grid");
+    const empty = document.querySelector("#project-empty");
+    const createFirstBtn = document.querySelector("#create-first");
+    const createAnotherBtn = document.querySelector("#create-another");
+    const dialog = document.querySelector("#create-dialog");
+    const deleteDialog = document.querySelector("#delete-dialog");
+    const deleteTarget = document.querySelector("#delete-target");
+    const deleteError = document.querySelector("#delete-error");
+    const idInput = document.querySelector("#world-id");
+    const folderInput = document.querySelector("#world-folder");
+    const errorBox = document.querySelector("#create-error");
+    const homeError = document.querySelector("#home-error");
+    const canvas = document.querySelector("#spatial-canvas");
+    const ctx = canvas.getContext("2d");
+    const spatialStatus = document.querySelector("#spatial-status");
+    const hoverReliefEl = document.querySelector("#hover-relief");
+    const detailsLeadEl = document.querySelector("#details-lead");
+    const detailsCellIdEl = document.querySelector("#details-cell-id");
+    const detailsCellElevEl = document.querySelector("#details-cell-elev");
+
+    const syncDetailsPanel = () => {
+      const reliefDetails = workspaceMode === "editor" && activeTool === "relief";
+      detailsCellIdEl.classList.toggle("hidden", !reliefDetails);
+      detailsCellElevEl.classList.toggle("hidden", !reliefDetails);
+      if (!reliefDetails) {
+        detailsLeadEl.textContent = "Elevation cell readout appears in Relief.";
+        detailsCellIdEl.textContent = "Cell: —";
+        detailsCellElevEl.textContent = "Elevation: —";
+      } else {
+        detailsLeadEl.textContent = "Hover a cell while painting Relief.";
+      }
+    };
+
+    const setHoverReadout = (axial, h, { outside = false } = {}) => {
+      // Left View panel keeps a light line; Details elevation is Relief-only.
+      if (outside || !axial) {
+        hoverReliefEl.textContent = "Elevation: —";
+        if (activeTool === "relief") {
+          detailsCellIdEl.textContent = "Cell: —";
+          detailsCellElevEl.textContent = "Elevation: —";
+        }
+        return;
+      }
+      hoverReliefEl.textContent = `Elevation: ${h} @ ${axial.q},${axial.r}`;
+      if (activeTool !== "relief") return;
+      detailsCellIdEl.textContent = `Cell: ${axial.q}, ${axial.r}`;
+      detailsCellElevEl.textContent = `Elevation: ${h}`;
+    };
+    const viewHelp = document.querySelector("#view-help");
+    const editorToolStrip = document.querySelector("#editor-tool-strip");
+    const modeToolStub = document.querySelector("#mode-tool-stub");
+    const viewToolPanel = document.querySelector("#view-tool-panel");
+    const reliefToolPanel = document.querySelector("#relief-tool-panel");
+    const modeStub = document.querySelector("#mode-stub");
+
+    const reliefMode = () => {
+      const selected = document.querySelector('input[name="relief-mode"]:checked');
+      return selected && selected.value === "lower" ? -1 : 1;
+    };
+    // N-015: session-only Edit ocean unlock (default off = freeze h < 0).
+    const editOceanOn = () => {
+      const el = document.querySelector("#edit-ocean");
+      return el ? el.classList.contains("active") : false;
+    };
+    const brushRadiusEl = document.querySelector("#brush-radius");
+    const brushRadiusNumEl = document.querySelector("#brush-radius-num");
+    const brushRadiusMetaEl = document.querySelector("#brush-radius-meta");
+    const airbrushRateBlock = document.querySelector("#airbrush-rate-block");
+    const airbrushRateMetaEl = document.querySelector("#airbrush-rate-meta");
+    const strokeStampBtn = document.querySelector("#stroke-stamp");
+    const strokeAirbrushBtn = document.querySelector("#stroke-airbrush");
+
+    const radiusStepSize = (r) => (r < 5 ? 1 : r < 12 ? 2 : 4);
+    const diskCountEstimate = (r) => 3 * r * (r + 1) + 1;
+
+    const syncStrokeModeUi = () => {
+      if (strokeStampBtn) {
+        strokeStampBtn.classList.toggle("active", strokeMode === "stamp");
+        strokeStampBtn.setAttribute("aria-pressed", strokeMode === "stamp" ? "true" : "false");
+      }
+      if (strokeAirbrushBtn) {
+        strokeAirbrushBtn.classList.toggle("active", strokeMode === "airbrush");
+        strokeAirbrushBtn.setAttribute("aria-pressed", strokeMode === "airbrush" ? "true" : "false");
+      }
+      if (airbrushRateBlock) {
+        airbrushRateBlock.classList.toggle("hidden", strokeMode !== "airbrush");
+      }
+      if (airbrushRateMetaEl) {
+        airbrushRateMetaEl.textContent = `Airbrush · ${airbrushRate}/s`;
+      }
+      document.querySelectorAll("#airbrush-rate-stack button").forEach((btn) => {
+        const on = Number(btn.dataset.rate) === airbrushRate;
+        btn.classList.toggle("active", on);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+    };
+
+    const syncBrushRadiusUi = () => {
+      brushRadius = Math.max(0, Math.min(brushMaxRadius, brushRadius | 0));
+      if (brushRadiusEl) {
+        brushRadiusEl.max = String(brushMaxRadius);
+        brushRadiusEl.value = String(brushRadius);
+      }
+      if (brushRadiusNumEl) {
+        brushRadiusNumEl.max = String(brushMaxRadius);
+        brushRadiusNumEl.value = String(brushRadius);
+      }
+      if (brushRadiusMetaEl) {
+        const modeHint = strokeMode === "airbrush" ? ` · Airbrush ${airbrushRate}/s` : "";
+        brushRadiusMetaEl.textContent =
+          `r=${brushRadius} · ~${diskCountEstimate(brushRadius)} cells · max ${brushMaxRadius} · [ ] to nudge${modeHint}`;
+      }
+      syncStrokeModeUi();
+    };
+
+    const setBrushRadius = (next) => {
+      brushRadius = Math.max(0, Math.min(brushMaxRadius, next | 0));
+      syncBrushRadiusUi();
+      drawSpatial();
+    };
+
+    const setStrokeMode = (mode) => {
+      strokeMode = mode === "airbrush" ? "airbrush" : "stamp";
+      syncBrushRadiusUi();
+      drawSpatial();
+    };
+
+    const setAirbrushRate = (rate) => {
+      const allowed = [1, 5, 10, 20];
+      airbrushRate = allowed.includes(rate) ? rate : 5;
+      syncStrokeModeUi();
+      syncBrushRadiusUi();
+    };
+
+    const refreshBrushMaxFromGrid = () => {
+      if (!spatial) {
+        brushMaxRadius = 24;
+      } else {
+        const { width, height } = spatial.state.grid;
+        brushMaxRadius = probe_max_brush_radius(width, height);
+      }
+      if (brushRadius > brushMaxRadius) brushRadius = brushMaxRadius;
+      syncBrushRadiusUi();
+    };
+
+    const axialKey = (q, r) => `${q},${r}`;
+
+    const diskCellsAt = (q, r, radius) => {
+      if (!spatial) return [];
+      const { width, height } = spatial.state.grid;
+      // Prefer WASM footprint (offset-cache inside probe); keep API stable.
+      const flat = probe_disk_cells(q, r, radius, width, height);
+      const cells = [];
+      for (let i = 0; i + 1 < flat.length; i += 2) cells.push({ q: flat[i], r: flat[i + 1] });
+      return cells;
+    };
+
+    // Cube lerp hex line — FPS-independent stroke sampling (N-021).
+    const hexLine = (a, b) => {
+      const n = probe_hex_distance(a.q, a.r, b.q, b.r);
+      if (n === 0) return [{ q: a.q, r: a.r }];
+      const out = [];
+      for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        const x = a.q + (b.q - a.q) * t;
+        const z = a.r + (b.r - a.r) * t;
+        const y = -a.q - a.r + (-b.q - b.r - (-a.q - a.r)) * t;
+        let rx = Math.round(x);
+        let ry = Math.round(y);
+        let rz = Math.round(z);
+        const xDiff = Math.abs(rx - x);
+        const yDiff = Math.abs(ry - y);
+        const zDiff = Math.abs(rz - z);
+        if (xDiff > yDiff && xDiff > zDiff) rx = -ry - rz;
+        else if (yDiff > zDiff) ry = -rx - rz;
+        else rz = -rx - ry;
+        out.push({ q: rx, r: rz });
+      }
+      return out;
+    };
+
+    const nextElevation = (current, delta) => {
+      if (current < 0 && !editOceanOn()) return null;
+      let next = current + delta;
+      if (delta < 0 && !editOceanOn()) next = Math.max(0, next);
+      next = Math.max(ELEV_MIN, Math.min(ELEV_MAX, next));
+      return next === current ? null : next;
+    };
+    const viewHexGridOn = () => {
+      const el = document.querySelector("#view-hex-grid");
+      return el ? el.classList.contains("active") : true;
+    };
+
+    // View layers — display only (GATE editor-chrome-toolstrip).
+    const mapLayer = () => {
+      const selected = document.querySelector("#map-layer-stack button.active");
+      return selected && selected.dataset.layer === "relief" ? "relief" : "empty";
+    };
+    const setMapLayer = (layer) => {
+      document.querySelectorAll("#map-layer-stack button").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.layer === layer);
+      });
+      drawSpatial();
+    };
+
+    const ELEV_MIN = -60;
+    const ELEV_MAX = 100;
+    const lerpChannel = (a, b, t) => a + (b - a) * t;
+    // Relief display tint (N-011): land hypsometric bright green→yellow→red
+    // (D-50 archive intent); ocean bathymetric blues (N-013). Not SoT.
+    const reliefTintRgb = (value) => {
+      const h = Number(value);
+      if (h < 0) {
+        const depth = Math.min(1, (-h) / (-ELEV_MIN));
+        return [
+          Math.round(lerpChannel(56, 10, depth)),
+          Math.round(lerpChannel(140, 36, depth)),
+          Math.round(lerpChannel(210, 88, depth)),
+        ];
+      }
+      const t = Math.min(1, Math.max(0, h / ELEV_MAX));
+      if (t <= 0.5) {
+        const u = t * 2;
+        // #16a34a (bright green) → #facc15 (yellow)
+        return [
+          Math.round(lerpChannel(22, 250, u)),
+          Math.round(lerpChannel(163, 204, u)),
+          Math.round(lerpChannel(74, 21, u)),
+        ];
+      }
+      const u = (t - 0.5) * 2;
+      // #facc15 → #ef4444 (bright red)
+      return [
+        Math.round(lerpChannel(250, 239, u)),
+        Math.round(lerpChannel(204, 68, u)),
+        Math.round(lerpChannel(21, 68, u)),
+      ];
+    };
+
+    let defaultRoot = "";
+    let folderTouched = false;
+    let pendingDeletePath = "";
+    let spatial = null;
+    let camera = { zoom: 36, cx: 0, cy: 0 }; // ephemeral — never persisted
+    let activeTool = "view";
+    let workspaceMode = "editor";
+    let panDrag = null;
+    let brushRadius = 0;
+    let brushMaxRadius = 24;
+    let strokeMode = "stamp"; // stamp | airbrush (N-022); session UI only
+    let airbrushRate = 5; // steps/s; latched at stroke start (N-023)
+    let hoverBrush = null; // { q, r } for footprint preview
+    // paintStroke: Stamp visited=once/stroke; Airbrush visited=once/epoch
+    let paintStroke = null;
+    const FIELD_FLUSH_BATCH_MAX = 512;
+
+    const api = async (path, options = {}) => {
+      const response = await fetch(path, {
+        ...options,
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      });
+      if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+      return response.status === 204 ? null : response.json();
+    };
+
+    const worldPath = (name) => {
+      const slug = name.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "-").replace(/^-|-$/g, "");
+      const separator = defaultRoot.includes("\\") ? "\\" : "/";
+      return `${defaultRoot.replace(/[\\/]$/, "")}${separator}${slug}`;
+    };
+
+    const resizeCanvas = () => {
+      const rect = canvas.parentElement.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(320, Math.floor(rect.width * dpr));
+      canvas.height = Math.max(240, Math.floor(rect.height * dpr));
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+
+    const worldToScreen = (x, y) => {
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      return [
+        (x - camera.cx) * camera.zoom + w / 2,
+        (y - camera.cy) * camera.zoom + h / 2,
+      ];
+    };
+
+    const screenToWorld = (sx, sy) => {
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      return [
+        (sx - w / 2) / camera.zoom + camera.cx,
+        (sy - h / 2) / camera.zoom + camera.cy,
+      ];
+    };
+
+    const fitCamera = () => {
+      if (!spatial) return;
+      const { frame, grid } = spatial.state;
+      const centers = [];
+      for (let row = 0; row < grid.height; row++) {
+        for (let col = 0; col < grid.width; col++) {
+          const q = col - ((row - (row & 1)) / 2 | 0);
+          const p = probe_axial_to_world(
+            frame.origin_x, frame.origin_y,
+            grid.neighbor_center_distance_m, grid.width, grid.height, q, row,
+          );
+          centers.push([p.x, p.y]);
+        }
+      }
+      const xs = centers.map((c) => c[0]);
+      const ys = centers.map((c) => c[1]);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      camera.cx = (minX + maxX) / 2;
+      camera.cy = (minY + maxY) / 2;
+      const pad = 2.5 * grid.neighbor_center_distance_m;
+      const zoomX = canvas.clientWidth / (maxX - minX + pad);
+      const zoomY = canvas.clientHeight / (maxY - minY + pad);
+      // meters → allow small px/m zoom
+      camera.zoom = Math.max(0.002, Math.min(zoomX, zoomY) * 0.9);
+    };
+
+    const hexCorners = (cx, cy, size) => {
+      const pts = [];
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 180) * (60 * i - 30);
+        pts.push([cx + size * Math.cos(angle), cy + size * Math.sin(angle)]);
+      }
+      return pts;
+    };
+
+    const drawHex = (cx, cy, size, fill, stroke, lineWidth = 1) => {
+      const pts = hexCorners(cx, cy, size);
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+      ctx.closePath();
+      if (fill) {
+        ctx.fillStyle = fill;
+        ctx.fill();
+      }
+      if (stroke) {
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = lineWidth;
+        ctx.stroke();
+      }
+    };
+
+    const drawSpatial = () => {
+      resizeCanvas();
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "#0b0e13";
+      ctx.fillRect(0, 0, w, h);
+      if (!spatial) {
+        ctx.fillStyle = "#97a3b4";
+        ctx.fillText("Open a world to load the map", 24, 32);
+        return;
+      }
+      const layer = mapLayer();
+      const showGrid = viewHexGridOn();
+      if (viewHelp) {
+        viewHelp.textContent = layer === "relief"
+          ? (showGrid
+            ? "relief: elevation tint + outline overlay. Outlines are display-only."
+            : "relief: elevation tint (no outline). Cells stay flush for metric scale.")
+          : (showGrid
+            ? "Empty: outline overlay on flush cells. Toggle Grid off for fill-only."
+            : "Empty: flush cells, no outline. Toggle Grid on to see edges.");
+      }
+      const { frame, grid, field } = spatial.state;
+      // Centers stay metric (N-014). Slight fill overlap when Grid off hides canvas AA seams
+      // that look like a phantom outline — not a structural gap.
+      const radiusM = grid.neighbor_center_distance_m / Math.sqrt(3);
+      const sizePx = radiusM * camera.zoom;
+      const drawSize = showGrid ? sizePx : sizePx + 0.9;
+      const heightAt = (q, r) => field.cells[`${q},${r}`] || 0;
+      const gridStroke = showGrid
+        ? (layer === "empty" ? "rgba(140, 160, 190, 0.45)" : "rgba(20, 28, 36, 0.40)")
+        : null;
+      const gridWidth = showGrid ? 1.5 : 0;
+
+      for (let row = 0; row < grid.height; row++) {
+        for (let col = 0; col < grid.width; col++) {
+          const q = col - ((row - (row & 1)) / 2 | 0);
+          const p = probe_axial_to_world(
+            frame.origin_x, frame.origin_y,
+            grid.neighbor_center_distance_m, grid.width, grid.height, q, row,
+          );
+          const [sx, sy] = worldToScreen(p.x, p.y);
+          const cellH = heightAt(q, row);
+          if (layer === "relief") {
+            const rgb = reliefTintRgb(cellH);
+            drawHex(sx, sy, drawSize, `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`, gridStroke, gridWidth);
+          } else {
+            drawHex(sx, sy, drawSize, "#121821", gridStroke, gridWidth);
+          }
+        }
+      }
+      // N-021: hard-disk brush footprint preview.
+      if (activeTool === "relief" && hoverBrush) {
+        const footprint = diskCellsAt(hoverBrush.q, hoverBrush.r, brushRadius);
+        for (const cell of footprint) {
+          const p = probe_axial_to_world(
+            frame.origin_x, frame.origin_y,
+            grid.neighbor_center_distance_m, grid.width, grid.height, cell.q, cell.r,
+          );
+          const [sx, sy] = worldToScreen(p.x, p.y);
+          drawHex(sx, sy, drawSize, null, "rgba(232, 197, 71, 0.95)", Math.max(1.5, sizePx * 0.08));
+        }
+      }
+    };
+
+    const applySpatial = (view, { refit = false } = {}) => {
+      spatial = view;
+      spatialStatus.textContent = `grid=${view.state.grid.id} · field=${view.state.field.id}`;
+      if (refit) fitCamera();
+      refreshBrushMaxFromGrid();
+      drawSpatial();
+    };
+
+    const loadSpatial = async () => {
+      const view = await api("/api/spatial");
+      applySpatial(view, { refit: true });
+    };
+
+    const showWorkspace = async (project) => {
+      document.querySelector("#world-name").textContent = project.id;
+      document.querySelector("#world-path").textContent = project.path;
+      home.classList.add("hidden");
+      workspace.classList.remove("hidden");
+      try {
+        await loadSpatial();
+      } catch (error) {
+        spatialStatus.textContent = error.message;
+      }
+    };
+
+    const showHome = () => {
+      workspace.classList.add("hidden");
+      home.classList.remove("hidden");
+      spatial = null;
+    };
+
+    const presetGrid = document.querySelector("#preset-grid");
+    const presetIdInput = document.querySelector("#create-preset-id");
+    let createPresets = [];
+
+    const selectPreset = (presetId) => {
+      presetIdInput.value = presetId;
+      presetGrid.querySelectorAll(".preset-card").forEach((card) => {
+        const on = card.dataset.presetId === presetId;
+        card.classList.toggle("active", on);
+        card.setAttribute("aria-checked", on ? "true" : "false");
+      });
+    };
+
+    const renderPresetCards = (presets, defaultId) => {
+      createPresets = presets;
+      presetGrid.replaceChildren();
+      for (const preset of presets) {
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "preset-card";
+        card.dataset.presetId = preset.id;
+        card.setAttribute("role", "radio");
+        const titleRow = document.createElement("div");
+        titleRow.className = "title-row";
+        const title = document.createElement("span");
+        title.className = "title";
+        title.textContent = preset.display_name || preset.id;
+        titleRow.append(title);
+        if (preset.is_default) {
+          const badge = document.createElement("span");
+          badge.className = "badge";
+          badge.textContent = "Default";
+          titleRow.append(badge);
+        }
+        const extent = document.createElement("span");
+        extent.className = "extent";
+        extent.textContent = `≈ ${preset.width_km} × ${preset.height_km} km`;
+        const stats = document.createElement("span");
+        stats.className = "stats";
+        const areaLabel = Math.round(Number(preset.area_km2) || 0).toLocaleString("en-US").replace(/,/g, "\u00a0");
+        const cellsLabel = Number(preset.cells || 0).toLocaleString("en-US").replace(/,/g, "\u00a0");
+        stats.textContent = `${areaLabel} km² · ${cellsLabel} cells`;
+        card.append(titleRow, extent, stats);
+        card.addEventListener("click", () => selectPreset(preset.id));
+        presetGrid.append(card);
+      }
+      selectPreset(defaultId || (presets.find((p) => p.is_default) || presets[0] || {}).id || "");
+    };
+
+    const loadCreatePresets = async () => {
+      const data = await api("/api/map-presets");
+      renderPresetCards(data.presets || [], data.default_preset_id);
+    };
+
+    const openCreate = async () => {
+      idInput.value = "";
+      folderInput.value = defaultRoot;
+      folderTouched = false;
+      errorBox.textContent = "";
+      try {
+        if (!createPresets.length) await loadCreatePresets();
+        else selectPreset(presetIdInput.value || createPresets.find((p) => p.is_default)?.id || createPresets[0].id);
+      } catch (error) {
+        errorBox.textContent = error.message;
+      }
+      dialog.showModal();
+      idInput.focus();
+    };
+
+    const closeManageMenus = (except) => {
+      grid.querySelectorAll(".manage-menu").forEach((menu) => {
+        if (menu !== except) menu.classList.add("hidden");
+      });
+    };
+
+    const renderProjects = (projects) => {
+      grid.replaceChildren();
+      const hasWorlds = projects.length > 0;
+      empty.classList.toggle("hidden", hasWorlds);
+      // Empty Home: primary CTA only; later: New world in Worlds header (N-002).
+      createFirstBtn.classList.toggle("hidden", hasWorlds);
+      createAnotherBtn.classList.toggle("hidden", !hasWorlds);
+      for (const project of projects) {
+        const card = document.createElement("article");
+        card.className = "project-card";
+        const title = document.createElement("h3");
+        title.textContent = project.id;
+        const path = document.createElement("p");
+        path.className = "muted";
+        path.textContent = project.path;
+        const actions = document.createElement("div");
+        actions.className = "actions";
+
+        const open = document.createElement("button");
+        open.textContent = project.valid ? "Open" : "Missing";
+        open.dataset.action = "open";
+        open.dataset.path = project.path;
+        if (!project.valid) open.disabled = true;
+
+        const manage = document.createElement("div");
+        manage.className = "manage";
+        const manageBtn = document.createElement("button");
+        manageBtn.type = "button";
+        manageBtn.className = "manage-toggle";
+        manageBtn.textContent = "Manage ▾";
+        manageBtn.setAttribute("aria-haspopup", "menu");
+        const menu = document.createElement("div");
+        menu.className = "manage-menu hidden";
+        menu.setAttribute("role", "menu");
+        const manageItems = project.valid
+          ? [["delete", "Delete", "danger"]]
+          : [["forget", "Forget", ""]];
+        for (const [action, label, className] of manageItems) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = label;
+          button.dataset.action = action;
+          button.dataset.path = project.path;
+          button.className = className;
+          button.setAttribute("role", "menuitem");
+          menu.append(button);
+        }
+        manageBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const willOpen = menu.classList.contains("hidden");
+          closeManageMenus();
+          menu.classList.toggle("hidden", !willOpen);
+        });
+        manage.append(manageBtn, menu);
+        actions.append(open, manage);
+        card.append(title, path, actions);
+        grid.append(card);
+      }
+    };
+
+    const refresh = async () => {
+      const data = await api("/api/projects");
+      defaultRoot = data.default_worlds_root;
+      renderProjects(data.projects);
+      if (data.active) await showWorkspace(data.active);
+    };
+
+    createFirstBtn.addEventListener("click", openCreate);
+    createAnotherBtn.addEventListener("click", openCreate);
+    document.querySelector("#cancel-create").addEventListener("click", () => dialog.close());
+    idInput.addEventListener("input", () => {
+      if (!folderTouched) folderInput.value = worldPath(idInput.value);
+    });
+    folderInput.addEventListener("input", () => { folderTouched = true; });
+    document.querySelector("#browse-folder").addEventListener("click", async () => {
+      try {
+        const picked = await window.__TAURI__?.core?.invoke("pick_folder");
+        if (picked) {
+          defaultRoot = picked;
+          folderTouched = false;
+          folderInput.value = worldPath(idInput.value);
+        }
+      } catch (error) {
+        errorBox.textContent = String(error);
+      }
+    });
+    document.querySelector("#create-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      errorBox.textContent = "";
+      try {
+        const project = await api("/api/projects", {
+          method: "POST",
+          body: JSON.stringify({
+            id: idInput.value,
+            path: folderInput.value,
+            preset_id: presetIdInput.value || undefined,
+          }),
+        });
+        dialog.close();
+        await showWorkspace(project);
+      } catch (error) {
+        errorBox.textContent = error.message;
+      }
+    });
+    const askDelete = (path) => {
+      pendingDeletePath = path;
+      deleteTarget.textContent = path;
+      deleteError.textContent = "";
+      deleteDialog.showModal();
+    };
+
+    grid.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) {
+        if (!event.target.closest(".manage")) closeManageMenus();
+        return;
+      }
+      closeManageMenus();
+      if (button.dataset.action === "delete") {
+        askDelete(button.dataset.path);
+        return;
+      }
+      homeError.textContent = "";
+      try {
+        const body = JSON.stringify({ path: button.dataset.path });
+        const project = await api(`/api/projects/${button.dataset.action}`, { method: "POST", body });
+        if (button.dataset.action === "open") await showWorkspace(project);
+        else await refresh();
+      } catch (error) {
+        homeError.textContent = error.message || String(error);
+      }
+    });
+    document.querySelector("#delete-form").addEventListener("submit", async (event) => {
+      const submitter = event.submitter;
+      if (!submitter || submitter.value !== "confirm") {
+        pendingDeletePath = "";
+        return;
+      }
+      event.preventDefault();
+      deleteError.textContent = "";
+      try {
+        await api("/api/projects/delete", {
+          method: "POST",
+          body: JSON.stringify({ path: pendingDeletePath }),
+        });
+        pendingDeletePath = "";
+        deleteDialog.close();
+        await refresh();
+      } catch (error) {
+        deleteError.textContent = error.message;
+      }
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest("#project-grid .manage")) closeManageMenus();
+    });
+    document.querySelector("#back-worlds").addEventListener("click", async () => {
+      await api("/api/projects/close", { method: "POST" });
+      showHome();
+      await refresh();
+    });
+
+    const syncEditorChrome = () => {
+      const isEditor = workspaceMode === "editor";
+      editorToolStrip.classList.toggle("hidden", !isEditor);
+      modeToolStub.classList.toggle("hidden", isEditor);
+      modeStub.classList.toggle("hidden", isEditor);
+      viewToolPanel.classList.toggle("hidden", !isEditor || activeTool !== "view");
+      reliefToolPanel.classList.toggle("hidden", !isEditor || activeTool !== "relief");
+      const title = !isEditor
+        ? workspaceMode[0].toUpperCase() + workspaceMode.slice(1)
+        : (activeTool === "relief" ? "Relief" : "View");
+      document.querySelector("#left-title").textContent = title;
+      canvas.classList.toggle("paint", isEditor && activeTool === "relief");
+      document.querySelectorAll("#editor-tool-strip button").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tool === activeTool);
+      });
+      syncDetailsPanel();
+    };
+
+    const setTool = (tool) => {
+      activeTool = tool;
+      if (tool === "relief") setMapLayer("relief");
+      if (tool !== "relief") hoverBrush = null;
+      syncEditorChrome();
+      drawSpatial();
+    };
+
+    document.querySelector("#tool-view").addEventListener("click", () => setTool("view"));
+    document.querySelector("#tool-relief").addEventListener("click", () => setTool("relief"));
+
+    document.querySelector("#mode-nav").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-mode]");
+      if (!button) return;
+      document.querySelectorAll("#mode-nav button").forEach((item) => item.classList.toggle("active", item === button));
+      workspaceMode = button.dataset.mode;
+      syncEditorChrome();
+    });
+
+    const pickAxial = (clientX, clientY) => {
+      const rect = canvas.getBoundingClientRect();
+      const [wx, wy] = screenToWorld(clientX - rect.left, clientY - rect.top);
+      const { frame, grid } = spatial.state;
+      return probe_world_to_axial(
+        frame.origin_x, frame.origin_y,
+        grid.neighbor_center_distance_m, grid.width, grid.height, wx, wy,
+      );
+    };
+
+    const axialOnMap = (axial) => {
+      const { grid } = spatial.state;
+      const col = axial.q + ((axial.r - (axial.r & 1)) / 2 | 0);
+      const row = axial.r;
+      return col >= 0 && row >= 0 && col < grid.width && row < grid.height;
+    };
+
+    const elevationAt = (q, r) => {
+      if (!spatial) return 0;
+      return spatial.state.field.cells[axialKey(q, r)] || 0;
+    };
+
+    // Live Details/View readout from optimistic field during stroke (N-022).
+    const refreshDetailsAtBrush = () => {
+      if (!paintStroke || !paintStroke.onMap) return;
+      const { q, r } = paintStroke.last;
+      setHoverReadout({ q, r }, elevationAt(q, r));
+    };
+
+    const stampDiskAt = (centerQ, centerR) => {
+      if (!paintStroke || !spatial) return;
+      const field = spatial.state.field;
+      const delta = paintStroke.delta;
+      const radius = paintStroke.radius;
+      for (const cell of diskCellsAt(centerQ, centerR, radius)) {
+        const key = axialKey(cell.q, cell.r);
+        if (paintStroke.visited.has(key)) continue;
+        paintStroke.visited.add(key);
+        const current = paintStroke.updates.has(key)
+          ? paintStroke.updates.get(key)
+          : (field.cells[key] || 0);
+        const next = nextElevation(current, delta);
+        if (next == null) continue;
+        paintStroke.updates.set(key, next);
+        field.cells[key] = next;
+      }
+    };
+
+    const clearAirbrushTimer = () => {
+      if (paintStroke && paintStroke.timerId != null) {
+        clearInterval(paintStroke.timerId);
+        paintStroke.timerId = null;
+      }
+    };
+
+    // N-022: new pulse epoch — clear per-epoch dedupe and restamp current disk.
+    const beginAirbrushEpoch = () => {
+      if (!paintStroke || paintStroke.mode !== "airbrush") return;
+      paintStroke.visited = new Set();
+      const c = paintStroke.last;
+      stampDiskAt(c.q, c.r);
+      drawSpatial();
+      refreshDetailsAtBrush();
+    };
+
+    const beginPaintStroke = (q, r) => {
+      const mode = strokeMode;
+      const rate = airbrushRate;
+      const interval = mode === "airbrush" ? probe_pulse_interval_ms(rate) : 0;
+      paintStroke = {
+        mode,
+        rate,
+        delta: reliefMode(),
+        radius: brushRadius,
+        visited: new Set(),
+        updates: new Map(),
+        last: { q, r },
+        timerId: null,
+        onMap: true,
+      };
+      stampDiskAt(q, r);
+      hoverBrush = { q, r };
+      if (mode === "airbrush" && interval > 0) {
+        paintStroke.timerId = setInterval(() => {
+          if (!paintStroke || paintStroke.mode !== "airbrush") return;
+          if (!paintStroke.onMap) return;
+          beginAirbrushEpoch();
+        }, interval);
+      }
+      drawSpatial();
+      refreshDetailsAtBrush();
+    };
+
+    const extendPaintStroke = (q, r) => {
+      if (!paintStroke) return;
+      // N-021 / N-022: continuous hex path between pointer cells (not timed centers).
+      for (const p of hexLine(paintStroke.last, { q, r })) stampDiskAt(p.q, p.r);
+      paintStroke.last = { q, r };
+      paintStroke.onMap = true;
+      hoverBrush = { q, r };
+      drawSpatial();
+      refreshDetailsAtBrush();
+    };
+
+    const flushFieldBatches = async (cells) => {
+      let view = null;
+      for (let i = 0; i < cells.length; i += FIELD_FLUSH_BATCH_MAX) {
+        const chunk = cells.slice(i, i + FIELD_FLUSH_BATCH_MAX);
+        view = await api("/api/spatial/field", {
+          method: "PUT",
+          body: JSON.stringify({ cells: chunk }),
+        });
+      }
+      return view;
+    };
+
+    const endPaintStroke = async () => {
+      if (!paintStroke) return;
+      clearAirbrushTimer();
+      const stroke = paintStroke;
+      paintStroke = null;
+      const cells = [...stroke.updates.entries()].map(([key, value]) => {
+        const [q, r] = key.split(",").map(Number);
+        return { q, r, value };
+      });
+      if (cells.length === 0) {
+        spatialStatus.textContent = "Stroke hit no editable cells.";
+        return;
+      }
+      try {
+        const view = await flushFieldBatches(cells);
+        applySpatial(view);
+        const op = stroke.delta > 0 ? "Raise" : "Lower";
+        const modeLabel = stroke.mode === "airbrush" ? `Airbrush ${stroke.rate}/s` : "Stamp";
+        spatialStatus.textContent = `${op} ${modeLabel} r=${stroke.radius} · ${cells.length} cells`;
+      } catch (error) {
+        spatialStatus.textContent = error.message;
+        await loadSpatial().catch(() => {});
+      }
+    };
+
+    canvas.addEventListener("mousedown", (event) => {
+      if (!spatial || workspaceMode !== "editor" || event.button !== 0) return;
+      if (activeTool === "view") {
+        panDrag = {
+          x: event.clientX,
+          y: event.clientY,
+          cx: camera.cx,
+          cy: camera.cy,
+          moved: false,
+        };
+        canvas.style.cursor = "grabbing";
+        event.preventDefault();
+        return;
+      }
+      if (activeTool !== "relief") return;
+      const axial = pickAxial(event.clientX, event.clientY);
+      if (!axialOnMap(axial)) return;
+      event.preventDefault();
+      beginPaintStroke(axial.q, axial.r);
+    });
+    window.addEventListener("mousemove", (event) => {
+      if (paintStroke) {
+        const axial = pickAxial(event.clientX, event.clientY);
+        if (axialOnMap(axial)) {
+          extendPaintStroke(axial.q, axial.r);
+        } else {
+          paintStroke.onMap = false;
+        }
+        return;
+      }
+      if (!panDrag) return;
+      const dx = event.clientX - panDrag.x;
+      const dy = event.clientY - panDrag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 2) panDrag.moved = true;
+      camera.cx = panDrag.cx - dx / camera.zoom;
+      camera.cy = panDrag.cy - dy / camera.zoom;
+      drawSpatial();
+    });
+    window.addEventListener("mouseup", async () => {
+      if (paintStroke) {
+        await endPaintStroke();
+        return;
+      }
+      if (!panDrag) return;
+      panDrag = null;
+      canvas.style.cursor = "";
+      syncEditorChrome();
+    });
+    window.addEventListener("blur", async () => {
+      if (paintStroke) await endPaintStroke();
+    });
+
+    canvas.addEventListener("wheel", (event) => {
+      if (!spatial || workspaceMode !== "editor") return;
+      event.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const sx = event.clientX - rect.left;
+      const sy = event.clientY - rect.top;
+      const [wx, wy] = screenToWorld(sx, sy);
+      const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+      camera.zoom = Math.max(0.001, Math.min(2, camera.zoom * factor));
+      const [wx2, wy2] = screenToWorld(sx, sy);
+      camera.cx += wx - wx2;
+      camera.cy += wy - wy2;
+      drawSpatial();
+    }, { passive: false });
+
+    canvas.addEventListener("mousemove", (event) => {
+      if (!spatial || workspaceMode !== "editor" || paintStroke) return;
+      const axial = pickAxial(event.clientX, event.clientY);
+      const onMap = axialOnMap(axial);
+      if (!onMap) {
+        setHoverReadout(null, 0, { outside: true });
+        if (hoverBrush) {
+          hoverBrush = null;
+          drawSpatial();
+        }
+        return;
+      }
+      const key = `${axial.q},${axial.r}`;
+      const h = spatial.state.field.cells[key] || 0;
+      setHoverReadout(axial, h);
+      if (activeTool === "relief") {
+        if (!hoverBrush || hoverBrush.q !== axial.q || hoverBrush.r !== axial.r) {
+          hoverBrush = { q: axial.q, r: axial.r };
+          drawSpatial();
+        }
+      } else if (hoverBrush) {
+        hoverBrush = null;
+        drawSpatial();
+      }
+    });
+
+    canvas.addEventListener("mouseleave", () => {
+      if (paintStroke) return;
+      if (hoverBrush) {
+        hoverBrush = null;
+        drawSpatial();
+      }
+    });
+
+    if (brushRadiusEl) {
+      brushRadiusEl.addEventListener("input", () => setBrushRadius(Number(brushRadiusEl.value)));
+    }
+    if (brushRadiusNumEl) {
+      brushRadiusNumEl.addEventListener("change", () => setBrushRadius(Number(brushRadiusNumEl.value)));
+    }
+    if (strokeStampBtn) {
+      strokeStampBtn.addEventListener("click", () => setStrokeMode("stamp"));
+    }
+    if (strokeAirbrushBtn) {
+      strokeAirbrushBtn.addEventListener("click", () => setStrokeMode("airbrush"));
+    }
+    document.querySelector("#airbrush-rate-stack")?.addEventListener("click", (event) => {
+      const btn = event.target.closest("button[data-rate]");
+      if (!btn) return;
+      setAirbrushRate(Number(btn.dataset.rate));
+    });
+    window.addEventListener("keydown", (event) => {
+      if (workspaceMode !== "editor" || activeTool !== "relief") return;
+      const tag = (event.target && event.target.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (event.key === "[") {
+        event.preventDefault();
+        setBrushRadius(brushRadius - radiusStepSize(brushRadius));
+      } else if (event.key === "]") {
+        event.preventDefault();
+        const step = radiusStepSize(brushRadius);
+        setBrushRadius(brushRadius + (brushRadius === 0 ? 1 : step));
+      }
+    });
+    syncBrushRadiusUi();
+
+    document.querySelector("#reload-spatial").addEventListener("click", () => {
+      loadSpatial().catch((error) => { spatialStatus.textContent = error.message; });
+    });
+    document.querySelector("#map-layer-stack").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-layer]");
+      if (!button) return;
+      setMapLayer(button.dataset.layer);
+    });
+    document.querySelector("#view-hex-grid").addEventListener("click", (event) => {
+      const btn = event.currentTarget;
+      const on = !btn.classList.contains("active");
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      drawSpatial();
+    });
+    document.querySelector("#edit-ocean").addEventListener("click", (event) => {
+      const btn = event.currentTarget;
+      const on = !btn.classList.contains("active");
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    window.addEventListener("resize", () => {
+      if (spatial) fitCamera();
+      drawSpatial();
+    });
+
+    syncEditorChrome();
+    refresh().catch((error) => { empty.textContent = error.message; });
   </script>
 </body>
 </html>

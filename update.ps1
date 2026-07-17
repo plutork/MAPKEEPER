@@ -1,12 +1,12 @@
-# alpha-root-scripts-simplify (D-81): explicit update - dirty stop, pull, rebuild (no launch)
-# Daily path: .\run.ps1 (D-86 - pull when clean + launch)
+# Alpha explicit update: dirty stop, pull, rebuild (no launch)
+# Daily path: .\run.ps1 (pull when clean + launch)
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
 Set-Location $Root
 
 Write-Host "mapkeeper update (Windows)"
 Write-Host "repo: $Root"
-Write-Host "Build policy: warnings are errors (D-97, same as CI)."
+Write-Host "Build policy: warnings are errors (same as CI)."
 Write-Host ""
 
 $env:RUSTFLAGS = "-Dwarnings"

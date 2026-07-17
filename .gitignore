@@ -1,11 +1,11 @@
-# Cursor at repo root — ignore except tracked skills + alpha commands (D-18, D-80)
+# Cursor at repo root — ignore except tracked skills + alpha commands
 /.cursor/*
 !/.cursor/skills/
 !/.cursor/skills/**
 !/.cursor/commands/
 !/.cursor/commands/**
 
-# Rust (D-20)
+# Rust build output
 /target/
 **/target/
 
@@ -13,14 +13,15 @@
 crates/web/pkg/
 crates/web/dist/
 
-# Tauri desktop shell build output (roadmap 5.9, D-29) — installers are built
+# Tauri desktop shell build output — installers are built
 # artifacts, not source; `cargo tauri build` writes to target/, this is just
 # a convenience copy for local testing.
 /dist-installer/
 crates/desktop/gen/
 
-# e2e/dev tooling (tests/) — Node dev-only, not product runtime
+# Archived browser tooling may still be installed locally
 tests/node_modules/
+archive/map-v2/tests/node_modules/
 
 # Python bytecode (scripts/, CI helpers)
 **/__pycache__/

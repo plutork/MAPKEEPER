@@ -1,24 +1,11 @@
-//! mapkeeper desktop shell (roadmap 5.9, D-29) — Tauri wraps the exact same
-//! `mapkeeper-server` router and `mapkeeper-web` WASM build; the only thing
-//! that changes vs. the browser V0 flow is *how the window opens* (native
-//! window here, `http://localhost` instructions there).
-//!
-//! No sidecar process, no separate binary: the embedded server runs
-//! in-process on an OS-assigned ephemeral port (`port: 0`) so it never
-//! clashes with a dev server or another mapkeeper instance — an
-//! improvement over the fixed dev port, made possible by binding before
-//! creating the window (see `setup`).
+//! Native product shell over the shared local server and web UI.
 
 use std::path::PathBuf;
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
-/// Resolve the built web UI (wasm-bindgen output) to serve. Installed
-/// builds ship it as a bundled resource (`tauri.conf.json` `bundle.resources`);
-/// running from the workspace during development falls back to the crate's
-/// own build output so `cargo run -p mapkeeper-desktop` works without
-/// installing anything first (still requires `crates/web/build.ps1` once).
+/// Resolve the built web UI for installed and source-run launches.
 fn resolve_web_dist(app: &tauri::AppHandle) -> PathBuf {
     if let Ok(resource_path) = app
         .path()
@@ -55,9 +42,7 @@ pub fn run() {
                 web_dist,
             };
 
-            // Bind synchronously (fast — just opens a TCP listener) so the
-            // window can be created on the main thread below; only the
-            // long-running `axum::serve` loop is spawned to the background.
+            // Bind before creating the native window.
             let (listener, router) = tauri::async_runtime::block_on(mapkeeper_server::bind(config))
                 .expect("failed to bind embedded mapkeeper-server");
             let addr = listener
@@ -71,7 +56,6 @@ pub fn run() {
                 WebviewUrl::External(url.parse().expect("embedded server URL is always valid")),
             )
             .title("mapkeeper")
-            // desktop-maximized-default-launch: start in maximized mode.
             .maximized(true)
             .inner_size(1100.0, 720.0)
             .min_inner_size(720.0, 480.0)

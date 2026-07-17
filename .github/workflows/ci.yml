@@ -1,4 +1,4 @@
-# Schema/query CI (roadmap 1.2 V0-done criterion, D-12/D-22/D-23).
+# Active product-shell CI. archive/map-v2 is reference-only.
 name: CI
 
 on:
@@ -8,28 +8,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  schema-fixtures:
-    name: Schema fixtures (cell-profile.schema.json)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.x"
-      - run: pip install jsonschema
-      - run: python fixtures/validate_schema.py
-
   rust-tests:
-    name: cargo test (workspace, incl. CLI query path)
+    name: cargo test (active workspace)
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      # mapkeeper-desktop (Tauri, roadmap 5.9) is Windows-only for V0 (D-29)
-      # and needs system GTK/webkit2gtk dev libs this runner doesn't have —
-      # excluded here, covered instead by the windows-desktop-build job.
       - run: cargo test --workspace --exclude mapkeeper-desktop
 
   clippy-workspace:
@@ -40,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo clippy -p mapkeeper-core -p mapkeeper-server -p mapkeeper-cli -p mapkeeper-web -- -D warnings
+      - run: cargo clippy -p mapkeeper-core -p mapkeeper-server -p mapkeeper-web -- -D warnings
 
   codemap-drift:
     name: Codemap drift (CODEMAP.md + CODEMAP-LITE)
@@ -56,13 +42,13 @@ jobs:
         run: git diff --exit-code docs/CODEMAP.md
       - name: Check CODEMAP-LITE stale paths
         run: python scripts/check_codemap_drift.py
-      - name: Check OPS-INVARIANTS registry drift
-        run: python scripts/check_ops_invariants_drift.py
+      - name: Check map-v2 archive isolation
+        run: python scripts/check_archive_isolation.py
       - name: Check text encoding (mojibake + alpha ps1 ASCII)
         run: python scripts/check_text_encoding.py
 
   headless-smoke:
-    name: Headless API smoke (fixture world)
+    name: Headless product-shell smoke
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: -D warnings
@@ -77,7 +63,7 @@ jobs:
       - run: pwsh -File scripts/smoke-headless.ps1
 
   windows-desktop-build:
-    name: cargo build mapkeeper-desktop (Windows only, roadmap 5.9, D-29)
+    name: cargo build mapkeeper-desktop (Windows only)
     runs-on: windows-latest
     env:
       RUSTFLAGS: -D warnings

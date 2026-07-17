@@ -1,4 +1,4 @@
-# alpha-root-scripts-simplify (D-83): first-time workspace bootstrap - not system-wide install
+# Alpha first-time workspace bootstrap - not a system-wide install
 param(
     [Alias("y")][switch]$Yes,
     [switch]$NonInteractive,
@@ -48,7 +48,7 @@ if ($script:HeadlessSetup) {
 }
 Write-Host "repo: $Root"
 Write-Host "Not a system-wide app install. No git pull. Asks before heavy changes."
-Write-Host "Build policy: warnings are errors (D-97, same as CI)."
+Write-Host "Build policy: warnings are errors (same as CI)."
 Write-Host ""
 
 $env:RUSTFLAGS = "-Dwarnings"
