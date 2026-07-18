@@ -361,10 +361,7 @@ pub fn is_incomplete_create(world_path: &Path) -> bool {
 /// Remove directory only for [`CreateMarkerClass::SafeIncomplete`].
 /// Marker alone never authorizes `remove_dir_all`.
 pub fn cleanup_incomplete_create(world_path: &Path) -> Result<(), String> {
-    let registry = match load_projects() {
-        Ok(file) => file,
-        Err(_) => ProjectsFile::default(),
-    };
+    let registry = load_projects().unwrap_or_default();
     match classify_create_marker_at(world_path, &registry) {
         CreateMarkerClass::SafeIncomplete => {
             if world_path.exists() {
@@ -384,10 +381,7 @@ pub fn cleanup_incomplete_create(world_path: &Path) -> Result<(), String> {
 
 /// Best-effort fail cleanup: wipe only SafeIncomplete; never delete B/C/D.
 pub fn cleanup_after_failed_create(world_path: &Path) -> Result<(), String> {
-    let registry = match load_projects() {
-        Ok(file) => file,
-        Err(_) => ProjectsFile::default(),
-    };
+    let registry = load_projects().unwrap_or_default();
     match classify_create_marker_at(world_path, &registry) {
         CreateMarkerClass::SafeIncomplete => cleanup_incomplete_create(world_path),
         CreateMarkerClass::NoMarker => Ok(()),
