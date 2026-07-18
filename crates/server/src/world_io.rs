@@ -319,6 +319,7 @@ where
 }
 
 /// Full replace under the registry lock (prefer [`mutate_projects`] for RMW).
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn save_projects(file: &ProjectsFile) -> Result<()> {
     let _guard = PROJECTS_REGISTRY_LOCK
         .lock()
@@ -352,6 +353,7 @@ pub fn incomplete_marker_path(world_path: &Path) -> PathBuf {
     world_path.join(CREATE_INCOMPLETE_MARKER)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn is_incomplete_create(world_path: &Path) -> bool {
     incomplete_marker_path(world_path).is_file()
 }
@@ -492,6 +494,7 @@ pub fn clear_delete_inflight(key: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn load_delete_inflight(key: &str) -> Option<DeleteInflight> {
     let path = delete_inflight_file(key);
     let raw = fs::read_to_string(path).ok()?;
