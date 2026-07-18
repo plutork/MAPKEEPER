@@ -76,6 +76,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "check.ps1 [7/9] render-scale bench structural (N-026)..."
+python (Join-Path $Root "scripts\test_render_scale_bench.py")
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Fix: scripts/test_render_scale_bench.py (schema / changed_cells)"
+    exit $LASTEXITCODE
+}
 python (Join-Path $Root "scripts\check_render_scale_bench.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""

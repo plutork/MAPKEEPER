@@ -14,9 +14,9 @@ Active product-shell routing:
 | Projects create/open/close/delete | `crates/server/src/projects.rs` |
 | Create map-preset cards API | `crates/server/src/presets.rs` |
 | Spatial persist + stroke + bak restore (N-025) | `crates/server/src/spatial.rs` |
-| Atomic file replace + bak | `crates/server/src/atomic_io.rs` |
+| Atomic replace + bak + interrupted-write classify (N-025) | `crates/server/src/atomic_io.rs` |
 | Per-world locks + stroke staging | `crates/server/src/state.rs` |
-| Projects registry / trash / Create marker | `crates/server/src/world_io.rs` |
+| World path identity + registry lock + Delete inflight / Create-marker (N-025) | `crates/server/src/world_io.rs` |
 | Thin shell document (N-027) | `crates/web/index.html` + `styles.css` + `main.js` |
 | Workspace state owner (sole) | `crates/web/workspace-state.js` |
 | CRS renderer / camera / relief / stroke client | `crates/web/renderer.js` · `camera.js` · `relief-tool.js` · `spatial-transaction.js` |
@@ -28,7 +28,7 @@ Active product-shell routing:
 | Archive isolation guard | `scripts/check_archive_isolation.py` |
 | Doc drift (spatial vs identity-only) | `scripts/check_doc_drift.py` |
 | Headless spatial smoke | `scripts/smoke-headless.ps1` |
-| Relief render scale bench (N-026) | `scripts/bench-render-scale.mjs` + `docs/perf/relief-render-scale-report.json` |
+| Relief render scale bench (N-026) | `scripts/bench-render-scale.mjs` + lib + `docs/perf/relief-render-scale-report.json` + `OWNER-TAURI-RELEASE-GATE.md` |
 | CRS renderer (cull/cache/rAF) | `crates/web/renderer.js` + `probe_grid_centers` in `crates/web/src/lib.rs` |
 
 Immutable spatial config: `[spatial]` in `mapkeeper.toml` (meters, extent,

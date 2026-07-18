@@ -89,32 +89,42 @@ pub(crate) fn routes() -> Router<Arc<ServerState>> {
         .route("/api/spatial/stroke/abort", post(stroke_abort))
 }
 
-/// Load/init spatial state. Corrupt on-disk state is never silently replaced with defaults.
+fn spatial_bak_available(path: &Path) -> bool {
+    atomic_io::bak_passes(path, |bytes| {
+        let Ok(raw) = std::str::from_utf8(bytes) else {
+            return false;
+        };
+        SpatialState::assert_no_screen_keys(raw).is_ok() && SpatialState::from_json(raw).is_ok()
+    })
+}
+
+/// Load/init spatial state. Corrupt / interrupted on-disk state is never silently replaced with defaults.
 pub fn ensure_spatial_state(world_path: &Path) -> anyhow::Result<SpatialState> {
     let config = ensure_spatial_config(world_path)?;
     let path = spatial_path(world_path);
-    let (mut state, legacy_schema) = if path.is_file() {
-        let raw = std::fs::read_to_string(&path)?;
-        SpatialState::assert_no_screen_keys(&raw).map_err(anyhow::Error::msg)?;
-        let legacy = raw.contains("cell_size") || raw.contains("unit_scale");
-        match SpatialState::from_json(&raw) {
-            Ok(state) => (state, legacy),
-            Err(error) => {
-                let bak = atomic_io::bak_path(&path);
-                let bak_available = bak.is_file()
-                    && std::fs::read_to_string(&bak)
-                        .ok()
-                        .and_then(|b| SpatialState::from_json(&b).ok())
-                        .is_some();
-                anyhow::bail!(
-                    "corrupt_spatial: {} (bak_available={})",
-                    error,
-                    bak_available
-                );
+    let (mut state, legacy_schema) = match atomic_io::classify_durable_open(&path) {
+        atomic_io::DurableOpenKind::PrimaryPresent => {
+            let raw = std::fs::read_to_string(&path)?;
+            SpatialState::assert_no_screen_keys(&raw).map_err(anyhow::Error::msg)?;
+            let legacy = raw.contains("cell_size") || raw.contains("unit_scale");
+            match SpatialState::from_json(&raw) {
+                Ok(state) => (state, legacy),
+                Err(error) => {
+                    anyhow::bail!(
+                        "corrupt_spatial: {} (bak_available={})",
+                        error,
+                        spatial_bak_available(&path)
+                    );
+                }
             }
         }
-    } else {
-        (default_spatial_state(), false)
+        atomic_io::DurableOpenKind::InterruptedWrite => {
+            anyhow::bail!(
+                "corrupt_spatial: interrupted_write (bak_available={})",
+                spatial_bak_available(&path)
+            );
+        }
+        atomic_io::DurableOpenKind::AbsentClean => (default_spatial_state(), false),
     };
 
     let before = state.clone();
@@ -166,8 +176,38 @@ pub fn restore_spatial_from_bak(world_path: &Path) -> anyhow::Result<SpatialStat
 
 fn ensure_spatial_config(world_path: &Path) -> anyhow::Result<SpatialConfig> {
     let manifest_path = world_path.join("mapkeeper.toml");
+    match atomic_io::classify_durable_open(&manifest_path) {
+        atomic_io::DurableOpenKind::InterruptedWrite => {
+            let bak_available = atomic_io::bak_passes(&manifest_path, |bytes| {
+                std::str::from_utf8(bytes)
+                    .ok()
+                    .and_then(|raw| world::parse_manifest(raw).ok())
+                    .is_some()
+            });
+            anyhow::bail!("corrupt_manifest: interrupted_write (bak_available={bak_available})");
+        }
+        atomic_io::DurableOpenKind::AbsentClean => {
+            anyhow::bail!(
+                "corrupt_manifest: missing mapkeeper.toml at {}",
+                manifest_path.display()
+            );
+        }
+        atomic_io::DurableOpenKind::PrimaryPresent => {}
+    }
+
     let raw = std::fs::read_to_string(&manifest_path)?;
-    let mut manifest = world::parse_manifest(&raw)?;
+    let mut manifest = match world::parse_manifest(&raw) {
+        Ok(m) => m,
+        Err(error) => {
+            let bak_available = atomic_io::bak_passes(&manifest_path, |bytes| {
+                std::str::from_utf8(bytes)
+                    .ok()
+                    .and_then(|b| world::parse_manifest(b).ok())
+                    .is_some()
+            });
+            anyhow::bail!("corrupt_manifest: {error} (bak_available={bak_available})");
+        }
+    };
     if let Some(spatial) = manifest.spatial.clone() {
         spatial
             .assert_matches_catalog()
@@ -209,7 +249,9 @@ fn load_state(path: &Path) -> Result<SpatialState, (StatusCode, String)> {
         Ok(state) => Ok(state),
         Err(error) => {
             let message = error.to_string();
-            let status = if message.contains("corrupt_spatial") {
+            let status = if message.contains("corrupt_spatial")
+                || message.contains("corrupt_manifest")
+            {
                 StatusCode::UNPROCESSABLE_ENTITY
             } else {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -872,6 +914,104 @@ mod tests {
     }
 
     #[test]
+    fn restart_missing_primary_valid_bak_is_recovery_not_default() {
+        let dir = seed_world();
+        let path = dir.path().join("spatial/state.json");
+        let good = ensure_spatial_state(dir.path()).unwrap();
+        write_spatial_state(dir.path(), &good).unwrap();
+        let bak = crate::atomic_io::bak_path(&path);
+        let bak_bytes = std::fs::read(&bak).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        // Simulated restart: open with missing primary + valid bak.
+        let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("interrupted_write"));
+        assert!(err.contains("bak_available=true"));
+        assert!(!path.is_file());
+        assert_eq!(std::fs::read(&bak).unwrap(), bak_bytes);
+        // Explicit restore recovers author state; never silent default.
+        let restored = restore_spatial_from_bak(dir.path()).unwrap();
+        assert!(restored.revision >= 1);
+        assert!(path.is_file());
+    }
+
+    #[test]
+    fn restart_missing_primary_invalid_bak_never_defaults() {
+        let dir = seed_world();
+        let path = dir.path().join("spatial/state.json");
+        let bak = crate::atomic_io::bak_path(&path);
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&bak, "{bad-bak").unwrap();
+        let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("interrupted_write"));
+        assert!(err.contains("bak_available=false"));
+        assert!(!path.is_file());
+        assert_eq!(std::fs::read(&bak).unwrap(), b"{bad-bak");
+    }
+
+    #[test]
+    fn invalid_primary_valid_bak_never_defaults() {
+        let dir = seed_world();
+        let path = dir.path().join("spatial/state.json");
+        let good = ensure_spatial_state(dir.path()).unwrap();
+        write_spatial_state(dir.path(), &good).unwrap();
+        let bak_bytes = std::fs::read(crate::atomic_io::bak_path(&path)).unwrap();
+        std::fs::write(&path, "{truncated").unwrap();
+        let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("corrupt_spatial"));
+        assert!(err.contains("bak_available=true"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"{truncated");
+        assert_eq!(
+            std::fs::read(crate::atomic_io::bak_path(&path)).unwrap(),
+            bak_bytes
+        );
+    }
+
+    #[test]
+    fn failpoint_crash_after_bak_survives_restart_as_recovery() {
+        crate::atomic_io::clear_failpoint();
+        let dir = seed_world();
+        let path = dir.path().join("spatial/state.json");
+        let good = ensure_spatial_state(dir.path()).unwrap();
+        let good_json = good.to_json_pretty().unwrap();
+        write_spatial_state(dir.path(), &good).unwrap();
+        // Force a second replace so bak holds last-good author bytes.
+        let mut next = good.clone();
+        next.revision = good.revision + 1;
+        crate::atomic_io::set_failpoint(crate::atomic_io::AtomicFailAt::AfterPrimaryToBak);
+        assert!(write_spatial_state(dir.path(), &next).is_err());
+        assert!(!path.is_file());
+        let bak = crate::atomic_io::bak_path(&path);
+        assert!(SpatialState::from_json(&std::fs::read_to_string(&bak).unwrap()).is_ok());
+        assert!(!crate::atomic_io::leftover_temp_paths(&path).is_empty());
+        // Simulated process restart.
+        let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("interrupted_write"));
+        assert!(err.contains("bak_available=true"));
+        assert!(!path.is_file());
+        let restored = restore_spatial_from_bak(dir.path()).unwrap();
+        assert!(restored.revision >= 1);
+        let _ = good_json;
+    }
+
+    #[test]
+    fn failpoint_final_rename_restores_primary_before_error() {
+        crate::atomic_io::clear_failpoint();
+        let dir = seed_world();
+        let path = dir.path().join("spatial/state.json");
+        let good = ensure_spatial_state(dir.path()).unwrap();
+        write_spatial_state(dir.path(), &good).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let mut next = good.clone();
+        next.revision = good.revision + 1;
+        crate::atomic_io::set_failpoint(crate::atomic_io::AtomicFailAt::FinalRename);
+        assert!(write_spatial_state(dir.path(), &next).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        // Restart sees healthy primary (restored), not defaults.
+        let loaded = ensure_spatial_state(dir.path()).unwrap();
+        assert_eq!(loaded.revision, good.revision);
+    }
+
+    #[test]
     fn restore_bak_quarantines_corrupt_and_recovers() {
         let dir = seed_world();
         let path = dir.path().join("spatial/state.json");
@@ -904,6 +1044,22 @@ mod tests {
         let err = restore_spatial_from_bak(dir.path()).unwrap_err().to_string();
         assert!(err.contains("corrupt_spatial"));
         assert!(err.contains("invalid bak") || err.contains("no bak"));
+    }
+
+    #[test]
+    fn missing_manifest_with_bak_is_recovery_not_rewrite() {
+        let dir = seed_world();
+        let manifest = dir.path().join("mapkeeper.toml");
+        let bak = crate::atomic_io::bak_path(&manifest);
+        std::fs::copy(&manifest, &bak).unwrap();
+        let bak_bytes = std::fs::read(&bak).unwrap();
+        std::fs::remove_file(&manifest).unwrap();
+        let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("corrupt_manifest"));
+        assert!(err.contains("interrupted_write"));
+        assert!(err.contains("bak_available=true"));
+        assert!(!manifest.is_file());
+        assert_eq!(std::fs::read(&bak).unwrap(), bak_bytes);
     }
 
     #[test]

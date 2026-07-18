@@ -1,11 +1,124 @@
 {
-  "schema": "mapkeeper.relief-render-scale.v1",
-  "generated_at": "2026-07-17T22:48:54.077Z",
+  "schema": "mapkeeper.relief-render-scale.v2",
+  "generated_at": "2026-07-18T00:55:26.596Z",
+  "git_sha": "3cab260eb34dce41e9e9ef8553af3b5920455cad",
+  "build_mode": "debug-server + web dist",
+  "platform": "win32-x64",
+  "harness_revision": "90dbe7e482034b62",
   "phase": "after_crs",
   "surface": "playwright-chromium-headless",
-  "build": "debug-server + web dist",
-  "note_facts": "Frame times from flushDrawSpatial (paint). Commit = HTTP stroke only. before_crs_matrix captured on same harness surface prior to incremental/dirty+zoom-scale fixes in this /real. Headless Chromium != Tauri release gate machine (N-026).",
-  "note_assumptions": "Gate Supported SoT remains owner Windows Tauri release; this report is reproducible CI/maintainer evidence.",
+  "evidence_class": "reproducible_headless",
+  "supported_sot": "owner_windows_tauri_release",
+  "headless_verdict": {
+    "label": "provisionally_supported_on_headless_benchmark_surface; release_gate_pending",
+    "release_gate": "pending",
+    "all_sizes_gating_pass": true
+  },
+  "release_gate": {
+    "status": "pending",
+    "instruction_path": "docs/perf/OWNER-TAURI-RELEASE-GATE.md",
+    "owner_run_at": null,
+    "note": "Not claimed in this harness run. Owner Windows Tauri release remains product SoT."
+  },
+  "memory": {
+    "signal": "chromium_js_heap_used_bytes",
+    "reliability": "proxy_not_process_rss",
+    "note": "CDP JS heap is a reproducible proxy on headless Chromium. Mandatory owner Tauri release observation: process Working Set after open at each size.",
+    "by_size": {
+      "approx_2k": {
+        "signal": "chromium_js_heap_used_bytes",
+        "reliability": "proxy_not_process_rss",
+        "note": "Headless Chromium JS heap via CDP Performance.getMetrics. Not OS process RSS. Owner Tauri release must record Working Set / private bytes separately.",
+        "js_heap_used_bytes": 1961244,
+        "js_heap_total_bytes": 7917568,
+        "node_rss_bytes": 128946176,
+        "node_heap_used_bytes": 63535600
+      },
+      "approx_10k": {
+        "signal": "chromium_js_heap_used_bytes",
+        "reliability": "proxy_not_process_rss",
+        "note": "Headless Chromium JS heap via CDP Performance.getMetrics. Not OS process RSS. Owner Tauri release must record Working Set / private bytes separately.",
+        "js_heap_used_bytes": 4148944,
+        "js_heap_total_bytes": 8966144,
+        "node_rss_bytes": 132792320,
+        "node_heap_used_bytes": 61073688
+      },
+      "approx_25k": {
+        "signal": "chromium_js_heap_used_bytes",
+        "reliability": "proxy_not_process_rss",
+        "note": "Headless Chromium JS heap via CDP Performance.getMetrics. Not OS process RSS. Owner Tauri release must record Working Set / private bytes separately.",
+        "js_heap_used_bytes": 3230656,
+        "js_heap_total_bytes": 13946880,
+        "node_rss_bytes": 111497216,
+        "node_heap_used_bytes": 55208872
+      },
+      "approx_50k": {
+        "signal": "chromium_js_heap_used_bytes",
+        "reliability": "proxy_not_process_rss",
+        "note": "Headless Chromium JS heap via CDP Performance.getMetrics. Not OS process RSS. Owner Tauri release must record Working Set / private bytes separately.",
+        "js_heap_used_bytes": 1665320,
+        "js_heap_total_bytes": 14471168,
+        "node_rss_bytes": 113037312,
+        "node_heap_used_bytes": 58010552
+      }
+    },
+    "owner_tauri_observation_required": true
+  },
+  "operations": {
+    "gating": [
+      "open_fit",
+      "pan",
+      "zoom",
+      "stamp_drag",
+      "airbrush_5",
+      "commit_medium"
+    ],
+    "non_gating_measured": {
+      "view_empty": {
+        "role": "View Empty full-layer rebuild",
+        "budget": null,
+        "note": "Measured; not part of Supported gate (full invalidate path)."
+      },
+      "relief": {
+        "role": "Relief display full-layer rebuild",
+        "budget": null,
+        "note": "Measured; not part of Supported gate (full invalidate path)."
+      },
+      "hover": {
+        "role": "hover overlay",
+        "budget": null,
+        "note": "Measured; degraded OK per N-026."
+      },
+      "radius_preview": {
+        "role": "brush radius preview",
+        "budget": null,
+        "note": "Measured; non-gating."
+      },
+      "commit_small": {
+        "role": "1-cell oneshot commit",
+        "budget": null,
+        "note": "Measured for scale; Supported gates on commit_medium."
+      },
+      "commit_large": {
+        "role": "many-cell begin/chunk/commit",
+        "budget": null,
+        "note": "Measured separately; must use real multi-cell payload."
+      },
+      "airbrush_20": {
+        "role": "Airbrush 20 soft-fail OK",
+        "budget": null,
+        "note": "May soft-fail at 25k/50k if Airbrush 5 holds (N-026)."
+      }
+    }
+  },
+  "field_flush_batch_max": 512,
+  "stroke_sizes": {
+    "small": 1,
+    "medium": 64,
+    "large": 1200
+  },
+  "note_facts": "Frame times from flushDrawSpatial (paint). Commit uses truthful changed_cells (small/medium/large); large uses begin/chunk/commit when >512. commit_latency_ms.cells=map-size was a bug — removed. Headless Chromium is reproducible evidence, not final Supported SoT.",
+  "note_assumptions": "Supported SoT = owner Windows Tauri release. Until that run: «provisionally supported on headless benchmark surface; release gate pending». View Empty / Relief full rebuilds are non-gating measured ops.",
   "crs_signals": {
     "viewportCull": true,
     "offscreenCache": true,
@@ -19,39 +132,39 @@
       "preset_id": "wide_2000",
       "catalog_cells": 1980,
       "measured_cells": 1980,
-      "open_nav_ms": 728.1097000000001,
-      "reload_after_stroke_ms": 537.3917999999999,
+      "open_nav_ms": 700.7906,
+      "reload_after_stroke_ms": 531.1547999999998,
       "render": {
         "cells": 1980,
         "revision": 1,
         "open_fit": {
-          "p50": 10.900000005960464,
-          "p95": 11.100000023841858,
+          "p50": 10.400000005960464,
+          "p95": 11.400000005960464,
           "n": 8
         },
         "pan": {
           "p50": 0.09999999403953552,
-          "p95": 0.30000001192092896,
+          "p95": 0.19999998807907104,
           "n": 12
         },
         "zoom": {
           "p50": 0.09999999403953552,
-          "p95": 0.29999998211860657,
+          "p95": 0.20000001788139343,
           "n": 8
         },
         "hover": {
           "p50": 0.09999999403953552,
-          "p95": 0.20000001788139343,
+          "p95": 0.19999998807907104,
           "n": 12
         },
         "view_empty": {
-          "p50": 10.800000011920929,
-          "p95": 11.700000017881393,
+          "p50": 10.399999976158142,
+          "p95": 10.599999994039536,
           "n": 6
         },
         "relief": {
-          "p50": 11.099999994039536,
-          "p95": 12.299999982118607,
+          "p50": 10.599999994039536,
+          "p95": 11.800000011920929,
           "n": 6
         },
         "radius_preview": {
@@ -61,28 +174,28 @@
         },
         "stamp_drag": {
           "p50": 0.699999988079071,
-          "p95": 1.0999999940395355,
+          "p95": 1.4000000059604645,
           "n": 8
         },
         "airbrush": {
           "1": {
-            "p50": 0.699999988079071,
-            "p95": 1.0999999940395355,
+            "p50": 0.7000000178813934,
+            "p95": 1,
             "n": 3
           },
           "5": {
-            "p50": 0.5999999940395355,
-            "p95": 0.5999999940395355,
+            "p50": 0.5,
+            "p95": 0.5,
             "n": 3
           },
           "10": {
             "p50": 0.5,
-            "p95": 0.5999999940395355,
+            "p95": 0.5,
             "n": 5
           },
           "20": {
             "p50": 0.5,
-            "p95": 0.6000000238418579,
+            "p95": 0.7000000178813934,
             "n": 8
           }
         },
@@ -95,11 +208,49 @@
           "dirtyRect": true
         }
       },
-      "commit_latency_ms": {
-        "p50": 3.4900000000002365,
-        "p95": 5.728899999999612,
-        "n": 5,
-        "cells": 1980
+      "commit_strokes": {
+        "small": {
+          "changed_cells": 1,
+          "transport": "oneshot",
+          "chunks": 1,
+          "p50": 3.3791000000001077,
+          "p95": 7.708599999999933,
+          "n": 5,
+          "phases_p95": {
+            "serialize_ms": 0.03279999999995198,
+            "upload_ms": 7.071699999999964,
+            "server_commit_ms": 7.071699999999964
+          },
+          "note": "upload_ms ≈ full HTTP round-trip (upload+server not split)"
+        },
+        "medium": {
+          "changed_cells": 64,
+          "transport": "oneshot",
+          "chunks": 1,
+          "p50": 3.752600000000257,
+          "p95": 4.163199999999961,
+          "n": 5,
+          "phases_p95": {
+            "serialize_ms": 0.014400000000023283,
+            "upload_ms": 4.0253999999999905,
+            "server_commit_ms": 4.0253999999999905
+          },
+          "note": "upload_ms ≈ full HTTP round-trip (upload+server not split)"
+        },
+        "large": {
+          "changed_cells": 1200,
+          "transport": "begin_chunk_commit",
+          "chunks": 3,
+          "p50": 32.569600000000264,
+          "p95": 32.64169999999967,
+          "n": 3,
+          "phases_p95": {
+            "serialize_ms": 0.13180000000011205,
+            "upload_ms": 22.35640000000012,
+            "server_commit_ms": 9.791200000000117
+          },
+          "note": "chunked path: upload_ms includes begin+chunks; server_commit_ms is final commit HTTP"
+        }
       },
       "verdict": {
         "budgets": {
@@ -115,9 +266,18 @@
           "zoom": true,
           "stamp_drag": true,
           "airbrush_5": true,
-          "commit": true
+          "commit_medium": true
         },
-        "supported": true
+        "supported": true,
+        "headless_provisionally_supported": true,
+        "non_gating": {
+          "view_empty_p95": 10.599999994039536,
+          "relief_p95": 11.800000011920929,
+          "commit_small_p95": 7.708599999999933,
+          "commit_large_p95": 32.64169999999967,
+          "commit_large_changed_cells": 1200,
+          "commit_large_transport": "begin_chunk_commit"
+        }
       }
     },
     {
@@ -125,24 +285,24 @@
       "preset_id": "wide_12000",
       "catalog_cells": 11968,
       "measured_cells": 11968,
-      "open_nav_ms": 672.0445,
-      "reload_after_stroke_ms": 532.9200999999994,
+      "open_nav_ms": 663.4347000000002,
+      "reload_after_stroke_ms": 553.5501999999997,
       "render": {
         "cells": 11968,
         "revision": 1,
         "open_fit": {
-          "p50": 48.5,
-          "p95": 49.900000005960464,
+          "p50": 48.30000001192093,
+          "p95": 48.900000005960464,
           "n": 8
         },
         "pan": {
           "p50": 0.09999999403953552,
-          "p95": 0.09999999403953552,
+          "p95": 0.20000001788139343,
           "n": 12
         },
         "zoom": {
           "p50": 0.09999999403953552,
-          "p95": 0.19999998807907104,
+          "p95": 0.20000001788139343,
           "n": 8
         },
         "hover": {
@@ -151,44 +311,44 @@
           "n": 12
         },
         "view_empty": {
-          "p50": 49.69999998807907,
-          "p95": 50.39999997615814,
+          "p50": 49.20000001788139,
+          "p95": 67.90000000596046,
           "n": 6
         },
         "relief": {
-          "p50": 52.599999994039536,
-          "p95": 53.79999998211861,
+          "p50": 55.5,
+          "p95": 59.89999997615814,
           "n": 6
         },
         "radius_preview": {
           "p50": 0.4000000059604645,
-          "p95": 0.5999999940395355,
+          "p95": 0.699999988079071,
           "n": 8
         },
         "stamp_drag": {
           "p50": 0.699999988079071,
-          "p95": 0.800000011920929,
+          "p95": 1.100000023841858,
           "n": 8
         },
         "airbrush": {
           "1": {
-            "p50": 0.5,
-            "p95": 0.5999999940395355,
+            "p50": 0.699999988079071,
+            "p95": 1,
             "n": 3
           },
           "5": {
             "p50": 0.5,
-            "p95": 0.5999999940395355,
+            "p95": 0.699999988079071,
             "n": 3
           },
           "10": {
-            "p50": 0.5,
-            "p95": 0.5999999940395355,
+            "p50": 0.6000000238418579,
+            "p95": 0.699999988079071,
             "n": 5
           },
           "20": {
             "p50": 0.5,
-            "p95": 13.400000005960464,
+            "p95": 19.099999994039536,
             "n": 8
           }
         },
@@ -201,11 +361,49 @@
           "dirtyRect": true
         }
       },
-      "commit_latency_ms": {
-        "p50": 2.9347999999999956,
-        "p95": 4.042499999999563,
-        "n": 5,
-        "cells": 11968
+      "commit_strokes": {
+        "small": {
+          "changed_cells": 1,
+          "transport": "oneshot",
+          "chunks": 1,
+          "p50": 3.207399999999325,
+          "p95": 3.964799999999741,
+          "n": 5,
+          "phases_p95": {
+            "serialize_ms": 0.007599999999911233,
+            "upload_ms": 3.869999999999891,
+            "server_commit_ms": 3.869999999999891
+          },
+          "note": "upload_ms ≈ full HTTP round-trip (upload+server not split)"
+        },
+        "medium": {
+          "changed_cells": 64,
+          "transport": "oneshot",
+          "chunks": 1,
+          "p50": 5.535300000000461,
+          "p95": 7.341700000000856,
+          "n": 5,
+          "phases_p95": {
+            "serialize_ms": 0.018799999999828287,
+            "upload_ms": 7.014699999999721,
+            "server_commit_ms": 7.014699999999721
+          },
+          "note": "upload_ms ≈ full HTTP round-trip (upload+server not split)"
+        },
+        "large": {
+          "changed_cells": 1200,
+          "transport": "begin_chunk_commit",
+          "chunks": 3,
+          "p50": 54.43069999999989,
+          "p95": 60.38810000000012,
+          "n": 3,
+          "phases_p95": {
+            "serialize_ms": 0.15130000000044674,
+            "upload_ms": 39.365499999999884,
+            "server_commit_ms": 19.860099999999875
+          },
+          "note": "chunked path: upload_ms includes begin+chunks; server_commit_ms is final commit HTTP"
+        }
       },
       "verdict": {
         "budgets": {
@@ -221,9 +419,18 @@
           "zoom": true,
           "stamp_drag": true,
           "airbrush_5": true,
-          "commit": true
+          "commit_medium": true
         },
-        "supported": true
+        "supported": true,
+        "headless_provisionally_supported": true,
+        "non_gating": {
+          "view_empty_p95": 67.90000000596046,
+          "relief_p95": 59.89999997615814,
+          "commit_small_p95": 3.964799999999741,
+          "commit_large_p95": 60.38810000000012,
+          "commit_large_changed_cells": 1200,
+          "commit_large_transport": "begin_chunk_commit"
+        }
       }
     },
     {
@@ -231,19 +438,19 @@
       "preset_id": "wide_26000",
       "catalog_cells": 26000,
       "measured_cells": 26000,
-      "open_nav_ms": 676.1786000000002,
-      "reload_after_stroke_ms": 538.6869000000006,
+      "open_nav_ms": 690.0289999999995,
+      "reload_after_stroke_ms": 559.5360000000001,
       "render": {
         "cells": 26000,
         "revision": 1,
         "open_fit": {
-          "p50": 101.09999999403954,
-          "p95": 113.40000000596046,
+          "p50": 100.59999999403954,
+          "p95": 104.69999998807907,
           "n": 8
         },
         "pan": {
           "p50": 0.09999999403953552,
-          "p95": 0.20000001788139343,
+          "p95": 0.19999998807907104,
           "n": 12
         },
         "zoom": {
@@ -253,48 +460,48 @@
         },
         "hover": {
           "p50": 0.09999999403953552,
-          "p95": 0.30000001192092896,
+          "p95": 0.20000001788139343,
           "n": 12
         },
         "view_empty": {
-          "p50": 99.40000000596046,
-          "p95": 103.2999999821186,
+          "p50": 101.7999999821186,
+          "p95": 107.7000000178814,
           "n": 6
         },
         "relief": {
-          "p50": 104.90000000596046,
-          "p95": 106.19999998807907,
+          "p50": 108.30000001192093,
+          "p95": 111.09999999403954,
           "n": 6
         },
         "radius_preview": {
-          "p50": 0.29999998211860657,
-          "p95": 0.5,
+          "p50": 0.4000000059604645,
+          "p95": 0.800000011920929,
           "n": 8
         },
         "stamp_drag": {
-          "p50": 0.800000011920929,
-          "p95": 0.800000011920929,
+          "p50": 0.7999999821186066,
+          "p95": 1.4000000059604645,
           "n": 8
         },
         "airbrush": {
           "1": {
-            "p50": 0.5999999940395355,
-            "p95": 0.699999988079071,
+            "p50": 0.699999988079071,
+            "p95": 1,
             "n": 3
           },
           "5": {
-            "p50": 0.5,
-            "p95": 0.5999999940395355,
+            "p50": 0.5999999940395355,
+            "p95": 0.699999988079071,
             "n": 3
           },
           "10": {
-            "p50": 0.5999999940395355,
-            "p95": 0.699999988079071,
+            "p50": 0.5,
+            "p95": 0.5,
             "n": 5
           },
           "20": {
-            "p50": 0.5,
-            "p95": 0.7999999821186066,
+            "p50": 0.4000000059604645,
+            "p95": 0.5,
             "n": 8
           }
         },
@@ -307,11 +514,49 @@
           "dirtyRect": true
         }
       },
-      "commit_latency_ms": {
-        "p50": 2.705900000000838,
-        "p95": 5.6568999999999505,
-        "n": 5,
-        "cells": 26000
+      "commit_strokes": {
+        "small": {
+          "changed_cells": 1,
+          "transport": "oneshot",
+          "chunks": 1,
+          "p50": 3.0099000000009255,
+          "p95": 4.106600000000981,
+          "n": 5,
+          "phases_p95": {
+            "serialize_ms": 0.006600000000617001,
+            "upload_ms": 4.025400000000445,
+            "server_commit_ms": 4.025400000000445
+          },
+          "note": "upload_ms ≈ full HTTP round-trip (upload+server not split)"
+        },
+        "medium": {
+          "changed_cells": 64,
+          "transport": "oneshot",
+          "chunks": 1,
+          "p50": 4.6304999999993015,
+          "p95": 5.20810000000165,
+          "n": 5,
+          "phases_p95": {
+            "serialize_ms": 0.011099999999714782,
+            "upload_ms": 4.996900000000096,
+            "server_commit_ms": 4.996900000000096
+          },
+          "note": "upload_ms ≈ full HTTP round-trip (upload+server not split)"
+        },
+        "large": {
+          "changed_cells": 1200,
+          "transport": "begin_chunk_commit",
+          "chunks": 3,
+          "p50": 39.416300000000774,
+          "p95": 60.8804999999993,
+          "n": 3,
+          "phases_p95": {
+            "serialize_ms": 0.11359999999876891,
+            "upload_ms": 40.2421000000013,
+            "server_commit_ms": 19.39929999999913
+          },
+          "note": "chunked path: upload_ms includes begin+chunks; server_commit_ms is final commit HTTP"
+        }
       },
       "verdict": {
         "budgets": {
@@ -327,9 +572,18 @@
           "zoom": true,
           "stamp_drag": true,
           "airbrush_5": true,
-          "commit": true
+          "commit_medium": true
         },
-        "supported": true
+        "supported": true,
+        "headless_provisionally_supported": true,
+        "non_gating": {
+          "view_empty_p95": 107.7000000178814,
+          "relief_p95": 111.09999999403954,
+          "commit_small_p95": 4.106600000000981,
+          "commit_large_p95": 60.8804999999993,
+          "commit_large_changed_cells": 1200,
+          "commit_large_transport": "begin_chunk_commit"
+        }
       }
     },
     {
@@ -337,70 +591,70 @@
       "preset_id": "wide_50000",
       "catalog_cells": 49860,
       "measured_cells": 49860,
-      "open_nav_ms": 760.9045000000006,
-      "reload_after_stroke_ms": 537.8111000000026,
+      "open_nav_ms": 845.7227999999996,
+      "reload_after_stroke_ms": 546.3071999999993,
       "render": {
         "cells": 49860,
         "revision": 1,
         "open_fit": {
-          "p50": 183.60000002384186,
-          "p95": 184.5,
+          "p50": 188,
+          "p95": 204.2000000178814,
           "n": 8
         },
         "pan": {
-          "p50": 0.09999999403953552,
+          "p50": 0.10000002384185791,
           "p95": 0.19999998807907104,
           "n": 12
         },
         "zoom": {
-          "p50": 0.09999999403953552,
-          "p95": 0.29999998211860657,
+          "p50": 0.19999998807907104,
+          "p95": 0.30000001192092896,
           "n": 8
         },
         "hover": {
           "p50": 0.09999999403953552,
-          "p95": 0.19999998807907104,
+          "p95": 0.30000001192092896,
           "n": 12
         },
         "view_empty": {
-          "p50": 181.90000000596046,
-          "p95": 184.30000001192093,
+          "p50": 187.7999999821186,
+          "p95": 207.69999998807907,
           "n": 6
         },
         "relief": {
-          "p50": 192.40000000596046,
-          "p95": 198,
+          "p50": 199,
+          "p95": 203.2000000178814,
           "n": 6
         },
         "radius_preview": {
-          "p50": 0.30000001192092896,
-          "p95": 0.699999988079071,
+          "p50": 0.4000000059604645,
+          "p95": 0.5999999940395355,
           "n": 8
         },
         "stamp_drag": {
           "p50": 0.699999988079071,
-          "p95": 0.8999999761581421,
+          "p95": 1.300000011920929,
           "n": 8
         },
         "airbrush": {
           "1": {
-            "p50": 0.5,
-            "p95": 0.5999999940395355,
+            "p50": 0.9000000059604645,
+            "p95": 1,
             "n": 3
           },
           "5": {
-            "p50": 0.4000000059604645,
-            "p95": 0.5999999940395355,
+            "p50": 0.5,
+            "p95": 0.6000000238418579,
             "n": 3
           },
           "10": {
             "p50": 0.5,
-            "p95": 0.5,
+            "p95": 0.5999999940395355,
             "n": 5
           },
           "20": {
             "p50": 0.5,
-            "p95": 0.5,
+            "p95": 0.699999988079071,
             "n": 8
           }
         },
@@ -413,11 +667,49 @@
           "dirtyRect": true
         }
       },
-      "commit_latency_ms": {
-        "p50": 2.7946999999985565,
-        "p95": 7.715700000000652,
-        "n": 5,
-        "cells": 49860
+      "commit_strokes": {
+        "small": {
+          "changed_cells": 1,
+          "transport": "oneshot",
+          "chunks": 1,
+          "p50": 3.475699999999051,
+          "p95": 7.344999999997526,
+          "n": 5,
+          "phases_p95": {
+            "serialize_ms": 0.007100000002537854,
+            "upload_ms": 7.09230000000025,
+            "server_commit_ms": 7.09230000000025
+          },
+          "note": "upload_ms ≈ full HTTP round-trip (upload+server not split)"
+        },
+        "medium": {
+          "changed_cells": 64,
+          "transport": "oneshot",
+          "chunks": 1,
+          "p50": 4.010000000002037,
+          "p95": 4.744000000002416,
+          "n": 5,
+          "phases_p95": {
+            "serialize_ms": 0.03139999999984866,
+            "upload_ms": 4.606999999999971,
+            "server_commit_ms": 4.606999999999971
+          },
+          "note": "upload_ms ≈ full HTTP round-trip (upload+server not split)"
+        },
+        "large": {
+          "changed_cells": 1200,
+          "transport": "begin_chunk_commit",
+          "chunks": 3,
+          "p50": 39.371500000001106,
+          "p95": 60.67239999999947,
+          "n": 3,
+          "phases_p95": {
+            "serialize_ms": 0.11000000000058208,
+            "upload_ms": 40.50499999999738,
+            "server_commit_ms": 18.919800000003306
+          },
+          "note": "chunked path: upload_ms includes begin+chunks; server_commit_ms is final commit HTTP"
+        }
       },
       "verdict": {
         "budgets": {
@@ -433,9 +725,18 @@
           "zoom": true,
           "stamp_drag": true,
           "airbrush_5": true,
-          "commit": true
+          "commit_medium": true
         },
-        "supported": true
+        "supported": true,
+        "headless_provisionally_supported": true,
+        "non_gating": {
+          "view_empty_p95": 207.69999998807907,
+          "relief_p95": 203.2000000178814,
+          "commit_small_p95": 7.344999999997526,
+          "commit_large_p95": 60.67239999999947,
+          "commit_large_changed_cells": 1200,
+          "commit_large_transport": "begin_chunk_commit"
+        }
       }
     }
   ],
@@ -443,6 +744,7 @@
   "matrix": [
     {
       "size": "approx_2k",
+      "headless_provisionally_supported": true,
       "supported": true,
       "checks": {
         "open_fit": true,
@@ -450,16 +752,23 @@
         "zoom": true,
         "stamp_drag": true,
         "airbrush_5": true,
-        "commit": true
+        "commit_medium": true
       },
-      "open_fit_p95": 11.100000023841858,
-      "pan_p95": 0.30000001192092896,
-      "stamp_p95": 1.0999999940395355,
-      "airbrush5_p95": 0.5999999940395355,
-      "commit_p95": 5.728899999999612
+      "open_fit_p95": 11.400000005960464,
+      "pan_p95": 0.19999998807907104,
+      "stamp_p95": 1.4000000059604645,
+      "airbrush5_p95": 0.5,
+      "commit_medium_p95": 4.163199999999961,
+      "commit_medium_changed_cells": 64,
+      "view_empty_p95": 10.599999994039536,
+      "relief_p95": 11.800000011920929,
+      "commit_large_p95": 32.64169999999967,
+      "commit_large_changed_cells": 1200,
+      "commit_large_transport": "begin_chunk_commit"
     },
     {
       "size": "approx_10k",
+      "headless_provisionally_supported": true,
       "supported": true,
       "checks": {
         "open_fit": true,
@@ -467,16 +776,23 @@
         "zoom": true,
         "stamp_drag": true,
         "airbrush_5": true,
-        "commit": true
+        "commit_medium": true
       },
-      "open_fit_p95": 49.900000005960464,
-      "pan_p95": 0.09999999403953552,
-      "stamp_p95": 0.800000011920929,
-      "airbrush5_p95": 0.5999999940395355,
-      "commit_p95": 4.042499999999563
+      "open_fit_p95": 48.900000005960464,
+      "pan_p95": 0.20000001788139343,
+      "stamp_p95": 1.100000023841858,
+      "airbrush5_p95": 0.699999988079071,
+      "commit_medium_p95": 7.341700000000856,
+      "commit_medium_changed_cells": 64,
+      "view_empty_p95": 67.90000000596046,
+      "relief_p95": 59.89999997615814,
+      "commit_large_p95": 60.38810000000012,
+      "commit_large_changed_cells": 1200,
+      "commit_large_transport": "begin_chunk_commit"
     },
     {
       "size": "approx_25k",
+      "headless_provisionally_supported": true,
       "supported": true,
       "checks": {
         "open_fit": true,
@@ -484,16 +800,23 @@
         "zoom": true,
         "stamp_drag": true,
         "airbrush_5": true,
-        "commit": true
+        "commit_medium": true
       },
-      "open_fit_p95": 113.40000000596046,
-      "pan_p95": 0.20000001788139343,
-      "stamp_p95": 0.800000011920929,
-      "airbrush5_p95": 0.5999999940395355,
-      "commit_p95": 5.6568999999999505
+      "open_fit_p95": 104.69999998807907,
+      "pan_p95": 0.19999998807907104,
+      "stamp_p95": 1.4000000059604645,
+      "airbrush5_p95": 0.699999988079071,
+      "commit_medium_p95": 5.20810000000165,
+      "commit_medium_changed_cells": 64,
+      "view_empty_p95": 107.7000000178814,
+      "relief_p95": 111.09999999403954,
+      "commit_large_p95": 60.8804999999993,
+      "commit_large_changed_cells": 1200,
+      "commit_large_transport": "begin_chunk_commit"
     },
     {
       "size": "approx_50k",
+      "headless_provisionally_supported": true,
       "supported": true,
       "checks": {
         "open_fit": true,
@@ -501,13 +824,19 @@
         "zoom": true,
         "stamp_drag": true,
         "airbrush_5": true,
-        "commit": true
+        "commit_medium": true
       },
-      "open_fit_p95": 184.5,
+      "open_fit_p95": 204.2000000178814,
       "pan_p95": 0.19999998807907104,
-      "stamp_p95": 0.8999999761581421,
-      "airbrush5_p95": 0.5999999940395355,
-      "commit_p95": 7.715700000000652
+      "stamp_p95": 1.300000011920929,
+      "airbrush5_p95": 0.6000000238418579,
+      "commit_medium_p95": 4.744000000002416,
+      "commit_medium_changed_cells": 64,
+      "view_empty_p95": 207.69999998807907,
+      "relief_p95": 203.2000000178814,
+      "commit_large_p95": 60.67239999999947,
+      "commit_large_changed_cells": 1200,
+      "commit_large_transport": "begin_chunk_commit"
     }
   ],
   "before_crs_matrix": [
@@ -583,71 +912,99 @@
   "after_crs_matrix": [
     {
       "size": "approx_2k",
+      "headless_provisionally_supported": true,
       "supported": true,
-      "open_fit_p95": 11.100000023841858,
-      "pan_p95": 0.30000001192092896,
-      "stamp_p95": 1.0999999940395355,
-      "airbrush5_p95": 0.5999999940395355,
-      "commit_p95": 5.728899999999612,
       "checks": {
         "open_fit": true,
         "pan": true,
         "zoom": true,
         "stamp_drag": true,
         "airbrush_5": true,
-        "commit": true
-      }
+        "commit_medium": true
+      },
+      "open_fit_p95": 11.400000005960464,
+      "pan_p95": 0.19999998807907104,
+      "stamp_p95": 1.4000000059604645,
+      "airbrush5_p95": 0.5,
+      "commit_medium_p95": 4.163199999999961,
+      "commit_medium_changed_cells": 64,
+      "view_empty_p95": 10.599999994039536,
+      "relief_p95": 11.800000011920929,
+      "commit_large_p95": 32.64169999999967,
+      "commit_large_changed_cells": 1200,
+      "commit_large_transport": "begin_chunk_commit"
     },
     {
       "size": "approx_10k",
+      "headless_provisionally_supported": true,
       "supported": true,
-      "open_fit_p95": 49.900000005960464,
-      "pan_p95": 0.09999999403953552,
-      "stamp_p95": 0.800000011920929,
-      "airbrush5_p95": 0.5999999940395355,
-      "commit_p95": 4.042499999999563,
       "checks": {
         "open_fit": true,
         "pan": true,
         "zoom": true,
         "stamp_drag": true,
         "airbrush_5": true,
-        "commit": true
-      }
+        "commit_medium": true
+      },
+      "open_fit_p95": 48.900000005960464,
+      "pan_p95": 0.20000001788139343,
+      "stamp_p95": 1.100000023841858,
+      "airbrush5_p95": 0.699999988079071,
+      "commit_medium_p95": 7.341700000000856,
+      "commit_medium_changed_cells": 64,
+      "view_empty_p95": 67.90000000596046,
+      "relief_p95": 59.89999997615814,
+      "commit_large_p95": 60.38810000000012,
+      "commit_large_changed_cells": 1200,
+      "commit_large_transport": "begin_chunk_commit"
     },
     {
       "size": "approx_25k",
+      "headless_provisionally_supported": true,
       "supported": true,
-      "open_fit_p95": 113.40000000596046,
-      "pan_p95": 0.20000001788139343,
-      "stamp_p95": 0.800000011920929,
-      "airbrush5_p95": 0.5999999940395355,
-      "commit_p95": 5.6568999999999505,
       "checks": {
         "open_fit": true,
         "pan": true,
         "zoom": true,
         "stamp_drag": true,
         "airbrush_5": true,
-        "commit": true
-      }
+        "commit_medium": true
+      },
+      "open_fit_p95": 104.69999998807907,
+      "pan_p95": 0.19999998807907104,
+      "stamp_p95": 1.4000000059604645,
+      "airbrush5_p95": 0.699999988079071,
+      "commit_medium_p95": 5.20810000000165,
+      "commit_medium_changed_cells": 64,
+      "view_empty_p95": 107.7000000178814,
+      "relief_p95": 111.09999999403954,
+      "commit_large_p95": 60.8804999999993,
+      "commit_large_changed_cells": 1200,
+      "commit_large_transport": "begin_chunk_commit"
     },
     {
       "size": "approx_50k",
+      "headless_provisionally_supported": true,
       "supported": true,
-      "open_fit_p95": 184.5,
-      "pan_p95": 0.19999998807907104,
-      "stamp_p95": 0.8999999761581421,
-      "airbrush5_p95": 0.5999999940395355,
-      "commit_p95": 7.715700000000652,
       "checks": {
         "open_fit": true,
         "pan": true,
         "zoom": true,
         "stamp_drag": true,
         "airbrush_5": true,
-        "commit": true
-      }
+        "commit_medium": true
+      },
+      "open_fit_p95": 204.2000000178814,
+      "pan_p95": 0.19999998807907104,
+      "stamp_p95": 1.300000011920929,
+      "airbrush5_p95": 0.6000000238418579,
+      "commit_medium_p95": 4.744000000002416,
+      "commit_medium_changed_cells": 64,
+      "view_empty_p95": 207.69999998807907,
+      "relief_p95": 203.2000000178814,
+      "commit_large_p95": 60.67239999999947,
+      "commit_large_changed_cells": 1200,
+      "commit_large_transport": "begin_chunk_commit"
     }
   ]
 }
