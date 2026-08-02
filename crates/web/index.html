@@ -17,14 +17,25 @@
       <p>Open a world, use View to explore the map, or Relief to Raise/Lower elevation. Create a portable world folder to begin.</p>
       <button id="create-first" class="primary">Create your first world</button>
     </section>
-    <section>
+    <section id="worlds-section">
       <div class="worlds-header">
-        <h2>Worlds</h2>
         <button id="create-another">New world</button>
+        <h2>Worlds</h2>
       </div>
       <p id="project-empty" class="muted">No worlds yet.</p>
       <div id="project-grid" class="project-grid"></div>
       <p id="home-error" class="error" aria-live="polite"></p>
+    </section>
+    <section id="world-maps-section" class="hidden">
+      <div class="worlds-header">
+        <button type="button" id="back-to-worlds">← Worlds</button>
+        <button type="button" id="add-map" class="primary">Add map</button>
+        <h2 id="world-maps-title">Maps</h2>
+      </div>
+      <p id="world-maps-path" class="muted"></p>
+      <p id="world-maps-empty" class="muted hidden">No maps in this world.</p>
+      <div id="world-maps-grid" class="project-grid"></div>
+      <p id="world-maps-error" class="error" aria-live="polite"></p>
     </section>
   </main>
 
@@ -129,14 +140,16 @@
 
   <dialog id="create-dialog">
     <form id="create-form">
-      <h2>Create world workspace</h2>
-      <p class="muted">Creates identity <code>mapkeeper.toml</code> plus a minimal spatial map state. Map size is fixed after create.</p>
-      <label for="world-id">World name</label>
+      <h2 id="create-dialog-title">Create world</h2>
+      <p id="create-dialog-help" class="muted">Creates a world folder with one map. Map size is fixed after create.</p>
+      <label id="world-id-label" for="world-id">World name</label>
       <input id="world-id" autocomplete="off" required placeholder="My world">
-      <label for="world-folder">Folder</label>
-      <div class="actions">
-        <input id="world-folder" required>
-        <button id="browse-folder" type="button">Browse…</button>
+      <div id="world-folder-block">
+        <label for="world-folder">Folder</label>
+        <div class="actions">
+          <input id="world-folder" required>
+          <button id="browse-folder" type="button">Browse…</button>
+        </div>
       </div>
       <label>Map size</label>
       <div id="preset-grid" class="preset-grid" role="radiogroup" aria-label="Map size presets"></div>
@@ -144,7 +157,7 @@
       <div id="create-error" class="error"></div>
       <div class="actions">
         <button type="button" id="cancel-create">Cancel</button>
-        <button type="submit" class="primary">Create</button>
+        <button type="submit" class="primary" id="create-submit">Create</button>
       </div>
     </form>
   </dialog>

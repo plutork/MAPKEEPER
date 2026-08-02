@@ -7,8 +7,12 @@ use mapkeeper_core::spatial::Axial;
 
 #[derive(Clone)]
 pub(crate) struct ActiveWorld {
+    /// World folder (registry / transfer unit). N-035.
     pub(crate) path: PathBuf,
     pub(crate) id: String,
+    /// Active map folder (`maps/<id>`). Spatial I/O targets this path.
+    pub(crate) map_path: PathBuf,
+    pub(crate) map_id: String,
 }
 
 pub(crate) struct AppState {

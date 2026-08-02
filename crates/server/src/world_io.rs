@@ -97,7 +97,12 @@ pub fn inspect_create_disk(world_path: &Path, registry: &ProjectsFile) -> Create
     let marker = incomplete_marker_path(world_path);
     let has_marker = marker.is_file();
     let valid_manifest_id = read_manifest_id(world_path).ok();
-    let spatial_path = world_path.join(SPATIAL_STATE_RELATIVE);
+    // N-035: spatial lives under maps/<id>/, not world root.
+    let spatial_path = crate::world_layout::read_world_manifest(world_path)
+        .ok()
+        .and_then(|m| m.maps.first().cloned())
+        .map(|map_ref| world_path.join(map_ref.path).join(SPATIAL_STATE_RELATIVE))
+        .unwrap_or_else(|| world_path.join(SPATIAL_STATE_RELATIVE));
     let valid_spatial = match fs::read_to_string(&spatial_path) {
         Ok(raw) => {
             SpatialState::assert_no_screen_keys(&raw).is_ok()
@@ -125,7 +130,8 @@ fn is_create_allowlisted_name(name: &str) -> bool {
     {
         return true;
     }
-    if name == "spatial" {
+    // `maps/` = N-035 layout; `spatial/` kept for incomplete/legacy cleanup classify.
+    if name == "maps" || name == "spatial" {
         return true;
     }
     if name.starts_with(".mapkeeper.toml.tmp-") {

@@ -6,6 +6,7 @@ mod projects;
 mod spatial;
 mod state;
 mod world_io;
+mod world_layout;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -52,10 +53,16 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
     }
 
     let active = match &config.world {
-        Some(path) => Some(ActiveWorld {
-            id: world_io::read_manifest_id(path)?,
-            path: path.clone(),
-        }),
+        Some(path) => {
+            let (id, map_path, map_id) = world_layout::prepare_open(path, None)
+                .map_err(anyhow::Error::msg)?;
+            Some(ActiveWorld {
+                id,
+                path: path.clone(),
+                map_path,
+                map_id,
+            })
+        }
         None => None,
     };
     let state = Arc::new(ServerState::new(active));

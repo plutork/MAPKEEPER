@@ -31,6 +31,9 @@ input { width: 100%; color: inherit; background: #10151c; border: 1px solid var(
 .project-card { padding: 18px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
 .project-card h3 { margin: 0 0 8px; }
 .project-card p { min-height: 40px; overflow-wrap: anywhere; }
+.worlds-header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: flex-start; margin-bottom: 12px; }
+.worlds-header h2 { margin: 0; }
+.map-list { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .manage { position: relative; }
 .manage-menu {

@@ -92,21 +92,22 @@ pub fn restore_spatial_from_bak(world_path: &Path) -> anyhow::Result<SpatialStat
     ensure_spatial_state(world_path)
 }
 
-pub(super) fn ensure_spatial_config(world_path: &Path) -> anyhow::Result<SpatialConfig> {
-    let manifest_path = world_path.join("mapkeeper.toml");
+/// Read immutable `[spatial]` from a **map** folder (`map.toml`). N-035 / N-037.
+pub(super) fn ensure_spatial_config(map_path: &Path) -> anyhow::Result<SpatialConfig> {
+    let manifest_path = map_path.join("map.toml");
     match atomic_io::classify_durable_open(&manifest_path) {
         atomic_io::DurableOpenKind::InterruptedWrite => {
             let bak_available = atomic_io::bak_passes(&manifest_path, |bytes| {
                 std::str::from_utf8(bytes)
                     .ok()
-                    .and_then(|raw| world::parse_manifest(raw).ok())
+                    .and_then(|raw| world::parse_map_manifest(raw).ok())
                     .is_some()
             });
             anyhow::bail!("corrupt_manifest: interrupted_write (bak_available={bak_available})");
         }
         atomic_io::DurableOpenKind::AbsentClean => {
             anyhow::bail!(
-                "corrupt_manifest: missing mapkeeper.toml at {}",
+                "corrupt_manifest: missing map.toml at {}",
                 manifest_path.display()
             );
         }
@@ -114,37 +115,31 @@ pub(super) fn ensure_spatial_config(world_path: &Path) -> anyhow::Result<Spatial
     }
 
     let raw = std::fs::read_to_string(&manifest_path)?;
-    let mut manifest = match world::parse_manifest(&raw) {
+    let manifest = match world::parse_map_manifest(&raw) {
         Ok(m) => m,
         Err(error) => {
             let bak_available = atomic_io::bak_passes(&manifest_path, |bytes| {
                 std::str::from_utf8(bytes)
                     .ok()
-                    .and_then(|b| world::parse_manifest(b).ok())
+                    .and_then(|b| world::parse_map_manifest(b).ok())
                     .is_some()
             });
             anyhow::bail!("corrupt_manifest: {error} (bak_available={bak_available})");
         }
     };
-    if let Some(spatial) = manifest.spatial.clone() {
-        spatial
-            .assert_matches_catalog()
-            .map_err(anyhow::Error::msg)?;
-        return Ok(spatial);
-    }
-    let spatial = SpatialConfig::alpha_default();
-    manifest.spatial = Some(spatial.clone());
-    let rendered = world::render_manifest(&manifest)?;
-    atomic_io::atomic_replace(&manifest_path, rendered.as_bytes())?;
-    Ok(spatial)
+    manifest
+        .spatial
+        .assert_matches_catalog()
+        .map_err(anyhow::Error::msg)?;
+    Ok(manifest.spatial)
 }
 
-pub(super) fn spatial_path(world_path: &Path) -> PathBuf {
-    world_path.join(SPATIAL_STATE_RELATIVE)
+pub(super) fn spatial_path(map_path: &Path) -> PathBuf {
+    map_path.join(SPATIAL_STATE_RELATIVE)
 }
 
-pub(super) fn write_spatial_state(world_path: &Path, state: &SpatialState) -> anyhow::Result<()> {
-    let path = spatial_path(world_path);
+pub(super) fn write_spatial_state(map_path: &Path, state: &SpatialState) -> anyhow::Result<()> {
+    let path = spatial_path(map_path);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

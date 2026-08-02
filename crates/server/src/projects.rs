@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::{ActiveWorld, ServerState};
 use crate::world_io;
+use crate::world_layout;
 
 mod create;
 mod delete;
@@ -19,10 +20,22 @@ mod delete;
 use create::{resolve_create_preset, transactional_create};
 
 #[derive(Serialize)]
+struct MapStatus {
+    id: String,
+    name: String,
+    valid: bool,
+}
+
+#[derive(Serialize)]
 struct ProjectStatus {
     id: String,
     path: String,
     valid: bool,
+    #[serde(default)]
+    maps: Vec<MapStatus>,
+    /// Set when folder is pre-N-035 single-level (N-037).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    legacy: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -35,6 +48,25 @@ struct ProjectsResponse {
 #[derive(Deserialize)]
 struct ProjectPathInput {
     path: String,
+    /// Optional map id; default = first map in world (N-035).
+    #[serde(default)]
+    map_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AddMapInput {
+    path: String,
+    id: String,
+    #[serde(default)]
+    preset_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct OpenProjectResult {
+    id: String,
+    path: String,
+    map_id: String,
+    maps: Vec<MapStatus>,
 }
 
 #[derive(Deserialize)]
@@ -65,10 +97,29 @@ pub(crate) fn routes() -> Router<Arc<ServerState>> {
     Router::new()
         .route("/api/projects", get(list_projects).post(create_project))
         .route("/api/projects/open", post(open_project))
+        .route("/api/projects/maps", post(add_map))
         .route("/api/projects/forget", post(forget_project))
         .route("/api/projects/delete", post(delete_project))
         .route("/api/projects/close", post(close_project))
         .route("/api/projects/restore-bak", post(restore_registry_bak))
+}
+
+fn map_statuses(world_path: &Path) -> Vec<MapStatus> {
+    let Ok(manifest) = world_layout::read_world_manifest(world_path) else {
+        return Vec::new();
+    };
+    manifest
+        .maps
+        .iter()
+        .map(|m| {
+            let map_path = world_layout::map_abs_path(world_path, m);
+            MapStatus {
+                id: m.id.clone(),
+                name: m.name.clone(),
+                valid: map_path.join("map.toml").is_file(),
+            }
+        })
+        .collect()
 }
 
 fn registry_error(message: String) -> axum::response::Response {
@@ -92,7 +143,16 @@ async fn list_projects(State(server): State<Arc<ServerState>>) -> impl IntoRespo
         .map(|entry| {
             let path = Path::new(&entry.path);
             let class = world_io::classify_create_marker_at(path, &file);
+            let legacy = world_layout::is_legacy_world_dir(path);
+            let maps = if legacy {
+                Vec::new()
+            } else {
+                map_statuses(path)
+            };
             let valid = path.join("mapkeeper.toml").is_file()
+                && !legacy
+                && !maps.is_empty()
+                && maps.iter().any(|m| m.valid)
                 && !matches!(
                     class,
                     world_io::CreateMarkerClass::SafeIncomplete
@@ -102,6 +162,8 @@ async fn list_projects(State(server): State<Arc<ServerState>>) -> impl IntoRespo
                 valid,
                 id: entry.id.clone(),
                 path: entry.path.clone(),
+                maps,
+                legacy: legacy.then_some(true),
             }
         })
         .collect();
@@ -163,11 +225,9 @@ async fn open_project(
                 }
             }
         }
-        world_io::CreateMarkerClass::CompleteRegistered { world_id }
-        | world_io::CreateMarkerClass::CompleteUnregistered { world_id } => {
-            // Durable Create with residual marker — keep world, clear marker, open.
+        world_io::CreateMarkerClass::CompleteRegistered { .. }
+        | world_io::CreateMarkerClass::CompleteUnregistered { .. } => {
             let _ = world_io::clear_incomplete_marker(&path);
-            return activate_and_register(&server, world_id, path);
         }
         world_io::CreateMarkerClass::Ambiguous { reason } => {
             return (
@@ -177,21 +237,29 @@ async fn open_project(
                 .into_response();
         }
     }
-    let id = match world_io::read_manifest_id(&path) {
-        Ok(id) => id,
-        Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
-    };
-    activate_and_register(&server, id, path)
+    activate_and_register(&server, path, input.map_id.as_deref())
 }
 
 fn activate_and_register(
     server: &Arc<ServerState>,
-    id: String,
     path: PathBuf,
+    map_id: Option<&str>,
 ) -> axum::response::Response {
-    if let Err(error) = crate::spatial::ensure_spatial_state(&path) {
+    let (id, map_path, resolved_map_id) = match world_layout::prepare_open(&path, map_id) {
+        Ok(v) => v,
+        Err(message) => {
+            let status = if message.starts_with("legacy_world_format") {
+                StatusCode::UNPROCESSABLE_ENTITY
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            return (status, message).into_response();
+        }
+    };
+    if let Err(error) = crate::spatial::ensure_spatial_state(&map_path) {
         let message = error.to_string();
-        let status = if message.contains("corrupt_spatial") {
+        let status = if message.contains("corrupt_spatial") || message.contains("corrupt_manifest")
+        {
             StatusCode::UNPROCESSABLE_ENTITY
         } else {
             StatusCode::INTERNAL_SERVER_ERROR
@@ -209,9 +277,109 @@ fn activate_and_register(
     }) {
         return registry_error(error);
     }
-    // Registry lock released before app mutex (canonical order).
-    server.app.lock().unwrap().active = Some(ActiveWorld { path, id });
-    Json(entry).into_response()
+    let maps = map_statuses(&path);
+    server.app.lock().unwrap().active = Some(ActiveWorld {
+        path,
+        id: id.clone(),
+        map_path,
+        map_id: resolved_map_id.clone(),
+    });
+    Json(OpenProjectResult {
+        id,
+        path: entry.path,
+        map_id: resolved_map_id,
+        maps,
+    })
+    .into_response()
+}
+
+async fn add_map(
+    State(server): State<Arc<ServerState>>,
+    Json(input): Json<AddMapInput>,
+) -> impl IntoResponse {
+    let world_path = world_io::normalize_world_path(Path::new(&input.path));
+    if world_layout::is_legacy_world_dir(&world_path) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            world_layout::LEGACY_REFUSE_MSG.to_string(),
+        )
+            .into_response();
+    }
+    let map_id = match world::normalize_world_id(&input.id) {
+        Ok(id) => id,
+        Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
+    };
+    let preset = match resolve_create_preset(input.preset_id.as_deref()) {
+        Ok(preset) => preset,
+        Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
+    };
+    let mut manifest = match world_layout::read_world_manifest(&world_path) {
+        Ok(m) => m,
+        Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    if !world::is_two_level_world(&manifest) {
+        return (
+            StatusCode::BAD_REQUEST,
+            "world_format: missing maps list".to_string(),
+        )
+            .into_response();
+    }
+    if manifest.maps.iter().any(|m| m.id == map_id) {
+        return (
+            StatusCode::CONFLICT,
+            format!("map `{map_id}` already exists"),
+        )
+            .into_response();
+    }
+    let map_ref = mapkeeper_core::world::WorldMapRef {
+        id: map_id.clone(),
+        name: map_id.clone(),
+        path: world::map_rel_path(&map_id),
+    };
+    let map_path = world_layout::map_abs_path(&world_path, &map_ref);
+    if let Err(e) = std::fs::create_dir_all(&map_path) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
+    if let Err(e) = crate::atomic_io::atomic_replace(
+        &map_path.join("map.toml"),
+        world::map_manifest_toml(&map_id, preset).as_bytes(),
+    ) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
+    if let Err(e) = crate::spatial::ensure_spatial_state(&map_path) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
+    manifest.maps.push(map_ref);
+    let rendered = match world::render_manifest(&manifest) {
+        Ok(s) => s,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    if let Err(e) =
+        crate::atomic_io::atomic_replace(&world_path.join("mapkeeper.toml"), rendered.as_bytes())
+    {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
+    // Activate the new map when this world is already open.
+    {
+        let mut app = server.app.lock().unwrap();
+        if app
+            .active
+            .as_ref()
+            .is_some_and(|w| world_io::path_cmp_key(&w.path) == world_io::path_cmp_key(&world_path))
+        {
+            if let Some(active) = app.active.as_mut() {
+                active.map_path = map_path;
+                active.map_id = map_id.clone();
+            }
+        }
+    }
+    Json(serde_json::json!({
+        "id": manifest.world.id,
+        "path": world_path.display().to_string(),
+        "map_id": map_id,
+        "maps": map_statuses(&world_path),
+    }))
+    .into_response()
 }
 
 /// Explicit author-triggered recovery offered when the registry is corrupt (N-025).

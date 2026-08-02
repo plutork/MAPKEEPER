@@ -5,22 +5,42 @@ import { bakRestoreOffer } from "./shell-math.js";
 
 const home = document.querySelector("#home");
 const workspace = document.querySelector("#workspace");
+const worldsSection = document.querySelector("#worlds-section");
+const mapsSection = document.querySelector("#world-maps-section");
 const grid = document.querySelector("#project-grid");
+const mapsGrid = document.querySelector("#world-maps-grid");
 const empty = document.querySelector("#project-empty");
+const mapsEmpty = document.querySelector("#world-maps-empty");
 const createFirstBtn = document.querySelector("#create-first");
 const createAnotherBtn = document.querySelector("#create-another");
+const addMapBtn = document.querySelector("#add-map");
+const backToWorldsBtn = document.querySelector("#back-to-worlds");
 const dialog = document.querySelector("#create-dialog");
 const deleteDialog = document.querySelector("#delete-dialog");
 const deleteTarget = document.querySelector("#delete-target");
 const deleteError = document.querySelector("#delete-error");
 const idInput = document.querySelector("#world-id");
+const idLabel = document.querySelector("#world-id-label");
+const folderBlock = document.querySelector("#world-folder-block");
 const folderInput = document.querySelector("#world-folder");
 const errorBox = document.querySelector("#create-error");
 const homeError = document.querySelector("#home-error");
+const mapsError = document.querySelector("#world-maps-error");
+const mapsTitle = document.querySelector("#world-maps-title");
+const mapsPath = document.querySelector("#world-maps-path");
+const dialogTitle = document.querySelector("#create-dialog-title");
+const dialogHelp = document.querySelector("#create-dialog-help");
+const createSubmit = document.querySelector("#create-submit");
 const presetGrid = document.querySelector("#preset-grid");
 const presetIdInput = document.querySelector("#create-preset-id");
 
 let createPresets = [];
+/** @type {"world"|"map"} */
+let createMode = "world";
+/** @type {{ id: string, path: string, maps: Array<{id:string,name:string,valid:boolean}> } | null} */
+let selectedWorld = null;
+/** @type {Array<{id:string,path:string,valid:boolean,maps?:any[],legacy?:boolean}>} */
+let cachedProjects = [];
 
 const worldPath = (name) => {
   const slug = name.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "-").replace(/^-|-$/g, "");
@@ -78,10 +98,40 @@ const loadCreatePresets = async () => {
   renderPresetCards(data.presets || [], data.default_preset_id);
 };
 
+const setCreateMode = (mode) => {
+  createMode = mode;
+  const isMap = mode === "map";
+  dialogTitle.textContent = isMap ? "Add map" : "Create world";
+  dialogHelp.textContent = isMap
+    ? "Adds another map inside this world. Map size is fixed after create."
+    : "Creates a world folder with one map. Map size is fixed after create.";
+  idLabel.textContent = isMap ? "Map name" : "World name";
+  idInput.placeholder = isMap ? "North region" : "My world";
+  folderBlock.classList.toggle("hidden", isMap);
+  folderInput.required = !isMap;
+  createSubmit.textContent = isMap ? "Add map" : "Create";
+};
+
 const openCreate = async () => {
+  setCreateMode("world");
   idInput.value = "";
   folderInput.value = state.defaultRoot;
   state.folderTouched = false;
+  errorBox.textContent = "";
+  try {
+    if (!createPresets.length) await loadCreatePresets();
+    else selectPreset(presetIdInput.value || createPresets.find((p) => p.is_default)?.id || createPresets[0].id);
+  } catch (error) {
+    errorBox.textContent = error.message;
+  }
+  dialog.showModal();
+  idInput.focus();
+};
+
+const openAddMap = async () => {
+  if (!selectedWorld) return;
+  setCreateMode("map");
+  idInput.value = "";
   errorBox.textContent = "";
   try {
     if (!createPresets.length) await loadCreatePresets();
@@ -99,7 +149,51 @@ const closeManageMenus = (except) => {
   });
 };
 
+const showWorldsList = () => {
+  selectedWorld = null;
+  worldsSection.classList.remove("hidden");
+  mapsSection.classList.add("hidden");
+  mapsError.textContent = "";
+};
+
+const showWorldMaps = (project) => {
+  selectedWorld = {
+    id: project.id,
+    path: project.path,
+    maps: project.maps || [],
+  };
+  worldsSection.classList.add("hidden");
+  mapsSection.classList.remove("hidden");
+  mapsTitle.textContent = project.id;
+  mapsPath.textContent = project.path;
+  mapsError.textContent = "";
+  renderMaps(selectedWorld.maps);
+};
+
+const renderMaps = (maps) => {
+  mapsGrid.replaceChildren();
+  const hasMaps = maps.length > 0;
+  mapsEmpty.classList.toggle("hidden", hasMaps);
+  for (const map of maps) {
+    const card = document.createElement("article");
+    card.className = "project-card";
+    const title = document.createElement("h3");
+    title.textContent = map.name || map.id;
+    const meta = document.createElement("p");
+    meta.className = "muted";
+    meta.textContent = map.valid ? "Map" : "Missing map.toml";
+    const open = document.createElement("button");
+    open.textContent = map.valid ? "Open map" : "Missing";
+    open.dataset.action = "open-map";
+    open.dataset.mapId = map.id;
+    if (!map.valid) open.disabled = true;
+    card.append(title, meta, open);
+    mapsGrid.append(card);
+  }
+};
+
 const renderProjects = (projects) => {
+  cachedProjects = projects;
   grid.replaceChildren();
   const hasWorlds = projects.length > 0;
   empty.classList.toggle("hidden", hasWorlds);
@@ -116,10 +210,25 @@ const renderProjects = (projects) => {
     const actions = document.createElement("div");
     actions.className = "actions";
 
+    if (project.legacy) {
+      const note = document.createElement("p");
+      note.className = "muted";
+      note.textContent = "Old format — create a new world";
+      card.append(title, path, note);
+      grid.append(card);
+      continue;
+    }
+
+    const mapCount = (project.maps || []).length;
+    const summary = document.createElement("p");
+    summary.className = "muted";
+    summary.textContent = mapCount === 1 ? "1 map" : `${mapCount} maps`;
+
     const open = document.createElement("button");
     open.textContent = project.valid ? "Open" : "Missing";
-    open.dataset.action = "open";
+    open.dataset.action = "browse";
     open.dataset.path = project.path;
+    open.dataset.id = project.id;
     if (!project.valid) open.disabled = true;
 
     const manage = document.createElement("div");
@@ -154,7 +263,7 @@ const renderProjects = (projects) => {
     });
     manage.append(manageBtn, menu);
     actions.append(open, manage);
-    card.append(title, path, actions);
+    card.append(title, path, summary, actions);
     grid.append(card);
   }
 };
@@ -186,7 +295,8 @@ const showFailureWithRecovery = (host, error, afterRestore) => {
 };
 
 export const showWorkspace = async (project) => {
-  document.querySelector("#world-name").textContent = project.id;
+  const mapLabel = project.map_id ? `${project.id} / ${project.map_id}` : project.id;
+  document.querySelector("#world-name").textContent = mapLabel;
   document.querySelector("#world-path").textContent = project.path;
   home.classList.add("hidden");
   workspace.classList.remove("hidden");
@@ -207,15 +317,44 @@ export const showHome = () => {
   workspace.classList.add("hidden");
   home.classList.remove("hidden");
   state.spatial = null;
+  showWorldsList();
+};
+
+const browseWorld = (path) => {
+  const project = cachedProjects.find((p) => p.path === path);
+  if (!project) {
+    homeError.textContent = "World not found in list";
+    return;
+  }
+  showWorldMaps(project);
+};
+
+const refreshSelectedWorldMaps = async () => {
+  const data = await api("/api/projects");
+  state.defaultRoot = data.default_worlds_root;
+  cachedProjects = data.projects || [];
+  renderProjects(cachedProjects);
+  if (!selectedWorld) return;
+  const project = cachedProjects.find((p) => p.path === selectedWorld.path);
+  if (project) showWorldMaps(project);
+  else showWorldsList();
 };
 
 export const refresh = async () => {
   homeError.replaceChildren();
+  mapsError.textContent = "";
   try {
     const data = await api("/api/projects");
     state.defaultRoot = data.default_worlds_root;
-    renderProjects(data.projects);
-    if (data.active) await showWorkspace(data.active);
+    cachedProjects = data.projects || [];
+    renderProjects(cachedProjects);
+    if (selectedWorld) {
+      const project = cachedProjects.find((p) => p.path === selectedWorld.path);
+      if (project) showWorldMaps(project);
+      else showWorldsList();
+    }
+    // Resume in-progress Editor session only when not browsing maps.
+    if (data.active && !selectedWorld) await showWorkspace(data.active);
   } catch (error) {
     showFailureWithRecovery(homeError, error, refresh);
   }
@@ -232,10 +371,14 @@ const askDelete = (path, id) => {
 export const bindWorldEvents = () => {
   createFirstBtn.addEventListener("click", openCreate);
   createAnotherBtn.addEventListener("click", openCreate);
+  addMapBtn.addEventListener("click", openAddMap);
+  backToWorldsBtn.addEventListener("click", () => {
+    showWorldsList();
+  });
   document.querySelector("#cancel-create").addEventListener("click", () => dialog.close());
 
   idInput.addEventListener("input", () => {
-    if (!state.folderTouched) folderInput.value = worldPath(idInput.value);
+    if (createMode === "world" && !state.folderTouched) folderInput.value = worldPath(idInput.value);
   });
   folderInput.addEventListener("input", () => { state.folderTouched = true; });
 
@@ -256,6 +399,20 @@ export const bindWorldEvents = () => {
     event.preventDefault();
     errorBox.textContent = "";
     try {
+      if (createMode === "map") {
+        if (!selectedWorld) throw new Error("No world selected");
+        await api("/api/projects/maps", {
+          method: "POST",
+          body: JSON.stringify({
+            path: selectedWorld.path,
+            id: idInput.value,
+            preset_id: presetIdInput.value || undefined,
+          }),
+        });
+        dialog.close();
+        await refreshSelectedWorldMaps();
+        return;
+      }
       const project = await api("/api/projects", {
         method: "POST",
         body: JSON.stringify({
@@ -265,7 +422,14 @@ export const bindWorldEvents = () => {
         }),
       });
       dialog.close();
-      await showWorkspace(project);
+      await api("/api/projects/close", { method: "POST" });
+      const data = await api("/api/projects");
+      state.defaultRoot = data.default_worlds_root;
+      cachedProjects = data.projects || [];
+      renderProjects(cachedProjects);
+      const created = cachedProjects.find((p) => p.path === project.path || p.id === project.id);
+      if (created) showWorldMaps(created);
+      else await refresh();
     } catch (error) {
       errorBox.textContent = error.message;
     }
@@ -282,14 +446,33 @@ export const bindWorldEvents = () => {
       askDelete(button.dataset.path, button.dataset.id);
       return;
     }
+    if (button.dataset.action === "browse") {
+      homeError.textContent = "";
+      browseWorld(button.dataset.path);
+      return;
+    }
     homeError.textContent = "";
     try {
       const body = JSON.stringify({ path: button.dataset.path });
-      const project = await api(`/api/projects/${button.dataset.action}`, { method: "POST", body });
-      if (button.dataset.action === "open") await showWorkspace(project);
-      else await refresh();
+      await api(`/api/projects/${button.dataset.action}`, { method: "POST", body });
+      await refresh();
     } catch (error) {
       homeError.textContent = error.message || String(error);
+    }
+  });
+
+  mapsGrid.addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-action='open-map']");
+    if (!button || !selectedWorld) return;
+    mapsError.textContent = "";
+    try {
+      const project = await api("/api/projects/open", {
+        method: "POST",
+        body: JSON.stringify({ path: selectedWorld.path, map_id: button.dataset.mapId }),
+      });
+      await showWorkspace(project);
+    } catch (error) {
+      mapsError.textContent = error.message || String(error);
     }
   });
 
@@ -313,6 +496,7 @@ export const bindWorldEvents = () => {
       state.pendingDeletePath = "";
       state.pendingDeleteId = "";
       deleteDialog.close();
+      showWorldsList();
       await refresh();
     } catch (error) {
       deleteError.textContent = error.message;

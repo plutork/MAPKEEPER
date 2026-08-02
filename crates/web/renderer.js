@@ -2,13 +2,17 @@ import { state, ELEV_MIN, ELEV_MAX } from "./workspace-state.js";
 import { probe_grid_centers, probe_axial_to_world } from "./wasm-api.js";
 import { resizeCanvas, worldToScreen, getCanvas, getCtx, syncViewCameraDebug } from "./camera.js";
 import {
-  cellInViewport, cellInDirty, expandDirtyAabb, offscreenBlitArgs,
+  cellInViewport, cellInDirty, expandDirtyAabb,
+  overscanMarginCss, overscanCacheCssSize, panLeavesOverscan,
+  overscanSourceCss, overscanBlitArgs, cameraSlipCss,
 } from "./shell-math.js";
 import { diskCellsAt } from "./brush-geometry.js";
 
-/** Blit HiDPI cache into CSS-space CTM (explicit CSS dest, not device px). */
-const blitOffscreen = (ctx, oc, dx, dy, cssW, cssH) => {
-  ctx.drawImage(oc, ...offscreenBlitArgs(oc.width, oc.height, dx, dy, cssW, cssH));
+/** Present overscan cache window into the viewport (CSS-space CTM). */
+const blitOverscanWindow = (ctx, oc, viewW, viewH, dx, dy) => {
+  const dpr = window.devicePixelRatio || 1;
+  const { srcX, srcY } = overscanSourceCss(oc.margin, dx, dy);
+  ctx.drawImage(oc.canvas, ...overscanBlitArgs(srcX, srcY, viewW, viewH, dpr));
 };
 
 const lerpChannel = (a, b, t) => a + (b - a) * t;
@@ -46,6 +50,10 @@ export const invalidateMapCache = () => {
   if (state.cacheRebuildRaf) {
     cancelAnimationFrame(state.cacheRebuildRaf);
     state.cacheRebuildRaf = 0;
+  }
+  if (state.zoomRebuildTimer) {
+    clearTimeout(state.zoomRebuildTimer);
+    state.zoomRebuildTimer = 0;
   }
 };
 
@@ -210,20 +218,25 @@ const mapStaticKey = (layer, showGrid, cssW, cssH) => {
   return `${rev}|${layer}|${showGrid ? 1 : 0}|${cssW}x${cssH}`;
 };
 
-const rebuildOffscreenCache = (layer, showGrid, w, h, drawSize, sizePx, gridStroke, gridWidth, padPx) => {
+const rebuildOffscreenCache = (layer, showGrid, w, h, drawSize, sizePx, gridStroke, gridWidth) => {
   ensureCenterCache();
   syncHeightGrid();
-  const fullIdx = visibleCells(padPx, { useDirty: false });
-  const canvas = getCanvas();
-  const oc = document.createElement("canvas");
-  oc.width = canvas.width;
-  oc.height = canvas.height;
-  const octx = oc.getContext("2d");
+  const margin = overscanMarginCss(sizePx);
+  const { cacheW, cacheH } = overscanCacheCssSize(w, h, margin);
+  // Cull to overscan: viewport pad = margin + hex radius (body may touch rim).
+  const indices = visibleCells(margin + sizePx, { useDirty: false });
   const dpr = window.devicePixelRatio || 1;
+  const oc = document.createElement("canvas");
+  oc.width = Math.max(1, Math.floor(cacheW * dpr));
+  oc.height = Math.max(1, Math.floor(cacheH * dpr));
+  const octx = oc.getContext("2d");
   octx.setTransform(dpr, 0, 0, dpr, 0, 0);
   octx.fillStyle = "#0b0e13";
-  octx.fillRect(0, 0, w, h);
-  paintCellsTo(octx, fullIdx, layer, showGrid, drawSize, sizePx, gridStroke, gridWidth);
+  octx.fillRect(0, 0, cacheW, cacheH);
+  octx.save();
+  octx.translate(margin, margin);
+  paintCellsTo(octx, indices, layer, showGrid, drawSize, sizePx, gridStroke, gridWidth);
+  octx.restore();
   state.offscreenCache = {
     canvas: oc,
     staticKey: mapStaticKey(layer, showGrid, w, h),
@@ -232,18 +245,37 @@ const rebuildOffscreenCache = (layer, showGrid, w, h, drawSize, sizePx, gridStro
     zoom: state.camera.zoom,
     cssW: w,
     cssH: h,
+    margin,
+    cacheW,
+    cacheH,
   };
-  return oc;
+  return state.offscreenCache;
 };
 
-const scheduleCacheRebuild = () => {
-  if (state.cacheRebuildRaf || state.paintStroke) return;
-  state.cacheRebuildRaf = requestAnimationFrame(() => {
-    state.cacheRebuildRaf = 0;
-    if (state.paintStroke) return;
-    state.offscreenCache = null;
-    drawSpatialNow();
-  });
+/** Debounced zoom rebuild: keep old cache until swap (no null → black flash). */
+const ZOOM_REBUILD_MS = 120;
+const scheduleZoomCacheRebuild = () => {
+  if (state.paintStroke) return;
+  if (state.zoomRebuildTimer) clearTimeout(state.zoomRebuildTimer);
+  state.zoomRebuildTimer = setTimeout(() => {
+    state.zoomRebuildTimer = 0;
+    if (state.paintStroke || !state.spatial) return;
+    const canvas = getCanvas();
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const layer = state.mapLayer;
+    const showGrid = state.viewHexGrid;
+    const { grid } = state.spatial.state;
+    const radiusM = grid.neighbor_center_distance_m / Math.sqrt(3);
+    const sizePx = radiusM * state.camera.zoom;
+    const drawSize = showGrid ? sizePx : sizePx + 0.9;
+    const gridStroke = showGrid
+      ? (layer === "empty" ? "rgba(140, 160, 190, 0.45)" : "rgba(20, 28, 36, 0.40)")
+      : null;
+    const gridWidth = showGrid ? 1.5 : 0;
+    rebuildOffscreenCache(layer, showGrid, w, h, drawSize, sizePx, gridStroke, gridWidth);
+    drawSpatial();
+  }, ZOOM_REBUILD_MS);
 };
 
 export const drawSpatialNow = () => {
@@ -290,24 +322,45 @@ export const drawSpatialNow = () => {
   const zoomMatch = cacheOk && Math.abs(state.offscreenCache.zoom - state.camera.zoom) < 1e-12;
 
   if (!painting && cacheOk && zoomMatch && !state.dirtyRect) {
-    const dx = (state.offscreenCache.camCx - state.camera.cx) * state.camera.zoom;
-    const dy = (state.offscreenCache.camCy - state.camera.cy) * state.camera.zoom;
-    blitOffscreen(ctx, state.offscreenCache.canvas, dx, dy, w, h);
+    const { dx, dy } = cameraSlipCss(
+      state.offscreenCache.camCx, state.offscreenCache.camCy,
+      state.camera.cx, state.camera.cy, state.camera.zoom,
+    );
+    if (panLeavesOverscan(dx, dy, state.offscreenCache.margin, sizePx)) {
+      const oc = rebuildOffscreenCache(layer, showGrid, w, h, drawSize, sizePx, gridStroke, gridWidth);
+      blitOverscanWindow(ctx, oc, w, h, 0, 0);
+    } else {
+      blitOverscanWindow(ctx, state.offscreenCache, w, h, dx, dy);
+    }
   } else if (!painting && cacheOk && !zoomMatch && !state.dirtyRect) {
     const scale = state.camera.zoom / state.offscreenCache.zoom;
-    const dx = (state.offscreenCache.camCx - state.camera.cx) * state.camera.zoom;
-    const dy = (state.offscreenCache.camCy - state.camera.cy) * state.camera.zoom;
+    const oc = state.offscreenCache;
+    // Current zoom for slip (wheel re-anchors cx/cy). Full overscan fills zoom-out.
+    const { dx, dy } = cameraSlipCss(oc.camCx, oc.camCy, state.camera.cx, state.camera.cy, state.camera.zoom);
+    const cacheW = w + 2 * oc.margin;
+    const cacheH = h + 2 * oc.margin;
     ctx.save();
     ctx.translate(w / 2 + dx, h / 2 + dy);
     ctx.scale(scale, scale);
     ctx.translate(-w / 2, -h / 2);
-    blitOffscreen(ctx, state.offscreenCache.canvas, 0, 0, w, h);
+    ctx.drawImage(
+      oc.canvas,
+      0, 0, oc.canvas.width, oc.canvas.height,
+      -oc.margin, -oc.margin, cacheW, cacheH,
+    );
     ctx.restore();
-    scheduleCacheRebuild();
+    scheduleZoomCacheRebuild();
   } else if (painting && cacheOk && zoomMatch) {
-    const dx = (state.offscreenCache.camCx - state.camera.cx) * state.camera.zoom;
-    const dy = (state.offscreenCache.camCy - state.camera.cy) * state.camera.zoom;
-    blitOffscreen(ctx, state.offscreenCache.canvas, dx, dy, w, h);
+    const { dx, dy } = cameraSlipCss(
+      state.offscreenCache.camCx, state.offscreenCache.camCy,
+      state.camera.cx, state.camera.cy, state.camera.zoom,
+    );
+    if (panLeavesOverscan(dx, dy, state.offscreenCache.margin, sizePx)) {
+      const oc = rebuildOffscreenCache(layer, showGrid, w, h, drawSize, sizePx, gridStroke, gridWidth);
+      blitOverscanWindow(ctx, oc, w, h, 0, 0);
+    } else {
+      blitOverscanWindow(ctx, state.offscreenCache, w, h, dx, dy);
+    }
     // Keep stroke dirty until commit rebuild — clearing forced full-map patch flicker.
     if (state.dirtyRect) {
       syncHeightGrid();
@@ -315,8 +368,8 @@ export const drawSpatialNow = () => {
       paintCellsTo(ctx, patch, layer, showGrid, drawSize, sizePx, gridStroke, gridWidth);
     }
   } else {
-    const oc = rebuildOffscreenCache(layer, showGrid, w, h, drawSize, sizePx, gridStroke, gridWidth, padPx);
-    blitOffscreen(ctx, oc, 0, 0, w, h);
+    const oc = rebuildOffscreenCache(layer, showGrid, w, h, drawSize, sizePx, gridStroke, gridWidth);
+    blitOverscanWindow(ctx, oc, w, h, 0, 0);
     state.dirtyRect = null;
   }
 

@@ -37,6 +37,7 @@ a separate architecture decision.
 
 ## After the app opens
 
-Empty Home still uses **Create your first world**. It creates `mapkeeper.toml`
-(identity + immutable `[spatial]` metric config) and opens the neutral
-five-mode workspace.
+Empty Home still uses **Create your first world**. It creates a world folder
+with `mapkeeper.toml` (identity + maps list) and `maps/<id>/` (map.toml with
+immutable `[spatial]` + spatial state), then opens the neutral five-mode
+workspace on the first map (N-035 / N-037).

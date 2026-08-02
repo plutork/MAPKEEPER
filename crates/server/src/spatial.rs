@@ -88,10 +88,19 @@ pub(crate) fn routes() -> Router<Arc<ServerState>> {
 }
 
 
+/// Active **map** path for spatial I/O (N-035). Lock key stays world folder.
 fn active_world(server: &ServerState) -> Result<(PathBuf, String), (StatusCode, String)> {
     let app = server.app.lock().unwrap();
     match &app.active {
-        Some(world) => Ok((world.path.clone(), world.id.clone())),
+        Some(world) => Ok((world.map_path.clone(), world.id.clone())),
+        None => Err((StatusCode::BAD_REQUEST, "no active world".into())),
+    }
+}
+
+fn active_world_lock_key(server: &ServerState) -> Result<String, (StatusCode, String)> {
+    let app = server.app.lock().unwrap();
+    match &app.active {
+        Some(world) => Ok(world_io::path_cmp_key(&world.path)),
         None => Err((StatusCode::BAD_REQUEST, "no active world".into())),
     }
 }
@@ -117,7 +126,7 @@ async fn restore_bak(State(server): State<Arc<ServerState>>) -> impl IntoRespons
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let key = world_io::path_cmp_key(&path);
+    let key = match active_world_lock_key(&server) { Ok(k) => k, Err(e) => return e.into_response() };
     let lock = server.world_lock(&key);
     let _guard = lock.lock().unwrap();
     match restore_spatial_from_bak(&path) {
@@ -162,7 +171,7 @@ async fn put_stub(
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let key = world_io::path_cmp_key(&path);
+    let key = match active_world_lock_key(&server) { Ok(k) => k, Err(e) => return e.into_response() };
     let lock = server.world_lock(&key);
     let _guard = lock.lock().unwrap();
     let mut state = match load_state(&path) {
@@ -198,7 +207,7 @@ async fn stroke_begin(
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let key = world_io::path_cmp_key(&path);
+    let key = match active_world_lock_key(&server) { Ok(k) => k, Err(e) => return e.into_response() };
     {
         let committed = server.recent_committed_strokes.lock().unwrap();
         if committed.contains_key(&body.stroke_id) {
@@ -249,7 +258,7 @@ async fn stroke_chunk(
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let key = world_io::path_cmp_key(&path);
+    let key = match active_world_lock_key(&server) { Ok(k) => k, Err(e) => return e.into_response() };
     let mut strokes = server.strokes.lock().unwrap();
     let Some(staging) = strokes.get_mut(&body.stroke_id) else {
         return (StatusCode::BAD_REQUEST, "unknown stroke_id — begin first").into_response();
@@ -302,7 +311,7 @@ async fn stroke_commit(
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let key = world_io::path_cmp_key(&path);
+    let key = match active_world_lock_key(&server) { Ok(k) => k, Err(e) => return e.into_response() };
 
     if let Some(replay) = replay_committed_view(&server, &path, &key, &body.stroke_id) {
         return match replay {
@@ -363,7 +372,7 @@ async fn stroke_oneshot(
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let key = world_io::path_cmp_key(&path);
+    let key = match active_world_lock_key(&server) { Ok(k) => k, Err(e) => return e.into_response() };
 
     if let Some(replay) = replay_committed_view(&server, &path, &key, &body.stroke_id) {
         return match replay {

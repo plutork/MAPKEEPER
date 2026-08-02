@@ -1,4 +1,4 @@
-//! Create saga: preset resolution + durable world creation (N-025 / N-031).
+//! Create saga: preset resolution + durable world+first-map creation (N-025 / N-035 / N-037).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -8,11 +8,12 @@ use axum::response::IntoResponse;
 use axum::Json;
 use mapkeeper_core::projects::ProjectEntry;
 use mapkeeper_core::spatial::preset_by_id;
-use mapkeeper_core::world::{self, SpatialConfig};
+use mapkeeper_core::world::{self, SpatialConfig, DEFAULT_FIRST_MAP_ID};
 
 use super::{forget_registry_only, registry_error, CreateProjectResult};
 use crate::state::{ActiveWorld, ServerState};
 use crate::world_io;
+use crate::world_layout;
 
 pub(super) fn resolve_create_preset(
     preset_id: Option<&str>,
@@ -35,12 +36,11 @@ pub(super) fn resolve_create_preset(
             }
         },
     };
-    // Full metric validation, not id-only.
     SpatialConfig::from_preset(preset).assert_matches_catalog()?;
     Ok(preset)
 }
 
-/// Create dir + manifest + spatial + registry + activate, or recoverable cleanup (N-025).
+/// Create dir + world manifest + first map + spatial + registry + activate (N-035).
 pub(super) fn transactional_create(
     server: &Arc<ServerState>,
     id: String,
@@ -103,7 +103,6 @@ pub(super) fn transactional_create(
         return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
     }
 
-    // Marker first — owns cleanup contour for this Create.
     if let Err(error) = world_io::write_incomplete_marker(&path) {
         let cleanup = world_io::cleanup_after_failed_create_checked(&path);
         let msg = match cleanup {
@@ -127,18 +126,39 @@ pub(super) fn transactional_create(
         (StatusCode::INTERNAL_SERVER_ERROR, full).into_response()
     };
 
+    let map_ref = world_layout::default_first_map_ref();
+    let map_path = world_layout::map_abs_path(&path, &map_ref);
+    if let Err(error) = std::fs::create_dir_all(&map_path) {
+        return fail(
+            server,
+            &path,
+            format!("create_incomplete: maps dir: {error}"),
+        );
+    }
+
     if let Err(error) = crate::atomic_io::atomic_replace(
         &manifest_path,
-        world::manifest_toml_with_preset(&id, preset).as_bytes(),
+        world::world_manifest_toml(&id, std::slice::from_ref(&map_ref)).as_bytes(),
     ) {
         return fail(
             server,
             &path,
-            format!("create_incomplete: manifest: {error}"),
+            format!("create_incomplete: world manifest: {error}"),
         );
     }
 
-    if let Err(error) = crate::spatial::ensure_spatial_state(&path) {
+    if let Err(error) = crate::atomic_io::atomic_replace(
+        &map_path.join("map.toml"),
+        world::map_manifest_toml(DEFAULT_FIRST_MAP_ID, preset).as_bytes(),
+    ) {
+        return fail(
+            server,
+            &path,
+            format!("create_incomplete: map manifest: {error}"),
+        );
+    }
+
+    if let Err(error) = crate::spatial::ensure_spatial_state(&map_path) {
         return fail(
             server,
             &path,
@@ -167,10 +187,11 @@ pub(super) fn transactional_create(
         Err(_) => Some("marker_residual"),
     };
 
-    // Registry lock released before app mutex (canonical order).
     server.app.lock().unwrap().active = Some(ActiveWorld {
         path: path.clone(),
         id: id.clone(),
+        map_path,
+        map_id: DEFAULT_FIRST_MAP_ID.to_string(),
     });
     Json(CreateProjectResult {
         id: entry.id,

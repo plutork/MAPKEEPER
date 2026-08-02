@@ -173,7 +173,7 @@ canvas.addEventListener("wheel", (event) => {
   state.camera.cx += wx - wx2;
   state.camera.cy += wy - wy2;
   markCameraAuthorSet();
-  invalidateMapCache();
+  // Keep cache for scaled blit; coalesced rebuild fills full hexes (less flicker).
   drawSpatial();
 }, { passive: false });
 

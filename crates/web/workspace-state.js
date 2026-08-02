@@ -31,6 +31,7 @@ export const state = {
   offscreenCache: null,
   dirtyRect: null,
   cacheRebuildRaf: 0,
+  zoomRebuildTimer: 0,
   lastFrameMs: 0,
   heightRev: -1,
 };

@@ -470,14 +470,18 @@ fn complete_registered_with_marker_refuses_cleanup() {
     let prev = std::env::var("APPDATA").ok();
     std::env::set_var("APPDATA", dir.path());
     let world = dir.path().join("worlds").join("done");
-    fs::create_dir_all(world.join("spatial")).unwrap();
-    fs::write(world.join("mapkeeper.toml"), world::manifest_toml("done")).unwrap();
-    // Minimal valid spatial via ensure would need more; plant via core default.
+    let map_path = crate::world_layout::write_world_skeleton(
+        &world,
+        "done",
+        mapkeeper_core::spatial::alpha_default_preset(),
+    )
+    .unwrap();
     let state = mapkeeper_core::spatial::default_spatial_state();
     let mut state = state;
     state.revision = 1;
+    fs::create_dir_all(map_path.join("spatial")).unwrap();
     fs::write(
-        world.join("spatial/state.json"),
+        map_path.join("spatial/state.json"),
         state.to_json_pretty().unwrap(),
     )
     .unwrap();

@@ -5,7 +5,7 @@ Active product-shell routing (ownership index). Product invariants live in
 
 | Need | Start here |
 |---|---|
-| World identity + spatial config (`mapkeeper.toml`) | `crates/core/src/world.rs` |
+| World⊃maps layout (N-035/N-037): world `mapkeeper.toml` + `maps/<id>/map.toml` | `crates/core/src/world.rs` · `crates/server/src/world_layout.rs` |
 | Projects registry shape | `crates/core/src/projects.rs` |
 | Spatial foundation + relief field | `crates/core/src/spatial/` |
 | Hard-disk brush + Airbrush rate | `crates/core/src/spatial/brush.rs` |
@@ -26,7 +26,7 @@ Active product-shell routing (ownership index). Product invariants live in
 | Server tests (outside implementation, N-031) | `crates/server/src/projects/tests.rs` · `crates/server/src/spatial/tests.rs` · `crates/server/src/world_io/tests.rs` |
 | Thin shell document | `crates/web/index.html` + `styles.css` + `main.js` |
 | Sole Editor/view state owner | `crates/web/workspace-state.js` |
-| CRS renderer / camera / relief / stroke client | `crates/web/renderer.js` · `camera.js` · `relief-tool.js` · `spatial-transaction.js` (HiDPI cache blit → CSS dest) |
+| CRS renderer / camera / relief / stroke client | `crates/web/renderer.js` · `camera.js` · `relief-tool.js` · `spatial-transaction.js` (overscan offscreen cache + viewport blit; rebuild outside margin; zoom debounce + seamless cache swap) |
 | View Reset zoom (contain to host) | `#reset-zoom` → `fitCamera`; `shell-math.js` `fitZoomForViewport` |
 | Camera sticky fit on resize (N-029) | `workspace-state.js` `cameraFollowsFit` · `camera.js` `observeCanvasHost` · `shell-math.js` `nextCameraFollowsFit` |
 | Pure brush geometry / hover readout | `crates/web/brush-geometry.js` · `hover-readout.js` |
@@ -34,7 +34,7 @@ Active product-shell routing (ownership index). Product invariants live in
 | Relief gesture rule (domain, N-030) | `crates/core/src/spatial/field.rs` `next_relief_value` → `probe_next_relief` |
 | Mirrored threshold parity gate (N-030) | `scripts/check_domain_constants.py` |
 | Bench hooks (`?bench=1` only) | `crates/web/bench-hooks.js` |
-| Home/Create/Delete + HTTP | `crates/web/worlds.js` · `api.js` |
+| Home worlds → maps L2 + Add map / Create / Delete | `crates/web/worlds.js` · `api.js` · `index.html` |
 | WASM bootstrap + pick helpers | `crates/web/src/lib.rs` · `wasm-api.js` |
 | Desktop launch | `crates/desktop/src/lib.rs` |
 | Local checks | `scripts/check.ps1` |

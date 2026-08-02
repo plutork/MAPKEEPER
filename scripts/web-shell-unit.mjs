@@ -12,6 +12,12 @@ import {
   expandDirtyAabb,
   fitZoomForViewport,
   offscreenBlitArgs,
+  overscanMarginCss,
+  overscanCacheCssSize,
+  panLeavesOverscan,
+  overscanSourceCss,
+  overscanBlitArgs,
+  cameraSlipCss,
   nextCameraFollowsFit,
   bakRestoreOffer,
 } from "../crates/web/shell-math.js";
@@ -160,6 +166,34 @@ check("offscreen blit dest is CSS not device px", () => {
   assert.deepEqual(args, [0, 0, bitmapW, bitmapH, 0, 0, cssW, cssH]);
   assert.ok(args[6] < args[2]);
   assert.ok(args[7] < args[3]);
+});
+
+check("overscan margin and pan safe band (N-026 crs-overscan-cache)", () => {
+  assert.equal(overscanMarginCss(10), 256);
+  assert.equal(overscanMarginCss(200), 400);
+  const { cacheW, cacheH } = overscanCacheCssSize(1000, 600, 256);
+  assert.equal(cacheW, 1000 + 512);
+  assert.equal(cacheH, 600 + 512);
+  assert.equal(panLeavesOverscan(0, 0, 256, 24), false);
+  assert.equal(panLeavesOverscan(100, 0, 256, 24), false);
+  assert.equal(panLeavesOverscan(240, 0, 256, 24), true);
+  const { srcX, srcY } = overscanSourceCss(256, 40, -10);
+  assert.equal(srcX, 216);
+  assert.equal(srcY, 266);
+  const blit = overscanBlitArgs(216, 266, 1000, 600, 1.5);
+  assert.deepEqual(blit, [216 * 1.5, 266 * 1.5, 1500, 900, 0, 0, 1000, 600]);
+});
+
+check("zoom preview slip uses current zoom (not cache zoom)", () => {
+  // Wheel re-anchors cx; old-zoom slip drifts the preview until rebuild.
+  const cacheCx = 0;
+  const camCx = 100;
+  const zOld = 1;
+  const zNew = 1 / 1.12;
+  const withNew = cameraSlipCss(cacheCx, 0, camCx, 0, zNew);
+  const withOld = cameraSlipCss(cacheCx, 0, camCx, 0, zOld);
+  assert.equal(withNew.dx, -100 * zNew);
+  assert.ok(Math.abs(withNew.dx - withOld.dx) > 1e-9);
 });
 
 check("camera sticky fit survives resize, author view detaches", () => {

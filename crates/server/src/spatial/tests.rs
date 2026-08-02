@@ -3,16 +3,16 @@
 use super::*;
 use axum::body::Body;
 use http_body_util::BodyExt;
-use mapkeeper_core::world;
-
 use crate::state::RecentCommittedStroke;
 use tempfile::tempdir;
 use tower::ServiceExt;
 
-fn app_with_world(path: &Path) -> axum::Router {
+fn app_with_world(world_path: &Path, map_path: &Path) -> axum::Router {
     let state = Arc::new(ServerState::new(Some(crate::state::ActiveWorld {
-        path: path.to_path_buf(),
+        path: world_path.to_path_buf(),
         id: "t".into(),
+        map_path: map_path.to_path_buf(),
+        map_id: "main".into(),
     })));
     routes().with_state(state)
 }
@@ -45,42 +45,47 @@ async fn json_request(
     (status, value)
 }
 
-fn seed_world() -> tempfile::TempDir {
+fn seed_world() -> (tempfile::TempDir, PathBuf) {
     let dir = tempdir().unwrap();
-    std::fs::write(dir.path().join("mapkeeper.toml"), world::manifest_toml("t")).unwrap();
-    ensure_spatial_state(dir.path()).unwrap();
-    dir
+    let map_path = crate::world_layout::write_world_skeleton(
+        dir.path(),
+        "t",
+        mapkeeper_core::spatial::alpha_default_preset(),
+    )
+    .unwrap();
+    ensure_spatial_state(&map_path).unwrap();
+    (dir, map_path)
 }
 
 #[test]
 fn ensure_writes_spatial_config_and_metric_grid() {
     let dir = tempdir().unwrap();
-    std::fs::write(dir.path().join("mapkeeper.toml"), world::manifest_toml("t")).unwrap();
-    let state = ensure_spatial_state(dir.path()).unwrap();
+    let map_path = crate::world_layout::write_world_skeleton(
+        dir.path(),
+        "t",
+        mapkeeper_core::spatial::alpha_default_preset(),
+    )
+    .unwrap();
+    let state = ensure_spatial_state(&map_path).unwrap();
     assert_eq!(state.grid.neighbor_center_distance_m, 1000.0);
     assert!(state.revision >= 1);
-    let again = ensure_spatial_state(dir.path()).unwrap();
+    let again = ensure_spatial_state(&map_path).unwrap();
     assert_eq!(again.grid, state.grid);
 }
 
 #[test]
-fn ensure_backfills_spatial_section_on_legacy_manifest() {
+fn ensure_requires_map_toml_not_world_spatial() {
     let dir = tempdir().unwrap();
     let legacy = "# mapkeeper world workspace\n\n[world]\nid = \"old\"\nname = \"old\"\nversion = \"0.3.0\"\n";
     std::fs::write(dir.path().join("mapkeeper.toml"), legacy).unwrap();
-    let state = ensure_spatial_state(dir.path()).unwrap();
-    assert_eq!(state.grid.neighbor_center_distance_m, 1000.0);
-    let manifest = world::parse_manifest(
-        &std::fs::read_to_string(dir.path().join("mapkeeper.toml")).unwrap(),
-    )
-    .unwrap();
-    assert!(manifest.spatial.is_some());
+    let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+    assert!(err.contains("missing map.toml"), "{err}");
 }
 
 #[tokio::test]
 async fn stroke_oneshot_atomic_gesture() {
-    let dir = seed_world();
-    let app = app_with_world(dir.path());
+    let (dir, map_path) = seed_world();
+    let app = app_with_world(dir.path(), &map_path);
     let (status, view) = json_request(
         app,
         "POST",
@@ -95,15 +100,15 @@ async fn stroke_oneshot_atomic_gesture() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(view["state"]["field"]["cells"]["0,0"], 4);
     assert_eq!(view["state"]["revision"], 2);
-    let raw = std::fs::read_to_string(dir.path().join("spatial/state.json")).unwrap();
+    let raw = std::fs::read_to_string(map_path.join("spatial/state.json")).unwrap();
     assert!(raw.contains("\"0,0\": 4") || raw.contains("\"0,0\":4"));
     assert!(!raw.contains("\"0,0\": 2")); // no partial mid-values
 }
 
 #[tokio::test]
 async fn multi_chunk_commit_is_one_revision() {
-    let dir = seed_world();
-    let app = app_with_world(dir.path());
+    let (dir, map_path) = seed_world();
+    let app = app_with_world(dir.path(), &map_path);
     let (st, _) = json_request(
         app.clone(),
         "POST",
@@ -125,7 +130,7 @@ async fn multi_chunk_commit_is_one_revision() {
     assert_eq!(st, StatusCode::OK);
     // Disk unchanged mid-staging.
     let mid = SpatialState::from_json(
-        &std::fs::read_to_string(dir.path().join("spatial/state.json")).unwrap(),
+        &std::fs::read_to_string(map_path.join("spatial/state.json")).unwrap(),
     )
     .unwrap();
     assert!(mid.field.cells.is_empty());
@@ -157,8 +162,8 @@ async fn multi_chunk_commit_is_one_revision() {
 
 #[tokio::test]
 async fn abort_leaves_disk_untouched() {
-    let dir = seed_world();
-    let app = app_with_world(dir.path());
+    let (dir, map_path) = seed_world();
+    let app = app_with_world(dir.path(), &map_path);
     json_request(
         app.clone(),
         "POST",
@@ -194,7 +199,7 @@ async fn abort_leaves_disk_untouched() {
     .await;
     assert_eq!(st, StatusCode::OK);
     let state = SpatialState::from_json(
-        &std::fs::read_to_string(dir.path().join("spatial/state.json")).unwrap(),
+        &std::fs::read_to_string(map_path.join("spatial/state.json")).unwrap(),
     )
     .unwrap();
     assert!(state.field.cells.is_empty());
@@ -203,8 +208,8 @@ async fn abort_leaves_disk_untouched() {
 
 #[tokio::test]
 async fn duplicate_chunk_and_duplicate_commit() {
-    let dir = seed_world();
-    let app = app_with_world(dir.path());
+    let (dir, map_path) = seed_world();
+    let app = app_with_world(dir.path(), &map_path);
     json_request(
         app.clone(),
         "POST",
@@ -256,8 +261,8 @@ async fn duplicate_chunk_and_duplicate_commit() {
 
 #[tokio::test]
 async fn stale_base_revision_conflicts() {
-    let dir = seed_world();
-    let app = app_with_world(dir.path());
+    let (dir, map_path) = seed_world();
+    let app = app_with_world(dir.path(), &map_path);
     let (st, _) = json_request(
         app,
         "POST",
@@ -274,8 +279,8 @@ async fn stale_base_revision_conflicts() {
 
 #[tokio::test]
 async fn cells_outside_grid_rejected() {
-    let dir = seed_world();
-    let app = app_with_world(dir.path());
+    let (dir, map_path) = seed_world();
+    let app = app_with_world(dir.path(), &map_path);
     let (st, _) = json_request(
         app,
         "POST",
@@ -289,7 +294,7 @@ async fn cells_outside_grid_rejected() {
     .await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
     let state = SpatialState::from_json(
-        &std::fs::read_to_string(dir.path().join("spatial/state.json")).unwrap(),
+        &std::fs::read_to_string(map_path.join("spatial/state.json")).unwrap(),
     )
     .unwrap();
     assert_eq!(state.revision, 1);
@@ -299,10 +304,12 @@ async fn cells_outside_grid_rejected() {
 #[tokio::test]
 async fn failed_write_does_not_register_committed() {
     crate::atomic_io::clear_failpoint();
-    let dir = seed_world();
+    let (dir, map_path) = seed_world();
     let server = Arc::new(ServerState::new(Some(crate::state::ActiveWorld {
         path: dir.path().to_path_buf(),
         id: "t".into(),
+        map_path: map_path.clone(),
+        map_id: "main".into(),
     })));
     let app = routes().with_state(server.clone());
     crate::atomic_io::set_failpoint(crate::atomic_io::AtomicFailAt::FinalRename);
@@ -356,8 +363,8 @@ fn recent_committed_strokes_ttl_purge() {
 
 #[tokio::test]
 async fn failed_before_commit_no_partial_on_disk() {
-    let dir = seed_world();
-    let app = app_with_world(dir.path());
+    let (dir, map_path) = seed_world();
+    let app = app_with_world(dir.path(), &map_path);
     json_request(
         app.clone(),
         "POST",
@@ -384,7 +391,7 @@ async fn failed_before_commit_no_partial_on_disk() {
     )
     .await;
     let state = SpatialState::from_json(
-        &std::fs::read_to_string(dir.path().join("spatial/state.json")).unwrap(),
+        &std::fs::read_to_string(map_path.join("spatial/state.json")).unwrap(),
     )
     .unwrap();
     assert!(!state.field.cells.contains_key("0,0"));
@@ -392,12 +399,12 @@ async fn failed_before_commit_no_partial_on_disk() {
 
 #[test]
 fn corrupt_state_does_not_rewrite_defaults() {
-    let dir = seed_world();
-    let path = dir.path().join("spatial/state.json");
-    let good = ensure_spatial_state(dir.path()).unwrap();
-    write_spatial_state(dir.path(), &good).unwrap(); // creates *.bak
+    let (_dir, map_path) = seed_world();
+    let path = map_path.join("spatial/state.json");
+    let good = ensure_spatial_state(&map_path).unwrap();
+    write_spatial_state(&map_path, &good).unwrap(); // creates *.bak
     std::fs::write(&path, "{truncated").unwrap();
-    let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+    let err = ensure_spatial_state(&map_path).unwrap_err().to_string();
     assert!(err.contains("corrupt_spatial"));
     assert!(err.contains("bak_available=true"));
     assert_eq!(std::fs::read(&path).unwrap(), b"{truncated");
@@ -406,33 +413,33 @@ fn corrupt_state_does_not_rewrite_defaults() {
 
 #[test]
 fn restart_missing_primary_valid_bak_is_recovery_not_default() {
-    let dir = seed_world();
-    let path = dir.path().join("spatial/state.json");
-    let good = ensure_spatial_state(dir.path()).unwrap();
-    write_spatial_state(dir.path(), &good).unwrap();
+    let (_dir, map_path) = seed_world();
+    let path = map_path.join("spatial/state.json");
+    let good = ensure_spatial_state(&map_path).unwrap();
+    write_spatial_state(&map_path, &good).unwrap();
     let bak = crate::atomic_io::bak_path(&path);
     let bak_bytes = std::fs::read(&bak).unwrap();
     std::fs::remove_file(&path).unwrap();
     // Simulated restart: open with missing primary + valid bak.
-    let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+    let err = ensure_spatial_state(&map_path).unwrap_err().to_string();
     assert!(err.contains("interrupted_write"));
     assert!(err.contains("bak_available=true"));
     assert!(!path.is_file());
     assert_eq!(std::fs::read(&bak).unwrap(), bak_bytes);
     // Explicit restore recovers author state; never silent default.
-    let restored = restore_spatial_from_bak(dir.path()).unwrap();
+    let restored = restore_spatial_from_bak(&map_path).unwrap();
     assert!(restored.revision >= 1);
     assert!(path.is_file());
 }
 
 #[test]
 fn restart_missing_primary_invalid_bak_never_defaults() {
-    let dir = seed_world();
-    let path = dir.path().join("spatial/state.json");
+    let (_dir, map_path) = seed_world();
+    let path = map_path.join("spatial/state.json");
     let bak = crate::atomic_io::bak_path(&path);
     std::fs::remove_file(&path).unwrap();
     std::fs::write(&bak, "{bad-bak").unwrap();
-    let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+    let err = ensure_spatial_state(&map_path).unwrap_err().to_string();
     assert!(err.contains("interrupted_write"));
     assert!(err.contains("bak_available=false"));
     assert!(!path.is_file());
@@ -441,13 +448,13 @@ fn restart_missing_primary_invalid_bak_never_defaults() {
 
 #[test]
 fn invalid_primary_valid_bak_never_defaults() {
-    let dir = seed_world();
-    let path = dir.path().join("spatial/state.json");
-    let good = ensure_spatial_state(dir.path()).unwrap();
-    write_spatial_state(dir.path(), &good).unwrap();
+    let (_dir, map_path) = seed_world();
+    let path = map_path.join("spatial/state.json");
+    let good = ensure_spatial_state(&map_path).unwrap();
+    write_spatial_state(&map_path, &good).unwrap();
     let bak_bytes = std::fs::read(crate::atomic_io::bak_path(&path)).unwrap();
     std::fs::write(&path, "{truncated").unwrap();
-    let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+    let err = ensure_spatial_state(&map_path).unwrap_err().to_string();
     assert!(err.contains("corrupt_spatial"));
     assert!(err.contains("bak_available=true"));
     assert_eq!(std::fs::read(&path).unwrap(), b"{truncated");
@@ -460,26 +467,26 @@ fn invalid_primary_valid_bak_never_defaults() {
 #[test]
 fn failpoint_crash_after_bak_survives_restart_as_recovery() {
     crate::atomic_io::clear_failpoint();
-    let dir = seed_world();
-    let path = dir.path().join("spatial/state.json");
-    let good = ensure_spatial_state(dir.path()).unwrap();
+    let (_dir, map_path) = seed_world();
+    let path = map_path.join("spatial/state.json");
+    let good = ensure_spatial_state(&map_path).unwrap();
     let good_json = good.to_json_pretty().unwrap();
-    write_spatial_state(dir.path(), &good).unwrap();
+    write_spatial_state(&map_path, &good).unwrap();
     // Force a second replace so bak holds last-good author bytes.
     let mut next = good.clone();
     next.revision = good.revision + 1;
     crate::atomic_io::set_failpoint(crate::atomic_io::AtomicFailAt::AfterPrimaryToBak);
-    assert!(write_spatial_state(dir.path(), &next).is_err());
+    assert!(write_spatial_state(&map_path, &next).is_err());
     assert!(!path.is_file());
     let bak = crate::atomic_io::bak_path(&path);
     assert!(SpatialState::from_json(&std::fs::read_to_string(&bak).unwrap()).is_ok());
     assert!(!crate::atomic_io::leftover_temp_paths(&path).is_empty());
     // Simulated process restart.
-    let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+    let err = ensure_spatial_state(&map_path).unwrap_err().to_string();
     assert!(err.contains("interrupted_write"));
     assert!(err.contains("bak_available=true"));
     assert!(!path.is_file());
-    let restored = restore_spatial_from_bak(dir.path()).unwrap();
+    let restored = restore_spatial_from_bak(&map_path).unwrap();
     assert!(restored.revision >= 1);
     let _ = good_json;
 }
@@ -487,33 +494,33 @@ fn failpoint_crash_after_bak_survives_restart_as_recovery() {
 #[test]
 fn failpoint_final_rename_restores_primary_before_error() {
     crate::atomic_io::clear_failpoint();
-    let dir = seed_world();
-    let path = dir.path().join("spatial/state.json");
-    let good = ensure_spatial_state(dir.path()).unwrap();
-    write_spatial_state(dir.path(), &good).unwrap();
+    let (_dir, map_path) = seed_world();
+    let path = map_path.join("spatial/state.json");
+    let good = ensure_spatial_state(&map_path).unwrap();
+    write_spatial_state(&map_path, &good).unwrap();
     let before = std::fs::read(&path).unwrap();
     let mut next = good.clone();
     next.revision = good.revision + 1;
     crate::atomic_io::set_failpoint(crate::atomic_io::AtomicFailAt::FinalRename);
-    assert!(write_spatial_state(dir.path(), &next).is_err());
+    assert!(write_spatial_state(&map_path, &next).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), before);
     // Restart sees healthy primary (restored), not defaults.
-    let loaded = ensure_spatial_state(dir.path()).unwrap();
+    let loaded = ensure_spatial_state(&map_path).unwrap();
     assert_eq!(loaded.revision, good.revision);
 }
 
 #[test]
 fn restore_bak_quarantines_corrupt_and_recovers() {
-    let dir = seed_world();
-    let path = dir.path().join("spatial/state.json");
+    let (_dir, map_path) = seed_world();
+    let path = map_path.join("spatial/state.json");
     // Force a known bak by rewriting once more.
-    let good = ensure_spatial_state(dir.path()).unwrap();
-    write_spatial_state(dir.path(), &good).unwrap();
+    let good = ensure_spatial_state(&map_path).unwrap();
+    write_spatial_state(&map_path, &good).unwrap();
     std::fs::write(&path, "{truncated").unwrap();
-    let restored = restore_spatial_from_bak(dir.path()).unwrap();
+    let restored = restore_spatial_from_bak(&map_path).unwrap();
     assert!(restored.revision >= 1);
     assert!(SpatialState::from_json(&std::fs::read_to_string(&path).unwrap()).is_ok());
-    let diag_count = std::fs::read_dir(dir.path().join("spatial"))
+    let diag_count = std::fs::read_dir(map_path.join("spatial"))
         .unwrap()
         .filter(|e| {
             e.as_ref()
@@ -527,12 +534,12 @@ fn restore_bak_quarantines_corrupt_and_recovers() {
 
 #[test]
 fn invalid_bak_restore_errors() {
-    let dir = seed_world();
-    let path = dir.path().join("spatial/state.json");
+    let (_dir, map_path) = seed_world();
+    let path = map_path.join("spatial/state.json");
     let bak = crate::atomic_io::bak_path(&path);
     std::fs::write(&path, "{truncated").unwrap();
     std::fs::write(&bak, "{also-bad").unwrap();
-    let err = restore_spatial_from_bak(dir.path())
+    let err = restore_spatial_from_bak(&map_path)
         .unwrap_err()
         .to_string();
     assert!(err.contains("corrupt_spatial"));
@@ -540,14 +547,14 @@ fn invalid_bak_restore_errors() {
 }
 
 #[test]
-fn missing_manifest_with_bak_is_recovery_not_rewrite() {
-    let dir = seed_world();
-    let manifest = dir.path().join("mapkeeper.toml");
+fn missing_map_toml_with_bak_is_recovery_not_rewrite() {
+    let (_dir, map_path) = seed_world();
+    let manifest = map_path.join("map.toml");
     let bak = crate::atomic_io::bak_path(&manifest);
     std::fs::copy(&manifest, &bak).unwrap();
     let bak_bytes = std::fs::read(&bak).unwrap();
     std::fs::remove_file(&manifest).unwrap();
-    let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+    let err = ensure_spatial_state(&map_path).unwrap_err().to_string();
     assert!(err.contains("corrupt_manifest"));
     assert!(err.contains("interrupted_write"));
     assert!(err.contains("bak_available=true"));
@@ -556,14 +563,20 @@ fn missing_manifest_with_bak_is_recovery_not_rewrite() {
 }
 
 #[test]
-fn manifest_preset_mismatch_rejected() {
+fn map_manifest_preset_mismatch_rejected() {
     let dir = tempdir().unwrap();
-    let bad = r#"# mapkeeper world workspace
+    let map_path = crate::world_layout::write_world_skeleton(
+        dir.path(),
+        "t",
+        mapkeeper_core::spatial::alpha_default_preset(),
+    )
+    .unwrap();
+    let bad = r#"# mapkeeper map
 
-[world]
-id = "t"
-name = "t"
-version = "0.3.0"
+[map]
+id = "main"
+name = "main"
+version = "0.4.0"
 
 [spatial]
 preset_id = "wide_2000"
@@ -577,7 +590,7 @@ origin_x_m = 0.0
 origin_y_m = 0.0
 orientation = "pointy-top"
 "#;
-    std::fs::write(dir.path().join("mapkeeper.toml"), bad).unwrap();
-    let err = ensure_spatial_state(dir.path()).unwrap_err().to_string();
+    std::fs::write(map_path.join("map.toml"), bad).unwrap();
+    let err = ensure_spatial_state(&map_path).unwrap_err().to_string();
     assert!(err.contains("manifest/preset mismatch"));
 }

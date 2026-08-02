@@ -13,6 +13,12 @@ export const worldFromScreen = (sx, sy, camera, cssW, cssH) => [
 export const cellInViewport = (sx, sy, cssW, cssH, pad) =>
   !(sx < -pad || sy < -pad || sx > cssW + pad || sy > cssH + pad);
 
+/** Center inset by hex radius → whole hex fits (legacy cull helper). */
+export const cellFullyInViewport = (sx, sy, cssW, cssH, hexRadiusPx) => {
+  const r = Math.max(0, hexRadiusPx);
+  return sx >= r && sy >= r && sx <= cssW - r && sy <= cssH - r;
+};
+
 export const cellInDirty = (x, y, dirty) => {
   if (!dirty) return true;
   return !(x < dirty.minX || x > dirty.maxX || y < dirty.minY || y > dirty.maxY);
@@ -88,3 +94,41 @@ export const nextCameraFollowsFit = (followsFit, event) => {
 export const offscreenBlitArgs = (bitmapW, bitmapH, dx, dy, cssW, cssH) => (
   [0, 0, bitmapW, bitmapH, dx, dy, cssW, cssH]
 );
+
+/** N-026 overscan: margin around viewport (GATE crs-overscan-cache default A). */
+export const overscanMarginCss = (sizePx) => Math.max(256, 2 * Math.max(0, sizePx));
+
+export const overscanCacheCssSize = (viewW, viewH, margin) => ({
+  cacheW: viewW + 2 * margin,
+  cacheH: viewH + 2 * margin,
+});
+
+/** True when pan slip leaves the safe band (margin minus one hex radius). */
+export const panLeavesOverscan = (dx, dy, margin, sizePx) => {
+  const safe = Math.max(0, margin - Math.max(0, sizePx));
+  return Math.abs(dx) > safe || Math.abs(dy) > safe;
+};
+
+/**
+ * Source CSS origin inside overscan cache for current pan slip.
+ * Cache was painted with viewport at (margin, margin).
+ */
+export const overscanSourceCss = (margin, dx, dy) => ({
+  srcX: margin - dx,
+  srcY: margin - dy,
+});
+
+/**
+ * drawImage args: overscan bitmap → viewport (CTM = setTransform(dpr)).
+ * Source rect in device px; dest in CSS px.
+ */
+export const overscanBlitArgs = (srcCssX, srcCssY, viewW, viewH, dpr) => {
+  const s = Math.max(1e-6, dpr);
+  return [srcCssX * s, srcCssY * s, viewW * s, viewH * s, 0, 0, viewW, viewH];
+};
+
+/** Pan slip in CSS px for cache→camera; must use *current* zoom (wheel re-anchors cx/cy). */
+export const cameraSlipCss = (cacheCamCx, cacheCamCy, camCx, camCy, zoom) => ({
+  dx: (cacheCamCx - camCx) * zoom,
+  dy: (cacheCamCy - camCy) * zoom,
+});

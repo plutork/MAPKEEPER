@@ -81,9 +81,14 @@ try {
     if ($created.id -ne "smoke-world") { throw "World create returned wrong id." }
     if (-not (Test-Path (Join-Path $WorldPath "mapkeeper.toml"))) { throw "Identity manifest missing." }
     $manifest = Get-Content -LiteralPath (Join-Path $WorldPath "mapkeeper.toml") -Raw
-    if ($manifest -notmatch "\[spatial\]") { throw "Create missing [spatial] config." }
-    $StatePath = Join-Path $WorldPath (Join-Path "spatial" "state.json")
-    if (-not (Test-Path -LiteralPath $StatePath)) { throw "spatial/state.json missing after create." }
+    if ($manifest -match "\[spatial\]") { throw "World manifest must not carry [spatial] (N-035)." }
+    if ($manifest -notmatch "\[\[maps\]\]") { throw "Create missing maps list." }
+    $MapToml = Join-Path $WorldPath (Join-Path "maps" (Join-Path "main" "map.toml"))
+    if (-not (Test-Path -LiteralPath $MapToml)) { throw "maps/main/map.toml missing after create." }
+    $mapManifest = Get-Content -LiteralPath $MapToml -Raw
+    if ($mapManifest -notmatch "\[spatial\]") { throw "Map missing [spatial] config." }
+    $StatePath = Join-Path $WorldPath (Join-Path "maps" (Join-Path "main" (Join-Path "spatial" "state.json")))
+    if (-not (Test-Path -LiteralPath $StatePath)) { throw "maps/main/spatial/state.json missing after create." }
     if (Test-Path (Join-Path $WorldPath "map")) { throw "Active create produced archived map contract." }
     if (Test-Path (Join-Path $WorldPath "profiles")) { throw "Active create produced archived profiles contract." }
 

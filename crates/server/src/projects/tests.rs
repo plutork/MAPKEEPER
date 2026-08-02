@@ -38,6 +38,43 @@ fn test_server() -> Arc<ServerState> {
 }
 
 #[test]
+fn legacy_single_level_world_is_refused_on_open() {
+    let _lock = lock_appdata_env();
+    let tmp = tempfile::tempdir().unwrap();
+    let _guard = AppDataGuard::set(tmp.path());
+    let server = test_server();
+    let world = tmp.path().join("legacy");
+    fs::create_dir_all(world.join("spatial")).unwrap();
+    let legacy = r#"
+[world]
+id = "legacy"
+name = "legacy"
+version = "0.3.0"
+
+[spatial]
+preset_id = "wide_2000"
+grid_id = "primary"
+width_m = 47631.0
+height_m = 26937.0
+cols = 55
+rows = 36
+neighbor_center_distance_m = 1000.0
+origin_x_m = 0.0
+origin_y_m = 0.0
+orientation = "pointy-top"
+"#;
+    fs::write(world.join("mapkeeper.toml"), legacy).unwrap();
+    let open = activate_and_register(&server, world, None);
+    assert_eq!(open.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = response_json(open);
+    let raw = body.get("raw").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(
+        raw.contains("legacy_world_format") || body.to_string().contains("legacy_world_format"),
+        "{body}"
+    );
+}
+
+#[test]
 fn forget_allowed_only_when_manifest_missing() {
     let temp = tempfile::tempdir().unwrap();
     let world = temp.path().join("ghost");
@@ -63,7 +100,7 @@ fn create_success_clears_marker_and_registers() {
     assert_eq!(resp.status(), StatusCode::OK);
     assert!(!world_io::is_incomplete_create(&world));
     assert!(world.join("mapkeeper.toml").is_file());
-    assert!(world.join("spatial/state.json").is_file());
+    assert!(world.join("maps/main/spatial/state.json").is_file());
     let file = world_io::load_projects().unwrap();
     assert_eq!(file.projects.len(), 1);
     assert_eq!(file.projects[0].id, "alpha");
@@ -173,7 +210,7 @@ fn delete_moves_to_trash_not_purge() {
     let trash = world_io::move_world_to_trash(&world, &registered.id).unwrap();
     assert!(!world.exists());
     assert!(trash.join("mapkeeper.toml").is_file());
-    assert!(trash.join("spatial/state.json").is_file());
+    assert!(trash.join("maps/main/spatial/state.json").is_file());
 }
 
 #[test]
@@ -217,7 +254,7 @@ fn create_registry_write_failure_keeps_complete_unregistered_world() {
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     // Complete on-disk world must not be wiped (state C).
     assert!(world.join("mapkeeper.toml").is_file());
-    assert!(world.join("spatial/state.json").is_file());
+    assert!(world.join("maps/main/spatial/state.json").is_file());
     assert!(world_io::is_incomplete_create(&world));
     let registry = ProjectsFile::default();
     assert!(matches!(
@@ -274,7 +311,7 @@ fn clear_marker_failure_returns_recovery_and_open_reconciles() {
     assert_eq!(body["create_recovery"], "marker_residual");
     assert!(world_io::is_incomplete_create(&world));
     assert!(world.join("mapkeeper.toml").is_file());
-    assert!(world.join("spatial/state.json").is_file());
+    assert!(world.join("maps/main/spatial/state.json").is_file());
     let file = world_io::load_projects().unwrap();
     assert!(world_io::find_registered(&file, &world).is_some());
     assert!(matches!(
@@ -284,7 +321,7 @@ fn clear_marker_failure_returns_recovery_and_open_reconciles() {
     // Simulated restart/open: keep world, clear marker.
     let _ = world_io::clear_incomplete_marker(&world);
     assert!(!world_io::is_incomplete_create(&world));
-    let open = activate_and_register(&server, "residual".into(), world.clone());
+    let open = activate_and_register(&server, world.clone(), None);
     assert_eq!(open.status(), StatusCode::OK);
     assert!(world.exists());
 }
@@ -314,7 +351,7 @@ fn marker_plus_complete_registered_never_deleted() {
     ));
     assert!(world_io::cleanup_incomplete_create(&world, &file).is_err());
     assert!(world.join("mapkeeper.toml").is_file());
-    let open = activate_and_register(&server, "keep".into(), world.clone());
+    let open = activate_and_register(&server, world.clone(), None);
     // open_project reconciles via classifier; exercise clear + activate
     let _ = world_io::clear_incomplete_marker(&world);
     assert_eq!(open.status(), StatusCode::OK);
@@ -348,7 +385,7 @@ fn marker_plus_complete_unregistered_never_deleted() {
     ));
     assert!(world_io::cleanup_incomplete_create(&world, &file).is_err());
     assert!(world.join("mapkeeper.toml").is_file());
-    let open = activate_and_register(&server, "orphan".into(), world.clone());
+    let open = activate_and_register(&server, world.clone(), None);
     assert_eq!(open.status(), StatusCode::OK);
     let file = world_io::load_projects().unwrap();
     assert!(world_io::find_registered(&file, &world).is_some());
@@ -481,12 +518,12 @@ fn concurrent_open_register_keeps_both_entries() {
     world_io::save_projects(&ProjectsFile::default()).unwrap();
     let barrier = Arc::new(Barrier::new(2));
     let mut handles = Vec::new();
-    for (id, world) in [("oa", wa), ("ob", wb)] {
+    for world in [wa, wb] {
         let server = server.clone();
         let barrier = barrier.clone();
         handles.push(thread::spawn(move || {
             barrier.wait();
-            activate_and_register(&server, id.into(), world)
+            activate_and_register(&server, world, None)
         }));
     }
     assert!(handles
@@ -599,7 +636,7 @@ fn concurrent_forget_and_open() {
     });
     let open_handle = thread::spawn(move || {
         barrier.wait();
-        activate_and_register(&s2, "keep".into(), keep)
+        activate_and_register(&s2, keep, None)
     });
     assert_eq!(
         forget_handle.join().unwrap().status(),
