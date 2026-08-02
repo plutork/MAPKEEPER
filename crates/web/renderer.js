@@ -1,10 +1,15 @@
-import { state, ELEV_MIN, ELEV_MAX, mapLayer, viewHexGridOn } from "./workspace-state.js";
+import { state, ELEV_MIN, ELEV_MAX } from "./workspace-state.js";
 import { probe_grid_centers, probe_axial_to_world } from "./wasm-api.js";
-import { resizeCanvas, worldToScreen, getCanvas, getCtx } from "./camera.js";
+import { resizeCanvas, worldToScreen, getCanvas, getCtx, syncViewCameraDebug } from "./camera.js";
+import {
+  cellInViewport, cellInDirty, expandDirtyAabb, offscreenBlitArgs,
+} from "./shell-math.js";
+import { diskCellsAt } from "./brush-geometry.js";
 
-let _getDiskCells = null;
-
-export const setGetDiskCells = (fn) => { _getDiskCells = fn; };
+/** Blit HiDPI cache into CSS-space CTM (explicit CSS dest, not device px). */
+const blitOffscreen = (ctx, oc, dx, dy, cssW, cssH) => {
+  ctx.drawImage(oc, ...offscreenBlitArgs(oc.width, oc.height, dx, dy, cssW, cssH));
+};
 
 const lerpChannel = (a, b, t) => a + (b - a) * t;
 
@@ -100,19 +105,14 @@ export const ensureCenterCache = () => {
 };
 
 export const expandDirtyWorld = (wx, wy, padM) => {
-  if (!state.dirtyRect) {
-    state.dirtyRect = { minX: wx - padM, minY: wy - padM, maxX: wx + padM, maxY: wy + padM };
-    return;
-  }
-  state.dirtyRect.minX = Math.min(state.dirtyRect.minX, wx - padM);
-  state.dirtyRect.minY = Math.min(state.dirtyRect.minY, wy - padM);
-  state.dirtyRect.maxX = Math.max(state.dirtyRect.maxX, wx + padM);
-  state.dirtyRect.maxY = Math.max(state.dirtyRect.maxY, wy + padM);
+  state.dirtyRect = expandDirtyAabb(state.dirtyRect, wx, wy, padM);
 };
 
 export const visibleCells = (padPx, { useDirty = false } = {}) => {
   const cache = ensureCenterCache();
   if (!cache) return new Int32Array(0);
+  // useDirty with no rect = paint nothing (not the whole map).
+  if (useDirty && !state.dirtyRect) return new Int32Array(0);
   const canvas = getCanvas();
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
@@ -122,19 +122,15 @@ export const visibleCells = (padPx, { useDirty = false } = {}) => {
   const halfH = h / 2;
   const cx = state.camera.cx;
   const cy = state.camera.cy;
-  const useWorldDirty = useDirty && !!state.dirtyRect;
-  const dMinX = useWorldDirty ? state.dirtyRect.minX : 0;
-  const dMinY = useWorldDirty ? state.dirtyRect.minY : 0;
-  const dMaxX = useWorldDirty ? state.dirtyRect.maxX : 0;
-  const dMaxY = useWorldDirty ? state.dirtyRect.maxY : 0;
+  const dirty = useDirty ? state.dirtyRect : null;
   const out = [];
   for (let i = 0; i < cache.n; i++) {
     const x = cache.xs[i];
     const y = cache.ys[i];
-    if (useWorldDirty && (x < dMinX || x > dMaxX || y < dMinY || y > dMaxY)) continue;
+    if (!cellInDirty(x, y, dirty)) continue;
     const sx = (x - cx) * z + halfW;
     const sy = (y - cy) * z + halfH;
-    if (sx < -pad || sy < -pad || sx > w + pad || sy > h + pad) continue;
+    if (!cellInViewport(sx, sy, w, h, pad)) continue;
     out.push(i);
   }
   return Int32Array.from(out);
@@ -194,9 +190,10 @@ export const paintCellsTo = (targetCtx, indices, layer, showGrid, drawSize, size
 
 const drawBrushOverlay = (drawSize, sizePx) => {
   if (state.activeTool !== "relief" || !state.hoverBrush || !state.spatial) return;
-  if (!_getDiskCells) return;
   const { frame, grid } = state.spatial.state;
-  const footprint = _getDiskCells(state.hoverBrush.q, state.hoverBrush.r, state.brushRadius);
+  const footprint = diskCellsAt(
+    state.hoverBrush.q, state.hoverBrush.r, state.brushRadius, grid.width, grid.height,
+  );
   const ctx = getCtx();
   for (const cell of footprint) {
     const p = probe_axial_to_world(
@@ -265,8 +262,8 @@ export const drawSpatialNow = () => {
     state.lastFrameMs = performance.now() - t0;
     return;
   }
-  const layer = mapLayer();
-  const showGrid = viewHexGridOn();
+  const layer = state.mapLayer;
+  const showGrid = state.viewHexGrid;
   const viewHelp = document.querySelector("#view-help");
   if (viewHelp) {
     viewHelp.textContent = layer === "relief"
@@ -295,7 +292,7 @@ export const drawSpatialNow = () => {
   if (!painting && cacheOk && zoomMatch && !state.dirtyRect) {
     const dx = (state.offscreenCache.camCx - state.camera.cx) * state.camera.zoom;
     const dy = (state.offscreenCache.camCy - state.camera.cy) * state.camera.zoom;
-    ctx.drawImage(state.offscreenCache.canvas, dx, dy);
+    blitOffscreen(ctx, state.offscreenCache.canvas, dx, dy, w, h);
   } else if (!painting && cacheOk && !zoomMatch && !state.dirtyRect) {
     const scale = state.camera.zoom / state.offscreenCache.zoom;
     const dx = (state.offscreenCache.camCx - state.camera.cx) * state.camera.zoom;
@@ -304,26 +301,28 @@ export const drawSpatialNow = () => {
     ctx.translate(w / 2 + dx, h / 2 + dy);
     ctx.scale(scale, scale);
     ctx.translate(-w / 2, -h / 2);
-    ctx.drawImage(state.offscreenCache.canvas, 0, 0);
+    blitOffscreen(ctx, state.offscreenCache.canvas, 0, 0, w, h);
     ctx.restore();
     scheduleCacheRebuild();
   } else if (painting && cacheOk && zoomMatch) {
     const dx = (state.offscreenCache.camCx - state.camera.cx) * state.camera.zoom;
     const dy = (state.offscreenCache.camCy - state.camera.cy) * state.camera.zoom;
-    ctx.drawImage(state.offscreenCache.canvas, dx, dy);
-    syncHeightGrid();
-    const patch = visibleCells(padPx, { useDirty: true });
-    paintCellsTo(ctx, patch, layer, showGrid, drawSize, sizePx, gridStroke, gridWidth);
-    state.dirtyRect = null;
+    blitOffscreen(ctx, state.offscreenCache.canvas, dx, dy, w, h);
+    // Keep stroke dirty until commit rebuild — clearing forced full-map patch flicker.
+    if (state.dirtyRect) {
+      syncHeightGrid();
+      const patch = visibleCells(padPx, { useDirty: true });
+      paintCellsTo(ctx, patch, layer, showGrid, drawSize, sizePx, gridStroke, gridWidth);
+    }
   } else {
     const oc = rebuildOffscreenCache(layer, showGrid, w, h, drawSize, sizePx, gridStroke, gridWidth, padPx);
-    ctx.drawImage(oc, 0, 0);
+    blitOffscreen(ctx, oc, 0, 0, w, h);
     state.dirtyRect = null;
   }
 
   drawBrushOverlay(drawSize, sizePx);
   state.lastFrameMs = performance.now() - t0;
-  if (state.perfSamples.length < 500) state.perfSamples.push(state.lastFrameMs);
+  if (!painting) syncViewCameraDebug();
 };
 
 export const drawSpatial = () => {

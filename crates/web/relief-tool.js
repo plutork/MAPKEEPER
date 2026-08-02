@@ -1,46 +1,25 @@
-import { state, axialKey, radiusStepSize, diskCountEstimate, reliefMode, editOceanOn, ELEV_MIN, ELEV_MAX } from "./workspace-state.js";
-import { probe_disk_cells, probe_hex_distance, probe_max_brush_radius, probe_pulse_interval_ms } from "./wasm-api.js";
+import {
+  state, axialKey, diskCountEstimate,
+} from "./workspace-state.js";
+import {
+  probe_max_brush_radius, probe_pulse_interval_ms, probe_next_relief,
+} from "./wasm-api.js";
 import { ensureCenterCache, expandDirtyWorld, drawSpatial, flushDrawSpatial } from "./renderer.js";
-import { nextElevationValue } from "./shell-math.js";
+import { diskCellsAt, hexLine } from "./brush-geometry.js";
+import { setHoverReadout } from "./hover-readout.js";
 
-export const diskCellsAt = (q, r, radius) => {
-  if (!state.spatial) return [];
+export { diskCellsAt } from "./brush-geometry.js";
+
+const gridSize = () => {
   const { width, height } = state.spatial.state.grid;
-  const flat = probe_disk_cells(q, r, radius, width, height);
-  const cells = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) cells.push({ q: flat[i], r: flat[i + 1] });
-  return cells;
+  return { width, height };
 };
 
-export const hexLine = (a, b) => {
-  const n = probe_hex_distance(a.q, a.r, b.q, b.r);
-  if (n === 0) return [{ q: a.q, r: a.r }];
-  const out = [];
-  for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    const x = a.q + (b.q - a.q) * t;
-    const z = a.r + (b.r - a.r) * t;
-    const y = -a.q - a.r + (-b.q - b.r - (-a.q - a.r)) * t;
-    let rx = Math.round(x);
-    let ry = Math.round(y);
-    let rz = Math.round(z);
-    const xDiff = Math.abs(rx - x);
-    const yDiff = Math.abs(ry - y);
-    const zDiff = Math.abs(rz - z);
-    if (xDiff > yDiff && xDiff > zDiff) rx = -ry - rz;
-    else if (yDiff > zDiff) ry = -rx - rz;
-    else rz = -rx - ry;
-    out.push({ q: rx, r: rz });
-  }
-  return out;
+/** Domain owns the gesture rule (N-030); undefined means no change. */
+export const nextElevation = (current, delta) => {
+  const next = probe_next_relief(current, delta, state.editOcean);
+  return next === undefined ? null : next;
 };
-
-export const nextElevation = (current, delta) =>
-  nextElevationValue(current, delta, {
-    editOcean: editOceanOn(),
-    elevMin: ELEV_MIN,
-    elevMax: ELEV_MAX,
-  });
 
 export const refreshBrushMaxFromGrid = () => {
   if (!state.spatial) {
@@ -69,7 +48,8 @@ export const stampDiskAt = (centerQ, centerR) => {
   const delta = state.paintStroke.delta;
   const radius = state.paintStroke.radius;
   const padM = (radius + 1.5) * grid.neighbor_center_distance_m;
-  for (const cell of diskCellsAt(centerQ, centerR, radius)) {
+  const { width, height } = gridSize();
+  for (const cell of diskCellsAt(centerQ, centerR, radius, width, height)) {
     const key = axialKey(cell.q, cell.r);
     if (state.paintStroke.visited.has(key)) continue;
     state.paintStroke.visited.add(key);
@@ -103,11 +83,8 @@ const elevationAt = (q, r) => {
 const refreshDetailsAtBrush = () => {
   if (!state.paintStroke || !state.paintStroke.onMap) return;
   const { q, r } = state.paintStroke.last;
-  setHoverReadoutFn({ q, r }, elevationAt(q, r));
+  setHoverReadout({ q, r }, elevationAt(q, r));
 };
-
-let setHoverReadoutFn = () => {};
-export const setHoverReadoutRef = (fn) => { setHoverReadoutFn = fn; };
 
 export const beginAirbrushEpoch = () => {
   if (!state.paintStroke || state.paintStroke.mode !== "airbrush") return;
@@ -123,10 +100,11 @@ export const beginPaintStroke = (q, r) => {
   const rate = state.airbrushRate;
   const interval = mode === "airbrush" ? probe_pulse_interval_ms(rate) : 0;
   if (!state.offscreenCache) flushDrawSpatial();
+  state.dirtyRect = null;
   state.paintStroke = {
     mode,
     rate,
-    delta: reliefMode(),
+    delta: state.reliefDirection,
     radius: state.brushRadius,
     visited: new Set(),
     updates: new Map(),

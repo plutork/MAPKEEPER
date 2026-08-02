@@ -18,14 +18,6 @@ export const cellInDirty = (x, y, dirty) => {
   return !(x < dirty.minX || x > dirty.maxX || y < dirty.minY || y > dirty.maxY);
 };
 
-export const nextElevationValue = (current, delta, { editOcean, elevMin, elevMax }) => {
-  if (current < 0 && !editOcean) return null;
-  let next = current + delta;
-  if (delta < 0 && !editOcean) next = Math.max(0, next);
-  next = Math.max(elevMin, Math.min(elevMax, next));
-  return next === current ? null : next;
-};
-
 /** Split stroke cells into begin/chunk transport batches (N-025). */
 export const strokeChunks = (cells, maxBatch) => {
   if (!Array.isArray(cells) || maxBatch < 1) return [];
@@ -35,6 +27,25 @@ export const strokeChunks = (cells, maxBatch) => {
     out.push(cells.slice(i, i + maxBatch));
   }
   return out;
+};
+
+/**
+ * N-025 corruption policy: classify a durable-open failure into the recovery
+ * the author may be offered. `null` when nothing can be restored.
+ */
+export const bakRestoreOffer = (message) => {
+  const text = String(message ?? "");
+  const endpoint = text.includes("corrupt_registry")
+    ? "/api/projects/restore-bak"
+    : text.includes("corrupt_spatial")
+      ? "/api/spatial/restore-bak"
+      : null;
+  // corrupt_manifest has no restore route yet — never offer a dead action.
+  if (!endpoint || !/bak_available=true/.test(text)) return null;
+  return {
+    endpoint,
+    label: endpoint.includes("projects") ? "Restore world list" : "Restore last saved map",
+  };
 };
 
 export const expandDirtyAabb = (dirty, wx, wy, padM) => {
@@ -48,3 +59,32 @@ export const expandDirtyAabb = (dirty, wx, wy, padM) => {
     maxY: Math.max(dirty.maxY, wy + padM),
   };
 };
+
+/** Contain ×0.96 to current CSS host (open / Reset zoom). */
+export const fitZoomForViewport = (cssW, cssH, spanX, spanY) => {
+  const containZ = Math.min(cssW / spanX, cssH / spanY) * 0.96;
+  const zoom = Math.max(0.002, containZ);
+  return {
+    zoom,
+    containZ,
+    limit: cssW / spanX <= cssH / spanY ? "X" : "Y",
+  };
+};
+
+/**
+ * N-029 camera state transition. `follows fit` survives resize; a deliberate
+ * pan/zoom detaches it, open and Reset zoom reattach it.
+ */
+export const nextCameraFollowsFit = (followsFit, event) => {
+  if (event === "open" || event === "reset-zoom") return true;
+  if (event === "pan" || event === "zoom") return false;
+  return followsFit;
+};
+
+/**
+ * drawImage args for a HiDPI offscreen cache while CTM is setTransform(dpr).
+ * Dest size must be CSS px — intrinsic bitmap size under dpr CTM over-scales.
+ */
+export const offscreenBlitArgs = (bitmapW, bitmapH, dx, dy, cssW, cssH) => (
+  [0, 0, bitmapW, bitmapH, dx, dy, cssW, cssH]
+);

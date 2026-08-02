@@ -24,7 +24,7 @@ function Require-Python {
 
 Require-Python
 
-Write-Host "check.ps1 [1/9] cargo test (workspace, exclude desktop)..."
+Write-Host "check.ps1 [1/10] cargo test (workspace, exclude desktop)..."
 cargo test --workspace --exclude mapkeeper-desktop
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -32,15 +32,15 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [2/9] clippy workspace (-D warnings, excl. desktop)..."
-cargo clippy -p mapkeeper-core -p mapkeeper-server -p mapkeeper-web -- -D warnings
+Write-Host "check.ps1 [2/10] clippy workspace incl. tests (-D warnings, excl. desktop)..."
+cargo clippy -p mapkeeper-core -p mapkeeper-server -p mapkeeper-web --all-targets -- -D warnings
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
-    Write-Host "Fix clippy: cargo clippy -p mapkeeper-core -p mapkeeper-server -p mapkeeper-web -- -D warnings"
+    Write-Host "Fix clippy: cargo clippy -p mapkeeper-core -p mapkeeper-server -p mapkeeper-web --all-targets -- -D warnings"
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [3/9] codemap drift..."
+Write-Host "check.ps1 [3/10] codemap drift..."
 python (Join-Path $Root "scripts\check_codemap_drift.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -50,7 +50,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [4/9] archive isolation..."
+Write-Host "check.ps1 [4/10] archive isolation..."
 python (Join-Path $Root "scripts\check_archive_isolation.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -58,7 +58,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [5/9] text encoding (mojibake + alpha ps1 ASCII)..."
+Write-Host "check.ps1 [5/10] text encoding (mojibake + alpha ps1 ASCII)..."
 python (Join-Path $Root "scripts\check_text_encoding.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -67,7 +67,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [6/9] doc drift (spatial vs identity-only)..."
+Write-Host "check.ps1 [6/10] doc drift (spatial vs identity-only)..."
 python (Join-Path $Root "scripts\check_doc_drift.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -75,7 +75,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [7/9] render-scale bench structural (N-026)..."
+Write-Host "check.ps1 [7/10] render-scale bench structural (N-026)..."
 python (Join-Path $Root "scripts\test_render_scale_bench.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -89,7 +89,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [8/9] web shell modules structural (N-027)..."
+Write-Host "check.ps1 [8/10] web shell modules structural (N-027)..."
 python (Join-Path $Root "scripts\check_web_shell_modules.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -97,7 +97,15 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "check.ps1 [9/9] web shell pure unit (N-027)..."
+Write-Host "check.ps1 [9/10] domain constant parity (N-030)..."
+python (Join-Path $Root "scripts\check_domain_constants.py")
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Fix: shell mirrors must match core constants; gesture rule from probe_next_relief"
+    exit $LASTEXITCODE
+}
+
+Write-Host "check.ps1 [10/10] web shell pure unit (N-027)..."
 node (Join-Path $Root "scripts\web-shell-unit.mjs")
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""

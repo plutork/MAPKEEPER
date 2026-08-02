@@ -2,6 +2,7 @@ export const ELEV_MIN = -60;
 export const ELEV_MAX = 100;
 export const FIELD_FLUSH_BATCH_MAX = 512;
 
+/** Sole owner of mutable Editor/view state (N-027). DOM is view only. */
 export const state = {
   defaultRoot: "",
   folderTouched: false,
@@ -9,8 +10,14 @@ export const state = {
   pendingDeleteId: "",
   spatial: null,
   camera: { zoom: 36, cx: 0, cy: 0 },
+  // N-029: camera follows fit until the author sets a view; then resize keeps it.
+  cameraFollowsFit: true,
   activeTool: "view",
   workspaceMode: "editor",
+  mapLayer: "empty",
+  viewHexGrid: true,
+  reliefDirection: 1,
+  editOcean: false,
   panDrag: null,
   brushRadius: 0,
   brushMaxRadius: 24,
@@ -25,7 +32,6 @@ export const state = {
   dirtyRect: null,
   cacheRebuildRaf: 0,
   lastFrameMs: 0,
-  perfSamples: [],
   heightRev: -1,
 };
 
@@ -33,30 +39,51 @@ export const axialKey = (q, r) => `${q},${r}`;
 export const radiusStepSize = (r) => (r < 5 ? 1 : r < 12 ? 2 : 4);
 export const diskCountEstimate = (r) => 3 * r * (r + 1) + 1;
 
-export const reliefMode = () => {
-  const selected = document.querySelector('input[name="relief-mode"]:checked');
-  return selected && selected.value === "lower" ? -1 : 1;
-};
-
-export const editOceanOn = () => {
-  const el = document.querySelector("#edit-ocean");
-  return el ? el.classList.contains("active") : false;
-};
-
-export const viewHexGridOn = () => {
-  const el = document.querySelector("#view-hex-grid");
-  return el ? el.classList.contains("active") : true;
-};
-
-export const mapLayer = () => {
-  const selected = document.querySelector("#map-layer-stack button.active");
-  return selected && selected.dataset.layer === "relief" ? "relief" : "empty";
-};
-
 export const setMapLayer = (layer) => {
+  state.mapLayer = layer === "relief" ? "relief" : "empty";
+};
+
+export const setViewHexGrid = (on) => {
+  state.viewHexGrid = !!on;
+};
+
+export const setReliefDirection = (dir) => {
+  state.reliefDirection = dir < 0 ? -1 : 1;
+};
+
+export const setEditOcean = (on) => {
+  state.editOcean = !!on;
+};
+
+/** N-029: deliberate pan/zoom detaches the camera from automatic fit. */
+export const markCameraAuthorSet = () => {
+  state.cameraFollowsFit = false;
+};
+
+/** N-029: open world / Reset zoom put the camera back under automatic fit. */
+export const markCameraFollowsFit = () => {
+  state.cameraFollowsFit = true;
+};
+
+/** Push listed Editor flags to DOM controls (view sync). */
+export const syncEditorViewDom = () => {
   document.querySelectorAll("#map-layer-stack button").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.layer === layer);
+    btn.classList.toggle("active", btn.dataset.layer === state.mapLayer);
   });
+  const gridBtn = document.querySelector("#view-hex-grid");
+  if (gridBtn) {
+    gridBtn.classList.toggle("active", state.viewHexGrid);
+    gridBtn.setAttribute("aria-pressed", state.viewHexGrid ? "true" : "false");
+  }
+  const raise = document.querySelector('input[name="relief-mode"][value="raise"]');
+  const lower = document.querySelector('input[name="relief-mode"][value="lower"]');
+  if (raise) raise.checked = state.reliefDirection >= 0;
+  if (lower) lower.checked = state.reliefDirection < 0;
+  const ocean = document.querySelector("#edit-ocean");
+  if (ocean) {
+    ocean.classList.toggle("active", state.editOcean);
+    ocean.setAttribute("aria-pressed", state.editOcean ? "true" : "false");
+  }
 };
 
 export const applySpatial = (view) => {

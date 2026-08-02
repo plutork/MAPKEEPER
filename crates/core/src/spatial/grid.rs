@@ -62,6 +62,9 @@ mod tests {
             assert_eq!((q, r), (q2, r2));
             assert!(grid.contains_axial(q, r));
         }
-        assert_eq!(grid.iter_axial().count(), (grid.width * grid.height) as usize);
+        assert_eq!(
+            grid.iter_axial().count(),
+            (grid.width * grid.height) as usize
+        );
     }
 }

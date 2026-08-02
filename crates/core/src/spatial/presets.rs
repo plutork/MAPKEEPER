@@ -228,7 +228,8 @@ mod tests {
     #[test]
     fn stored_extent_matches_metric_helper() {
         for preset in create_presets() {
-            let (w, h) = metric_extent_m(preset.cols, preset.rows, ALPHA_NEIGHBOR_CENTER_DISTANCE_M);
+            let (w, h) =
+                metric_extent_m(preset.cols, preset.rows, ALPHA_NEIGHBOR_CENTER_DISTANCE_M);
             assert!((w - preset.width_m).abs() < 0.01, "{}", preset.id);
             assert!((h - preset.height_m).abs() < 0.01, "{}", preset.id);
         }

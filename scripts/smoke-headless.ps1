@@ -106,7 +106,6 @@ try {
     $strokeSmall = @{
         stroke_id     = "smoke-small"
         base_revision = $rev0
-        mode          = "stamp"
         cells         = @(@{ q = 0; r = 0; value = 3 })
     } | ConvertTo-Json -Depth 5
     $updated = Invoke-RestMethod -Uri "$BaseUrl/api/spatial/stroke" -Method Post -ContentType "application/json" -Body $strokeSmall
@@ -116,7 +115,7 @@ try {
     # Multi-chunk stroke (transport only; one commit).
     $rev1 = [int64]$updated.state.revision
     Invoke-RestMethod -Uri "$BaseUrl/api/spatial/stroke/begin" -Method Post -ContentType "application/json" -Body (@{
-        stroke_id = "smoke-chunks"; base_revision = $rev1; mode = "stamp"
+        stroke_id = "smoke-chunks"; base_revision = $rev1
     } | ConvertTo-Json) | Out-Null
     # Mid-staging must not write disk.
     $midRaw = Get-Content -LiteralPath $StatePath -Raw

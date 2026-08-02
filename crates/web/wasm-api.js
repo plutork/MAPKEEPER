@@ -7,6 +7,8 @@ import init, {
   probe_max_brush_radius,
   probe_disk_cells,
   probe_pulse_interval_ms,
+  probe_next_relief,
+  probe_relief_range,
 } from "./mapkeeper_web.js";
 
 await init();
@@ -20,4 +22,6 @@ export {
   probe_max_brush_radius,
   probe_disk_cells,
   probe_pulse_interval_ms,
+  probe_next_relief,
+  probe_relief_range,
 };

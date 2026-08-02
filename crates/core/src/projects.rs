@@ -21,18 +21,6 @@ impl ProjectsFile {
     pub fn to_json_pretty(&self) -> Result<String, String> {
         serde_json::to_string_pretty(self).map_err(|error| format!("serialize projects: {error}"))
     }
-
-    pub fn upsert(&mut self, entry: ProjectEntry) {
-        if let Some(existing) = self
-            .projects
-            .iter_mut()
-            .find(|item| item.path == entry.path)
-        {
-            *existing = entry;
-        } else {
-            self.projects.push(entry);
-        }
-    }
 }
 
 pub fn projects_file_path(appdata: Option<&str>, home: Option<&str>) -> String {
@@ -51,10 +39,7 @@ pub fn projects_file_path(appdata: Option<&str>, home: Option<&str>) -> String {
 
 pub fn trash_dir_path(appdata: Option<&str>, home: Option<&str>) -> String {
     if let Some(appdata) = appdata.filter(|value| !value.is_empty()) {
-        return format!(
-            "{}/mapkeeper/trash",
-            appdata.trim_end_matches(['/', '\\'])
-        );
+        return format!("{}/mapkeeper/trash", appdata.trim_end_matches(['/', '\\']));
     }
     let home = home.filter(|value| !value.is_empty()).unwrap_or(".");
     format!(
@@ -69,15 +54,13 @@ mod tests {
 
     #[test]
     fn project_registry_round_trips() {
-        let mut file = ProjectsFile::default();
-        file.upsert(ProjectEntry {
-            id: "first".into(),
-            path: "/world".into(),
-        });
-        file.upsert(ProjectEntry {
-            id: "renamed".into(),
-            path: "/world".into(),
-        });
+        // Registry insert is server-side (path_cmp_key); core only round-trips.
+        let file = ProjectsFile {
+            projects: vec![ProjectEntry {
+                id: "renamed".into(),
+                path: "/world".into(),
+            }],
+        };
         let parsed = ProjectsFile::parse(&file.to_json_pretty().unwrap()).unwrap();
         assert_eq!(parsed.projects.len(), 1);
         assert_eq!(parsed.projects[0].id, "renamed");

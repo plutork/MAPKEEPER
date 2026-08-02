@@ -353,7 +353,8 @@ async function main() {
       if (!create.ok) throw new Error(`create ${size.id}: ${await create.text()}`);
 
       const tOpen0 = performance.now();
-      await page.goto(base, { waitUntil: "networkidle" });
+      const benchUrl = `${base}/?bench=1`;
+      await page.goto(benchUrl, { waitUntil: "networkidle" });
       await page.waitForFunction(() => window.__MK_BENCH__);
       await page.evaluate(async (p) => {
         await fetch("/api/projects/open", {
@@ -361,7 +362,7 @@ async function main() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ path: p }),
         });
-        location.reload();
+        location.href = "/?bench=1";
       }, worldPath);
       await page.waitForFunction(() => window.__MK_BENCH__);
       await page.waitForFunction(() => window.__MK_BENCH__.cellCount() > 0, null, {
@@ -375,7 +376,7 @@ async function main() {
       memoryBySize[size.id] = await sampleMemory(page);
 
       const tReload0 = performance.now();
-      await page.reload({ waitUntil: "networkidle" });
+      await page.goto(benchUrl, { waitUntil: "networkidle" });
       await page.waitForFunction(() => window.__MK_BENCH__ && window.__MK_BENCH__.cellCount() > 0);
       await page.evaluate(() => window.__MK_BENCH__.flushDraw());
       const reload_ms = performance.now() - tReload0;

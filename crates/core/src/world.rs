@@ -75,10 +75,7 @@ impl SpatialConfig {
             )
             || self.orientation != expected.orientation
         {
-            return Err(format!(
-                "manifest/preset mismatch for `{}`",
-                self.preset_id
-            ));
+            return Err(format!("manifest/preset mismatch for `{}`", self.preset_id));
         }
         Ok(())
     }

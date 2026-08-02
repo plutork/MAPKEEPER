@@ -51,7 +51,9 @@ impl SpatialState {
     pub fn assert_no_screen_keys(raw: &str) -> Result<(), String> {
         for forbidden in ["screen_", "viewport", "camera", "zoom", "pan_x", "pan_y"] {
             if raw.contains(forbidden) {
-                return Err(format!("persisted spatial state must not contain `{forbidden}`"));
+                return Err(format!(
+                    "persisted spatial state must not contain `{forbidden}`"
+                ));
             }
         }
         Ok(())
@@ -92,10 +94,7 @@ fn migrate_spatial_value(mut value: Value) -> Result<SpatialState, serde_json::E
                 // Already-metric-ish value stored under old key.
                 legacy
             };
-            grid.insert(
-                "neighbor_center_distance_m".into(),
-                Value::from(distance),
-            );
+            grid.insert("neighbor_center_distance_m".into(), Value::from(distance));
         } else {
             grid.remove("cell_size");
         }

@@ -21,7 +21,13 @@ FIELD_FLUSH_BATCH_MAX = 512
 
 def _shell_sources() -> str:
     parts: list[str] = []
-    for name in ("index.html", "main.js", "renderer.js", "workspace-state.js"):
+    for name in (
+        "index.html",
+        "main.js",
+        "renderer.js",
+        "workspace-state.js",
+        "bench-hooks.js",
+    ):
         path = WEB / name
         if path.is_file():
             parts.append(path.read_text(encoding="utf-8"))
@@ -204,6 +210,13 @@ def main() -> int:
         encoding="utf-8"
     ):
         errors.append("workspace-state FIELD_FLUSH_BATCH_MAX drift vs bench (expected 512)")
+    main_js = (WEB / "main.js").read_text(encoding="utf-8") if (WEB / "main.js").is_file() else ""
+    if "window.__MK_BENCH__" in main_js:
+        errors.append("main.js must not assign window.__MK_BENCH__ on ordinary startup")
+    if 'get("bench") === "1"' not in main_js and "get('bench') === '1'" not in main_js:
+        errors.append("main.js must load bench-hooks only when ?bench=1")
+    if not (WEB / "bench-hooks.js").is_file():
+        errors.append("missing crates/web/bench-hooks.js")
 
     if errors:
         print("check_render_scale_bench: FAIL")

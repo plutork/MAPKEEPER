@@ -1,6 +1,7 @@
 import { state } from "./workspace-state.js";
 import { api } from "./api.js";
 import { loadSpatial } from "./spatial-transaction.js";
+import { bakRestoreOffer } from "./shell-math.js";
 
 const home = document.querySelector("#home");
 const workspace = document.querySelector("#workspace");
@@ -158,6 +159,32 @@ const renderProjects = (projects) => {
   }
 };
 
+/**
+ * N-025 corruption policy: show the failure and, when a last-good backup
+ * exists, the explicit restore the author can run.
+ */
+const showFailureWithRecovery = (host, error, afterRestore) => {
+  const message = error?.message || String(error);
+  host.textContent = message;
+  const offer = bakRestoreOffer(message);
+  if (!offer) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "restore-bak";
+  button.textContent = offer.label;
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await api(offer.endpoint, { method: "POST" });
+      await afterRestore();
+    } catch (restoreError) {
+      host.textContent = restoreError.message || String(restoreError);
+      button.disabled = false;
+    }
+  });
+  host.append(" ", button);
+};
+
 export const showWorkspace = async (project) => {
   document.querySelector("#world-name").textContent = project.id;
   document.querySelector("#world-path").textContent = project.path;
@@ -167,7 +194,12 @@ export const showWorkspace = async (project) => {
     await loadSpatial();
   } catch (error) {
     const spatialStatus = document.querySelector("#spatial-status");
-    if (spatialStatus) spatialStatus.textContent = error.message;
+    if (spatialStatus) {
+      showFailureWithRecovery(spatialStatus, error, async () => {
+        spatialStatus.textContent = "";
+        await loadSpatial();
+      });
+    }
   }
 };
 
@@ -178,14 +210,14 @@ export const showHome = () => {
 };
 
 export const refresh = async () => {
-  homeError.textContent = "";
+  homeError.replaceChildren();
   try {
     const data = await api("/api/projects");
     state.defaultRoot = data.default_worlds_root;
     renderProjects(data.projects);
     if (data.active) await showWorkspace(data.active);
   } catch (error) {
-    homeError.textContent = error.message || String(error);
+    showFailureWithRecovery(homeError, error, refresh);
   }
 };
 

@@ -1,27 +1,29 @@
-import { state, setMapLayer, radiusStepSize } from "./workspace-state.js";
-import { initCamera, fitCamera, screenToWorld } from "./camera.js";
 import {
-  drawSpatial, flushDrawSpatial, invalidateMapCache,
-  ensureCenterCache, visibleCells, setGetDiskCells,
+  state, setMapLayer, setViewHexGrid, setReliefDirection, setEditOcean,
+  syncEditorViewDom, radiusStepSize,
+  markCameraAuthorSet, markCameraFollowsFit,
+} from "./workspace-state.js";
+import {
+  initCamera, fitCamera, screenToWorld, observeCanvasHost,
+} from "./camera.js";
+import {
+  drawSpatial, invalidateMapCache, ensureCenterCache,
 } from "./renderer.js";
 import {
-  diskCellsAt, beginPaintStroke, extendPaintStroke, beginAirbrushEpoch,
-  clearAirbrushTimer, setBrushRadius, setStrokeMode, setAirbrushRate,
-  syncBrushRadiusUi, setHoverReadoutRef,
+  beginPaintStroke, extendPaintStroke,
+  setBrushRadius, setStrokeMode, setAirbrushRate,
+  syncBrushRadiusUi,
 } from "./relief-tool.js";
 import { endPaintStroke, loadSpatial } from "./spatial-transaction.js";
 import { bindWorldEvents, refresh } from "./worlds.js";
 import { probe_world_to_axial } from "./wasm-api.js";
-
-// Wire cross-module callbacks
-setGetDiskCells(diskCellsAt);
+import { setHoverReadout } from "./hover-readout.js";
 
 const canvas = document.querySelector("#spatial-canvas");
 const ctx = canvas.getContext("2d");
 initCamera(canvas, ctx);
 
 const spatialStatus = document.querySelector("#spatial-status");
-const hoverReliefEl = document.querySelector("#hover-relief");
 const detailsLeadEl = document.querySelector("#details-lead");
 const detailsCellIdEl = document.querySelector("#details-cell-id");
 const detailsCellElevEl = document.querySelector("#details-cell-elev");
@@ -44,23 +46,6 @@ const syncDetailsPanel = () => {
   }
 };
 
-const setHoverReadout = (axial, h, { outside = false } = {}) => {
-  if (outside || !axial) {
-    hoverReliefEl.textContent = "Elevation: —";
-    if (state.activeTool === "relief") {
-      detailsCellIdEl.textContent = "Cell: —";
-      detailsCellElevEl.textContent = "Elevation: —";
-    }
-    return;
-  }
-  hoverReliefEl.textContent = `Elevation: ${h} @ ${axial.q},${axial.r}`;
-  if (state.activeTool !== "relief") return;
-  detailsCellIdEl.textContent = `Cell: ${axial.q}, ${axial.r}`;
-  detailsCellElevEl.textContent = `Elevation: ${h}`;
-};
-
-setHoverReadoutRef(setHoverReadout);
-
 const syncEditorChrome = () => {
   const isEditor = state.workspaceMode === "editor";
   editorToolStrip.classList.toggle("hidden", !isEditor);
@@ -76,6 +61,7 @@ const syncEditorChrome = () => {
   document.querySelectorAll("#editor-tool-strip button").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tool === state.activeTool);
   });
+  syncEditorViewDom();
   syncDetailsPanel();
 };
 
@@ -155,6 +141,7 @@ window.addEventListener("mousemove", (event) => {
   if (Math.abs(dx) + Math.abs(dy) > 2) state.panDrag.moved = true;
   state.camera.cx = state.panDrag.cx - dx / state.camera.zoom;
   state.camera.cy = state.panDrag.cy - dy / state.camera.zoom;
+  markCameraAuthorSet();
   drawSpatial();
 });
 
@@ -185,6 +172,7 @@ canvas.addEventListener("wheel", (event) => {
   const [wx2, wy2] = screenToWorld(sx, sy);
   state.camera.cx += wx - wx2;
   state.camera.cy += wy - wy2;
+  markCameraAuthorSet();
   invalidateMapCache();
   drawSpatial();
 }, { passive: false });
@@ -217,6 +205,7 @@ canvas.addEventListener("mousemove", (event) => {
 
 canvas.addEventListener("mouseleave", () => {
   if (state.paintStroke) return;
+  setHoverReadout(null, 0, { outside: true });
   if (state.hoverBrush) {
     state.hoverBrush = null;
     drawSpatial();
@@ -261,166 +250,66 @@ document.querySelector("#map-layer-stack").addEventListener("click", (event) => 
   const button = event.target.closest("button[data-layer]");
   if (!button) return;
   setMapLayer(button.dataset.layer);
+  syncEditorViewDom();
   invalidateMapCache();
   drawSpatial();
 });
 
-document.querySelector("#view-hex-grid").addEventListener("click", (event) => {
-  const btn = event.currentTarget;
-  const on = !btn.classList.contains("active");
-  btn.classList.toggle("active", on);
-  btn.setAttribute("aria-pressed", on ? "true" : "false");
+document.querySelector("#view-hex-grid").addEventListener("click", () => {
+  setViewHexGrid(!state.viewHexGrid);
+  syncEditorViewDom();
   invalidateMapCache();
   drawSpatial();
 });
 
-document.querySelector("#edit-ocean").addEventListener("click", (event) => {
-  const btn = event.currentTarget;
-  const on = !btn.classList.contains("active");
-  btn.classList.toggle("active", on);
-  btn.setAttribute("aria-pressed", on ? "true" : "false");
+const resetZoomToFit = () => {
+  if (!state.spatial) return;
+  fitCamera();
+  ensureCenterCache();
+  invalidateMapCache();
+  drawSpatial();
+};
+
+document.querySelector("#reset-zoom").addEventListener("click", () => {
+  markCameraFollowsFit();
+  resetZoomToFit();
 });
 
-window.addEventListener("resize", () => {
-  if (state.spatial) {
-    fitCamera();
-    ensureCenterCache();
-    invalidateMapCache();
+document.querySelector("#edit-ocean").addEventListener("click", () => {
+  setEditOcean(!state.editOcean);
+  syncEditorViewDom();
+});
+
+document.querySelectorAll('input[name="relief-mode"]').forEach((input) => {
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    setReliefDirection(input.value === "lower" ? -1 : 1);
+    syncEditorViewDom();
+  });
+});
+
+// N-029: refit only while the camera still follows fit; an author view survives.
+observeCanvasHost(() => {
+  if (!state.spatial) {
+    drawSpatial();
+    return;
   }
+  if (state.cameraFollowsFit) {
+    resetZoomToFit();
+    return;
+  }
+  invalidateMapCache();
   drawSpatial();
 });
-
-// --- Bench hooks (N-026) ---
-const percentile = (arr, p) => {
-  if (!arr.length) return null;
-  const s = [...arr].sort((a, b) => a - b);
-  const i = Math.min(s.length - 1, Math.max(0, Math.ceil((p / 100) * s.length) - 1));
-  return s[i];
-};
-
-const measureFrames = async (n, tick) => {
-  const samples = [];
-  for (let i = 0; i < n; i++) {
-    const t0 = performance.now();
-    tick();
-    flushDrawSpatial();
-    samples.push(performance.now() - t0);
-    await new Promise((r) => requestAnimationFrame(r));
-  }
-  return {
-    p50: percentile(samples, 50),
-    p95: percentile(samples, 95),
-    n: samples.length,
-  };
-};
-
-window.__MK_BENCH__ = {
-  lastFrameMs: () => state.lastFrameMs,
-  flushDraw: () => flushDrawSpatial(),
-  ensureCenters: () => ensureCenterCache(),
-  visibleCount: () => visibleCells(64, { useDirty: false }).length,
-  cellCount: () => (state.spatial ? state.spatial.state.grid.width * state.spatial.state.grid.height : 0),
-  async runSuite() {
-    if (!state.spatial) throw new Error("no active world");
-    const out = { cells: this.cellCount(), revision: state.spatial.state.revision };
-    const cloneCells = () => JSON.parse(JSON.stringify(state.spatial.state.field.cells));
-    const restoreCells = (cells) => {
-      state.spatial.state.field.cells = JSON.parse(JSON.stringify(cells));
-      state.heightRev = -1;
-      ensureCenterCache();
-      invalidateMapCache();
-    };
-    setMapLayer("empty");
-    invalidateMapCache();
-    flushDrawSpatial();
-    out.open_fit = await measureFrames(8, () => { fitCamera(); ensureCenterCache(); invalidateMapCache(); });
-    out.pan = await measureFrames(12, () => {
-      state.camera.cx += state.spatial.state.grid.neighbor_center_distance_m * 0.25;
-    });
-    out.zoom = await measureFrames(8, () => {
-      state.camera.zoom *= 1.05;
-    });
-    fitCamera();
-    ensureCenterCache();
-    invalidateMapCache();
-    flushDrawSpatial();
-    out.hover = await measureFrames(12, () => {
-      state.hoverBrush = { q: 2, r: 2 };
-    });
-    out.view_empty = await measureFrames(6, () => { setMapLayer("empty"); invalidateMapCache(); });
-    out.relief = await measureFrames(6, () => { setMapLayer("relief"); invalidateMapCache(); });
-    state.activeTool = "relief";
-    state.brushRadius = Math.min(3, state.brushMaxRadius);
-    out.radius_preview = await measureFrames(8, () => {
-      state.hoverBrush = { q: 4, r: 4 };
-    });
-    const snapCells = cloneCells();
-    const stampSamples = [];
-    for (let i = 0; i < 8; i++) {
-      restoreCells(snapCells);
-      flushDrawSpatial();
-      beginPaintStroke(3 + i, 3);
-      const t0 = performance.now();
-      extendPaintStroke(5 + i, 4);
-      flushDrawSpatial();
-      stampSamples.push(performance.now() - t0);
-      clearAirbrushTimer();
-      state.paintStroke = null;
-    }
-    out.stamp_drag = {
-      p50: percentile(stampSamples, 50),
-      p95: percentile(stampSamples, 95),
-      n: stampSamples.length,
-    };
-    out.airbrush = {};
-    for (const rate of [1, 5, 10, 20]) {
-      state.airbrushRate = rate;
-      state.strokeMode = "airbrush";
-      restoreCells(snapCells);
-      flushDrawSpatial();
-      beginPaintStroke(6, 6);
-      flushDrawSpatial();
-      const samples = [];
-      const pulses = Math.min(8, Math.max(3, Math.ceil(rate / 2)));
-      for (let p = 0; p < pulses; p++) {
-        const t0 = performance.now();
-        beginAirbrushEpoch();
-        flushDrawSpatial();
-        samples.push(performance.now() - t0);
-      }
-      clearAirbrushTimer();
-      state.paintStroke = null;
-      out.airbrush[String(rate)] = {
-        p50: percentile(samples, 50),
-        p95: percentile(samples, 95),
-        n: samples.length,
-      };
-    }
-    restoreCells(snapCells);
-    state.strokeMode = "stamp";
-    state.airbrushRate = 5;
-    state.activeTool = "view";
-    state.hoverBrush = null;
-    fitCamera();
-    ensureCenterCache();
-    invalidateMapCache();
-    flushDrawSpatial();
-    out.visible_at_fit = this.visibleCount();
-    out.crs = {
-      centerCache: !!state.centerCache,
-      offscreenCache: !!state.offscreenCache,
-      viewportCull: true,
-      rafCoalesce: true,
-      dirtyRect: true,
-    };
-    return out;
-  },
-};
 
 // --- Bootstrap ---
 bindWorldEvents();
 syncBrushRadiusUi();
 syncEditorChrome();
+// N-026: bench suite only when ?bench=1 (harness or maintainer).
+if (new URLSearchParams(window.location.search).get("bench") === "1") {
+  import("./bench-hooks.js").then((m) => m.installBenchHooks());
+}
 refresh().catch((error) => {
   document.querySelector("#project-empty").textContent = error.message;
 });

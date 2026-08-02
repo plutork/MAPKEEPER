@@ -60,7 +60,7 @@ impl GridField {
         Ok(())
     }
 
-    /// Raise/Lower one cell by delta (clamped).
+    /// Raise/Lower one cell by delta (clamped, no gesture rule).
     pub fn adjust_cell(&mut self, grid: &HexGrid, axial: Axial, delta: i32) -> Result<i32, String> {
         if !grid.contains_axial(axial.q, axial.r) {
             return Err(format!("cell {},{} outside grid", axial.q, axial.r));
@@ -69,6 +69,21 @@ impl GridField {
         self.set_cells(grid, &[(axial, next)])?;
         Ok(next)
     }
+}
+
+/// Relief gesture rule (N-015 meaning, N-030 placement): what one Raise/Lower
+/// step does to a cell. `None` means the gesture leaves the cell untouched.
+/// Every writer must use this instead of re-deriving the rule.
+pub fn next_relief_value(current: i32, delta: i32, edit_ocean: bool) -> Option<i32> {
+    if current < 0 && !edit_ocean {
+        return None;
+    }
+    let mut next = current + delta;
+    if delta < 0 && !edit_ocean {
+        next = next.max(0);
+    }
+    next = next.clamp(RELIEF_MIN, RELIEF_MAX);
+    (next != current).then_some(next)
 }
 
 #[cfg(test)]
@@ -80,8 +95,14 @@ mod tests {
         let grid = HexGrid::default_probe();
         let mut field = GridField::default_relief();
         assert_eq!(field.id, "relief");
-        assert_eq!(field.adjust_cell(&grid, Axial { q: 0, r: 0 }, 1).unwrap(), 1);
-        assert_eq!(field.adjust_cell(&grid, Axial { q: 0, r: 0 }, -1).unwrap(), 0);
+        assert_eq!(
+            field.adjust_cell(&grid, Axial { q: 0, r: 0 }, 1).unwrap(),
+            1
+        );
+        assert_eq!(
+            field.adjust_cell(&grid, Axial { q: 0, r: 0 }, -1).unwrap(),
+            0
+        );
         for _ in 0..=RELIEF_MAX {
             field.adjust_cell(&grid, Axial { q: 0, r: 0 }, 1).unwrap();
         }
@@ -90,6 +111,22 @@ mod tests {
             field.adjust_cell(&grid, Axial { q: 0, r: 0 }, -1).unwrap();
         }
         assert_eq!(field.get(Axial { q: 0, r: 0 }), RELIEF_MIN);
+    }
+
+    #[test]
+    fn relief_gesture_respects_ocean_lock() {
+        // Edit ocean off: below datum frozen, land Lower stops at 0 (N-015).
+        assert_eq!(next_relief_value(-2, -1, false), None);
+        assert_eq!(next_relief_value(-2, 1, false), None);
+        assert_eq!(next_relief_value(1, -1, false), Some(0));
+        assert_eq!(next_relief_value(0, -1, false), None);
+        assert_eq!(next_relief_value(0, 1, false), Some(1));
+        // Edit ocean on: digging and filling below datum allowed.
+        assert_eq!(next_relief_value(-2, -1, true), Some(-3));
+        assert_eq!(next_relief_value(-1, 1, true), Some(0));
+        // Range clamp holds in both modes.
+        assert_eq!(next_relief_value(RELIEF_MAX, 1, false), None);
+        assert_eq!(next_relief_value(RELIEF_MIN, -1, true), None);
     }
 
     #[test]

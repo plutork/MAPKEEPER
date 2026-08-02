@@ -1,14 +1,13 @@
-import { state, FIELD_FLUSH_BATCH_MAX, applySpatial } from "./workspace-state.js";
+import {
+  state, FIELD_FLUSH_BATCH_MAX, applySpatial, markCameraFollowsFit,
+} from "./workspace-state.js";
 import { api, newStrokeId } from "./api.js";
-import { ensureCenterCache, drawSpatial } from "./renderer.js";
+import { ensureCenterCache, drawSpatial, invalidateMapCache } from "./renderer.js";
 import { fitCamera } from "./camera.js";
 import { clearAirbrushTimer, refreshBrushMaxFromGrid, syncBrushRadiusUi } from "./relief-tool.js";
 import { strokeChunks } from "./shell-math.js";
 
-let _loadSpatial = null;
-export const setLoadSpatial = (fn) => { _loadSpatial = fn; };
-
-export const commitStrokeCells = async (cells, mode) => {
+export const commitStrokeCells = async (cells) => {
   const baseRevision = state.spatial?.state?.revision ?? 0;
   const strokeId = newStrokeId();
   const chunks = strokeChunks(cells, FIELD_FLUSH_BATCH_MAX);
@@ -18,7 +17,6 @@ export const commitStrokeCells = async (cells, mode) => {
       body: JSON.stringify({
         stroke_id: strokeId,
         base_revision: baseRevision,
-        mode,
         cells,
       }),
     });
@@ -28,7 +26,6 @@ export const commitStrokeCells = async (cells, mode) => {
     body: JSON.stringify({
       stroke_id: strokeId,
       base_revision: baseRevision,
-      mode,
     }),
   });
   try {
@@ -72,7 +69,19 @@ export const fullApplySpatial = (view, { refit = false } = {}) => {
 
 export const loadSpatial = async () => {
   const view = await api("/api/spatial");
+  // N-029: a freshly loaded map starts under automatic fit again.
+  markCameraFollowsFit();
   fullApplySpatial(view, { refit: true });
+  // Second fit after layout flush (workspace just revealed).
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (!state.spatial) return;
+      fitCamera();
+      ensureCenterCache();
+      invalidateMapCache();
+      drawSpatial();
+    });
+  });
 };
 
 export const endPaintStroke = async () => {
@@ -87,11 +96,13 @@ export const endPaintStroke = async () => {
   const spatialStatus = document.querySelector("#spatial-status");
   if (cells.length === 0) {
     if (spatialStatus) spatialStatus.textContent = "Stroke hit no editable cells.";
+    invalidateMapCache();
+    drawSpatial();
     return;
   }
   if (spatialStatus) spatialStatus.textContent = "Saving stroke…";
   try {
-    const view = await commitStrokeCells(cells, stroke.mode);
+    const view = await commitStrokeCells(cells);
     fullApplySpatial(view);
     const op = stroke.delta > 0 ? "Raise" : "Lower";
     const modeLabel = stroke.mode === "airbrush" ? `Airbrush ${stroke.rate}/s` : "Stamp";

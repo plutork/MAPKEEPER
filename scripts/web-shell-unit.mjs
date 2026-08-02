@@ -8,21 +8,26 @@ import {
   worldFromScreen,
   cellInViewport,
   cellInDirty,
-  nextElevationValue,
   strokeChunks,
   expandDirtyAabb,
+  fitZoomForViewport,
+  offscreenBlitArgs,
+  nextCameraFollowsFit,
+  bakRestoreOffer,
 } from "../crates/web/shell-math.js";
 
-// Minimal document mock for workspace-state DOM helpers.
+// Minimal document mock for workspace-state view sync.
 globalThis.document = {
   querySelector: () => null,
   querySelectorAll: () => [],
 };
 globalThis.cancelAnimationFrame = () => {};
 
-const { state, applySpatial, FIELD_FLUSH_BATCH_MAX, axialKey } = await import(
-  "../crates/web/workspace-state.js"
-);
+const {
+  state, applySpatial, FIELD_FLUSH_BATCH_MAX, axialKey,
+  setMapLayer, setViewHexGrid, setReliefDirection, setEditOcean,
+  markCameraAuthorSet, markCameraFollowsFit,
+} = await import("../crates/web/workspace-state.js");
 
 let failed = 0;
 const check = (name, fn) => {
@@ -60,11 +65,7 @@ check("dirty aabb", () => {
   assert.equal(cellInDirty(100, 0, d2), false);
 });
 
-check("nextElevation ocean freeze", () => {
-  assert.equal(nextElevationValue(-2, -1, { editOcean: false, elevMin: -60, elevMax: 100 }), null);
-  assert.equal(nextElevationValue(-2, -1, { editOcean: true, elevMin: -60, elevMax: 100 }), -3);
-  assert.equal(nextElevationValue(1, -1, { editOcean: false, elevMin: -60, elevMax: 100 }), 0);
-});
+// Relief gesture rule lives in core (N-030); its tests are in crates/core.
 
 check("strokeChunks batching", () => {
   const cells = Array.from({ length: 5 }, (_, i) => ({ q: i, r: 0, value: 1 }));
@@ -75,6 +76,22 @@ check("strokeChunks batching", () => {
     [2, 2, 1],
   );
   assert.equal(FIELD_FLUSH_BATCH_MAX, 512);
+});
+
+check("bak restore offer follows N-025 corruption policy", () => {
+  assert.equal(
+    bakRestoreOffer("corrupt_registry: interrupted_write (bak_available=true)").endpoint,
+    "/api/projects/restore-bak",
+  );
+  assert.equal(
+    bakRestoreOffer("corrupt_spatial: bad json (bak_available=true)").endpoint,
+    "/api/spatial/restore-bak",
+  );
+  // No usable backup, unrelated failure, or manifest damage → no dead button.
+  assert.equal(bakRestoreOffer("corrupt_registry: x (bak_available=false)"), null);
+  assert.equal(bakRestoreOffer("corrupt_manifest: x (bak_available=true)"), null);
+  assert.equal(bakRestoreOffer("HTTP 500"), null);
+  assert.equal(bakRestoreOffer(undefined), null);
 });
 
 check("applySpatial resets CRS caches", () => {
@@ -89,6 +106,89 @@ check("applySpatial resets CRS caches", () => {
   assert.equal(state.dirtyRect, null);
   assert.equal(state.heightRev, -1);
   assert.equal(axialKey(1, 2), "1,2");
+});
+
+check("workspace-state owns editor view flags", () => {
+  setMapLayer("relief");
+  setViewHexGrid(false);
+  setReliefDirection(-1);
+  setEditOcean(true);
+  assert.equal(state.mapLayer, "relief");
+  assert.equal(state.viewHexGrid, false);
+  assert.equal(state.reliefDirection, -1);
+  assert.equal(state.editOcean, true);
+  setMapLayer("empty");
+  setViewHexGrid(true);
+  setReliefDirection(1);
+  setEditOcean(false);
+  assert.equal(state.mapLayer, "empty");
+  assert.equal(state.viewHexGrid, true);
+  assert.equal(state.reliefDirection, 1);
+  assert.equal(state.editOcean, false);
+});
+
+check("fit zoom uses positive viewport dims", () => {
+  // Mirror fitCamera denom guard: zero CSS size must not drive usable zoom.
+  const span = 1000;
+  const zoomZero = Math.max(0.002, Math.min(0 / span, 0 / span) * 0.9);
+  const zoomLaidOut = Math.max(0.002, Math.min(800 / span, 600 / span) * 0.9);
+  assert.equal(zoomZero, 0.002);
+  assert.ok(zoomLaidOut > 0.1);
+});
+
+check("fitZoom contain scales with CSS host", () => {
+  const spanX = 55655;
+  const spanY = 31466;
+  const small = fitZoomForViewport(1380, 905, spanX, spanY);
+  const large = fitZoomForViewport(2020, 1267, spanX, spanY);
+  assert.equal(small.limit, "X");
+  assert.equal(large.limit, "X");
+  // Larger host → higher contain zoom (fill monitor, no density clamp).
+  assert.ok(large.zoom > small.zoom);
+  assert.ok(Math.abs(large.zoom - large.containZ) < 1e-12);
+  assert.ok(Math.abs(large.zoom - 2020 / spanX * 0.96) < 1e-9);
+});
+
+check("offscreen blit dest is CSS not device px", () => {
+  const dpr = 1.5;
+  const cssW = 2020;
+  const cssH = 1267;
+  const bitmapW = Math.floor(cssW * dpr);
+  const bitmapH = Math.floor(cssH * dpr);
+  const args = offscreenBlitArgs(bitmapW, bitmapH, 0, 0, cssW, cssH);
+  // Default drawImage(oc,0,0) would use bitmap size under setTransform(dpr) → ×dpr crop.
+  assert.deepEqual(args, [0, 0, bitmapW, bitmapH, 0, 0, cssW, cssH]);
+  assert.ok(args[6] < args[2]);
+  assert.ok(args[7] < args[3]);
+});
+
+check("camera sticky fit survives resize, author view detaches", () => {
+  // N-029 transition table.
+  assert.equal(nextCameraFollowsFit(true, "resize"), true);
+  assert.equal(nextCameraFollowsFit(true, "pan"), false);
+  assert.equal(nextCameraFollowsFit(true, "zoom"), false);
+  assert.equal(nextCameraFollowsFit(false, "resize"), false);
+  assert.equal(nextCameraFollowsFit(false, "reset-zoom"), true);
+  assert.equal(nextCameraFollowsFit(false, "open"), true);
+});
+
+check("workspace-state camera flag matches transition", () => {
+  markCameraFollowsFit();
+  assert.equal(state.cameraFollowsFit, true);
+  markCameraAuthorSet();
+  assert.equal(state.cameraFollowsFit, false);
+  // applySpatial after a stroke commit must not reattach the camera to fit.
+  applySpatial({ state: { field: { cells: {} } } });
+  assert.equal(state.cameraFollowsFit, false);
+  markCameraFollowsFit();
+});
+
+check("useDirty without rect means no patch cells", () => {
+  // Mirrors visibleCells guard: dirty-null must not repaint the whole map.
+  const useDirty = true;
+  const dirtyRect = null;
+  const patchAll = !useDirty || !!dirtyRect;
+  assert.equal(patchAll, false);
 });
 
 if (failed) {

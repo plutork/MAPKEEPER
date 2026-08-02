@@ -39,6 +39,18 @@ async fn health() -> Json<HealthResponse> {
 }
 
 pub fn build_router(config: &ServerConfig) -> Result<Router> {
+    // Restart recovery for interrupted Delete (N-025). Observable; not tied to GET list.
+    match world_io::reconcile_delete_inflights() {
+        Ok(notes) => {
+            for note in notes {
+                eprintln!("mapkeeper: {note}");
+            }
+        }
+        Err(error) => {
+            eprintln!("mapkeeper: delete_recovery startup failed: {error}");
+        }
+    }
+
     let active = match &config.world {
         Some(path) => Some(ActiveWorld {
             id: world_io::read_manifest_id(path)?,

@@ -32,6 +32,9 @@ $shellAssets = @(
     "spatial-transaction.js"
     "worlds.js"
     "shell-math.js"
+    "brush-geometry.js"
+    "hover-readout.js"
+    "bench-hooks.js"
     "styles.css"
 )
 foreach ($asset in $shellAssets) {

@@ -3,7 +3,8 @@
 
 use mapkeeper_core::spatial::{
     axial_to_world, disk_from_offsets, disk_offsets, hex_distance, max_brush_radius,
-    pulse_interval_ms, world_to_axial, Axial, HexGrid, WorldFrame,
+    next_relief_value, pulse_interval_ms, world_to_axial, Axial, HexGrid, WorldFrame, RELIEF_MAX,
+    RELIEF_MIN,
 };
 use wasm_bindgen::prelude::*;
 
@@ -159,4 +160,17 @@ pub fn probe_disk_cells(q: i32, r: i32, radius: u32, width: u32, height: u32) ->
 #[wasm_bindgen]
 pub fn probe_pulse_interval_ms(rate_steps_per_sec: u32) -> u32 {
     pulse_interval_ms(rate_steps_per_sec).unwrap_or(0)
+}
+
+/// One Raise/Lower step on a cell; `undefined` means no change (N-030).
+/// The shell must not re-implement this rule.
+#[wasm_bindgen]
+pub fn probe_next_relief(current: i32, delta: i32, edit_ocean: bool) -> Option<i32> {
+    next_relief_value(current, delta, edit_ocean)
+}
+
+/// Author elevation range `[min, max]` — mirrored thresholds check against it.
+#[wasm_bindgen]
+pub fn probe_relief_range() -> Vec<i32> {
+    vec![RELIEF_MIN, RELIEF_MAX]
 }

@@ -22,6 +22,9 @@ REQUIRED = (
     "spatial-transaction.js",
     "worlds.js",
     "shell-math.js",
+    "brush-geometry.js",
+    "hover-readout.js",
+    "bench-hooks.js",
 )
 
 
@@ -46,7 +49,15 @@ def main() -> int:
         errors.append("workspace-state.js must export sole `state` owner")
 
     build = (WEB / "build.ps1").read_text(encoding="utf-8") if (WEB / "build.ps1").is_file() else ""
-    for asset in ("main.js", "renderer.js", "styles.css", "shell-math.js"):
+    for asset in (
+        "main.js",
+        "renderer.js",
+        "styles.css",
+        "shell-math.js",
+        "brush-geometry.js",
+        "hover-readout.js",
+        "bench-hooks.js",
+    ):
         if asset not in build:
             errors.append(f"build.ps1 must stage {asset}")
 

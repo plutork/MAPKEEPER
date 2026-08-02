@@ -4,7 +4,7 @@
   "git_sha": "3cab260eb34dce41e9e9ef8553af3b5920455cad",
   "build_mode": "debug-server + web dist",
   "platform": "win32-x64",
-  "harness_revision": "90dbe7e482034b62",
+  "harness_revision": "abc6f23e305b73cf",
   "phase": "after_crs",
   "surface": "playwright-chromium-headless",
   "evidence_class": "reproducible_headless",

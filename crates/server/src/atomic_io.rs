@@ -16,8 +16,7 @@ pub fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<()> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)
-        .with_context(|| format!("create_dir_all {}", parent.display()))?;
+    fs::create_dir_all(parent).with_context(|| format!("create_dir_all {}", parent.display()))?;
 
     let file_name = path
         .file_name()
@@ -29,15 +28,13 @@ pub fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<()> {
     ));
 
     {
-        let mut file = File::create(&tmp)
-            .with_context(|| format!("create temp {}", tmp.display()))?;
+        let mut file =
+            File::create(&tmp).with_context(|| format!("create temp {}", tmp.display()))?;
 
         #[cfg(test)]
         if take_failpoint(AtomicFailAt::AfterTempCreate) {
             // Empty/partial temp; primary untouched.
-            return Err(anyhow::anyhow!(
-                "atomic_replace: failpoint AfterTempCreate"
-            ));
+            return Err(anyhow::anyhow!("atomic_replace: failpoint AfterTempCreate"));
         }
 
         file.write_all(bytes)
@@ -49,9 +46,7 @@ pub fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<()> {
     #[cfg(test)]
     if take_failpoint(AtomicFailAt::AfterTempFsync) {
         // Complete temp; primary still intact.
-        return Err(anyhow::anyhow!(
-            "atomic_replace: failpoint AfterTempFsync"
-        ));
+        return Err(anyhow::anyhow!("atomic_replace: failpoint AfterTempFsync"));
     }
 
     let bak = bak_path(path);
@@ -59,8 +54,7 @@ pub fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<()> {
         let _ = fs::remove_file(&bak);
         // Prefer rename so bak is the previous inode; fall back to copy.
         if fs::rename(path, &bak).is_err() {
-            fs::copy(path, &bak)
-                .with_context(|| format!("backup copy {}", path.display()))?;
+            fs::copy(path, &bak).with_context(|| format!("backup copy {}", path.display()))?;
             fs::remove_file(path)
                 .with_context(|| format!("remove before replace {}", path.display()))?;
         }
@@ -80,8 +74,7 @@ pub fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<()> {
     let rename_result = {
         #[cfg(test)]
         if force_rename_fail {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            Err(std::io::Error::other(
                 "atomic_replace: failpoint FinalRename",
             ))
         } else {
@@ -96,8 +89,7 @@ pub fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Err(error) = rename_result {
         // Windows: target may still exist after failed rename-to-bak.
         if path.is_file() {
-            fs::remove_file(path)
-                .with_context(|| format!("remove target {}", path.display()))?;
+            fs::remove_file(path).with_context(|| format!("remove target {}", path.display()))?;
             fs::rename(&tmp, path)
                 .with_context(|| format!("rename temp→target {}", path.display()))?;
             return Ok(());
