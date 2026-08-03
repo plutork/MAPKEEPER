@@ -86,10 +86,12 @@
             <p id="hover-relief" class="muted">Elevation: —</p>
           </div>
           <div id="relief-tool-panel" class="tool-stack hidden">
-            <p>Raise/Lower with a hard-disk brush. Drag to paint a stroke.</p>
+            <p>Sculpt elevation with a hard-disk brush. Drag to paint a stroke.</p>
             <div class="actions" style="gap:0.5rem;flex-wrap:wrap">
               <label><input type="radio" name="relief-mode" value="raise" checked> Raise</label>
               <label><input type="radio" name="relief-mode" value="lower"> Lower</label>
+              <label><input type="radio" name="relief-mode" value="flatten"> Flatten</label>
+              <label><input type="radio" name="relief-mode" value="smooth"> Smooth</label>
             </div>
             <p class="muted">Stroke</p>
             <div class="choice-stack" aria-label="Stroke mode">
@@ -118,7 +120,7 @@
             </div>
             <button id="reload-spatial" type="button">Reload map</button>
             <p class="muted">Entering Relief turns on the relief display layer.</p>
-            <p id="relief-hint" class="muted">Edit ocean off: freeze h &lt; 0; land Lower floors at 0. On: dig/fill ocean.</p>
+            <p id="relief-hint" class="muted">Flatten samples the first cell of the stroke. Smooth averages neighbours. Edit ocean off: freeze h &lt; 0; land floors at 0. On: dig/fill ocean.</p>
           </div>
           <div id="mode-stub" class="empty-card hidden">This mode is a stub in the alpha shell.</div>
         </div>

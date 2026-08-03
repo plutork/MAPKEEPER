@@ -20,14 +20,25 @@ mod persist;
 mod stroke;
 
 pub use persist::{ensure_spatial_state, restore_spatial_from_bak};
-use persist::write_spatial_state;
-use stroke::{cells_from_values, persist_stroke_cells, replay_committed_view, validate_stroke_id};
+use persist::{ensure_spatial_state_timed, write_spatial_state};
+use stroke::{
+    cells_from_values, persist_stroke_cells, replay_committed_view, validate_stroke_id,
+    PersistStrokeResult, StrokeServerTimings,
+};
 
 #[derive(Serialize)]
 struct SpatialView {
     state: SpatialState,
     /// Derived membership — not an independent SoT.
     stub_cells: Vec<Axial>,
+}
+
+#[derive(Serialize)]
+struct StrokeAck {
+    ok: bool,
+    revision: u64,
+    applied_cells: usize,
+    server_timings: StrokeServerTimings,
 }
 
 #[derive(Deserialize)]
@@ -87,7 +98,6 @@ pub(crate) fn routes() -> Router<Arc<ServerState>> {
         .route("/api/spatial/stroke/abort", post(stroke_abort))
 }
 
-
 /// Active **map** path for spatial I/O (N-035). Lock key stays world folder.
 fn active_world(server: &ServerState) -> Result<(PathBuf, String), (StatusCode, String)> {
     let app = server.app.lock().unwrap();
@@ -106,8 +116,14 @@ fn active_world_lock_key(server: &ServerState) -> Result<String, (StatusCode, St
 }
 
 fn load_state(path: &Path) -> Result<SpatialState, (StatusCode, String)> {
-    match ensure_spatial_state(path) {
-        Ok(state) => Ok(state),
+    load_state_timed(path).map(|(state, _)| state)
+}
+
+fn load_state_timed(
+    path: &Path,
+) -> Result<(SpatialState, persist::SpatialIoTimings), (StatusCode, String)> {
+    match ensure_spatial_state_timed(path) {
+        Ok(result) => Ok(result),
         Err(error) => {
             let message = error.to_string();
             let status =
@@ -126,7 +142,10 @@ async fn restore_bak(State(server): State<Arc<ServerState>>) -> impl IntoRespons
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let key = match active_world_lock_key(&server) { Ok(k) => k, Err(e) => return e.into_response() };
+    let key = match active_world_lock_key(&server) {
+        Ok(k) => k,
+        Err(e) => return e.into_response(),
+    };
     let lock = server.world_lock(&key);
     let _guard = lock.lock().unwrap();
     match restore_spatial_from_bak(&path) {
@@ -146,6 +165,15 @@ async fn restore_bak(State(server): State<Arc<ServerState>>) -> impl IntoRespons
 fn view_for(state: SpatialState) -> SpatialView {
     let stub_cells = cells_for_stub(&state.frame, &state.grid, &state.geometry_stub);
     SpatialView { state, stub_cells }
+}
+
+fn stroke_ack_for(result: PersistStrokeResult) -> StrokeAck {
+    StrokeAck {
+        ok: true,
+        revision: result.state.revision,
+        applied_cells: result.applied_cells,
+        server_timings: result.server_timings,
+    }
 }
 
 fn conflict(state: SpatialState) -> axum::response::Response {
@@ -171,7 +199,10 @@ async fn put_stub(
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let key = match active_world_lock_key(&server) { Ok(k) => k, Err(e) => return e.into_response() };
+    let key = match active_world_lock_key(&server) {
+        Ok(k) => k,
+        Err(e) => return e.into_response(),
+    };
     let lock = server.world_lock(&key);
     let _guard = lock.lock().unwrap();
     let mut state = match load_state(&path) {
@@ -194,7 +225,6 @@ async fn put_stub(
     Json(view_for(state)).into_response()
 }
 
-
 async fn stroke_begin(
     State(server): State<Arc<ServerState>>,
     Json(body): Json<StrokeBegin>,
@@ -207,7 +237,10 @@ async fn stroke_begin(
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let key = match active_world_lock_key(&server) { Ok(k) => k, Err(e) => return e.into_response() };
+    let key = match active_world_lock_key(&server) {
+        Ok(k) => k,
+        Err(e) => return e.into_response(),
+    };
     {
         let committed = server.recent_committed_strokes.lock().unwrap();
         if committed.contains_key(&body.stroke_id) {
@@ -258,7 +291,10 @@ async fn stroke_chunk(
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let key = match active_world_lock_key(&server) { Ok(k) => k, Err(e) => return e.into_response() };
+    let key = match active_world_lock_key(&server) {
+        Ok(k) => k,
+        Err(e) => return e.into_response(),
+    };
     let mut strokes = server.strokes.lock().unwrap();
     let Some(staging) = strokes.get_mut(&body.stroke_id) else {
         return (StatusCode::BAD_REQUEST, "unknown stroke_id — begin first").into_response();
@@ -311,11 +347,14 @@ async fn stroke_commit(
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let key = match active_world_lock_key(&server) { Ok(k) => k, Err(e) => return e.into_response() };
+    let key = match active_world_lock_key(&server) {
+        Ok(k) => k,
+        Err(e) => return e.into_response(),
+    };
 
     if let Some(replay) = replay_committed_view(&server, &path, &key, &body.stroke_id) {
         return match replay {
-            Ok(state) => Json(view_for(state)).into_response(),
+            Ok(result) => Json(stroke_ack_for(result)).into_response(),
             Err(e) => e.into_response(),
         };
     }
@@ -342,7 +381,7 @@ async fn stroke_commit(
         staging.base_revision,
         &staging.cells,
     ) {
-        Ok(state) => Json(view_for(state)).into_response(),
+        Ok(result) => Json(stroke_ack_for(result)).into_response(),
         Err(resp) => resp,
     }
 }
@@ -372,11 +411,14 @@ async fn stroke_oneshot(
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let key = match active_world_lock_key(&server) { Ok(k) => k, Err(e) => return e.into_response() };
+    let key = match active_world_lock_key(&server) {
+        Ok(k) => k,
+        Err(e) => return e.into_response(),
+    };
 
     if let Some(replay) = replay_committed_view(&server, &path, &key, &body.stroke_id) {
         return match replay {
-            Ok(state) => Json(view_for(state)).into_response(),
+            Ok(result) => Json(stroke_ack_for(result)).into_response(),
             Err(e) => e.into_response(),
         };
     }
@@ -391,10 +433,10 @@ async fn stroke_oneshot(
         body.base_revision,
         &cells,
     ) {
-        Ok(state) => {
+        Ok(result) => {
             // Drop any partial staging with same id.
             server.strokes.lock().unwrap().remove(&stroke_id);
-            Json(view_for(state)).into_response()
+            Json(stroke_ack_for(result)).into_response()
         }
         Err(resp) => resp,
     }

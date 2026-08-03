@@ -113,12 +113,14 @@ try {
         base_revision = $rev0
         cells         = @(@{ q = 0; r = 0; value = 3 })
     } | ConvertTo-Json -Depth 5
-    $updated = Invoke-RestMethod -Uri "$BaseUrl/api/spatial/stroke" -Method Post -ContentType "application/json" -Body $strokeSmall
+    $ack = Invoke-RestMethod -Uri "$BaseUrl/api/spatial/stroke" -Method Post -ContentType "application/json" -Body $strokeSmall
+    if ([int64]$ack.revision -ne ($rev0 + 1)) { throw "stroke oneshot did not bump revision." }
+    if ([int]$ack.applied_cells -ne 1) { throw "stroke oneshot ACK count mismatch." }
+    $updated = Invoke-RestMethod -Uri "$BaseUrl/api/spatial" -TimeoutSec 10
     if ((Get-Cell $updated "0,0") -ne 3) { throw "stroke oneshot did not persist cell 0,0=3." }
-    if ([int64]$updated.state.revision -ne ($rev0 + 1)) { throw "stroke oneshot did not bump revision." }
 
     # Multi-chunk stroke (transport only; one commit).
-    $rev1 = [int64]$updated.state.revision
+    $rev1 = [int64]$ack.revision
     Invoke-RestMethod -Uri "$BaseUrl/api/spatial/stroke/begin" -Method Post -ContentType "application/json" -Body (@{
         stroke_id = "smoke-chunks"; base_revision = $rev1
     } | ConvertTo-Json) | Out-Null
@@ -136,9 +138,11 @@ try {
     $chunked = Invoke-RestMethod -Uri "$BaseUrl/api/spatial/stroke/commit" -Method Post -ContentType "application/json" -Body (@{
         stroke_id = "smoke-chunks"
     } | ConvertTo-Json)
-    if ((Get-Cell $chunked "1,0") -ne 5) { throw "multi-chunk commit missing 1,0=5." }
-    if ((Get-Cell $chunked "3,0") -ne 7) { throw "multi-chunk commit missing 3,0=7." }
-    if ([int64]$chunked.state.revision -ne ($rev1 + 1)) { throw "multi-chunk did not bump one revision." }
+    if ([int64]$chunked.revision -ne ($rev1 + 1)) { throw "multi-chunk did not bump one revision." }
+    if ([int]$chunked.applied_cells -ne 3) { throw "multi-chunk ACK count mismatch." }
+    $chunkedView = Invoke-RestMethod -Uri "$BaseUrl/api/spatial" -TimeoutSec 10
+    if ((Get-Cell $chunkedView "1,0") -ne 5) { throw "multi-chunk commit missing 1,0=5." }
+    if ((Get-Cell $chunkedView "3,0") -ne 7) { throw "multi-chunk commit missing 3,0=7." }
 
     # Legacy field PUT must not exist as independent commit path.
     try {

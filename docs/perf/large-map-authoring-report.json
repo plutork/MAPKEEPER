@@ -1,0 +1,3657 @@
+{
+  "schema": "mapkeeper.continuous-authoring.v1",
+  "generated_at": "2026-08-03T20:38:04.945Z",
+  "git_sha": "e71c9ab267347d6610660406c724d5f6771faabd",
+  "build_mode": "debug-server + web dist",
+  "platform": "win32-x64",
+  "harness_revision": "1d3d19007570457c",
+  "phase": "after_delta_ack",
+  "evidence_class": "reproducible_headless",
+  "supported_sot": "owner_windows_tauri_release",
+  "release_gate": {
+    "status": "pending",
+    "owner_run_at": null,
+    "instruction_path": "docs/perf/OWNER-TAURI-RELEASE-GATE.md"
+  },
+  "contract": {
+    "metric": "mouseup_to_durable_ack_first_correct_frame_and_next_stroke_ready",
+    "p95_budget_ms": 100,
+    "sizes": [
+      "approx_2k",
+      "approx_12k",
+      "approx_26k",
+      "approx_50k"
+    ],
+    "density_pcts": [
+      0,
+      25,
+      75,
+      100
+    ],
+    "next_stroke_waits_for_ack": true
+  },
+  "note": "Headless values are report-only. Supported requires owner Windows Tauri release on the full mature matrix.",
+  "filter": null,
+  "matrix": [
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "density_pct": 0,
+      "populated_cells": 0,
+      "authoring": {
+        "cell_count": 1980,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 37.299999952316284,
+          "p95": 210.80000019073486,
+          "max": 210.80000019073486,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 11.799999952316284,
+            "server_read_ms": 1.4779,
+            "server_parse_ms": 0.1514,
+            "server_apply_ms": 0.0109,
+            "server_serialize_ms": 0.3549,
+            "server_atomic_write_ms": 6.5111,
+            "response_bytes": 205,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.3000001907348633,
+            "first_correct_frame_ms": 202.400000333786
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 30.5,
+          "p95": 47.200000047683716,
+          "max": 47.200000047683716,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 19.5,
+            "server_read_ms": 11.8249,
+            "server_parse_ms": 0.9430999999999999,
+            "server_apply_ms": 0.0711,
+            "server_serialize_ms": 0.5719,
+            "server_atomic_write_ms": 2.5465,
+            "response_bytes": 204,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 1.5,
+            "first_correct_frame_ms": 26.700000047683716
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 32.59999990463257,
+          "p95": 45.5,
+          "max": 81,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 14.399999856948853,
+            "server_read_ms": 2.0612,
+            "server_parse_ms": 1.1808999999999998,
+            "server_apply_ms": 0.0083,
+            "server_serialize_ms": 0.6151000000000001,
+            "server_atomic_write_ms": 2.878,
+            "response_bytes": 217,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 30.199999809265137
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 2614213,
+        "js_heap_total_bytes": 7820457,
+        "server_process_working_set_bytes": 16527360,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "density_pct": 25,
+      "populated_cells": 495,
+      "authoring": {
+        "cell_count": 1980,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 49.200000047683716,
+          "p95": 49.299999952316284,
+          "max": 49.299999952316284,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 22,
+            "server_read_ms": 11.8825,
+            "server_parse_ms": 1.4686000000000001,
+            "server_apply_ms": 0.0102,
+            "server_serialize_ms": 0.9472,
+            "server_atomic_write_ms": 7.4449,
+            "response_bytes": 205,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 32.5
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 48.299999952316284,
+          "p95": 48.700000047683716,
+          "max": 48.700000047683716,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 20.699999809265137,
+            "server_read_ms": 11.267299999999999,
+            "server_parse_ms": 1.9854,
+            "server_apply_ms": 0.0761,
+            "server_serialize_ms": 1.1354,
+            "server_atomic_write_ms": 2.3072,
+            "response_bytes": 206,
+            "client_parse_ms": 0,
+            "client_apply_ms": 1.1000001430511475,
+            "first_correct_frame_ms": 27.90000009536743
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 49.200000047683716,
+          "p95": 49.40000009536743,
+          "max": 49.59999990463257,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 21.200000047683716,
+            "server_read_ms": 10.437899999999999,
+            "server_parse_ms": 2.6224999999999996,
+            "server_apply_ms": 0.0102,
+            "server_serialize_ms": 1.3417,
+            "server_atomic_write_ms": 2.488,
+            "response_bytes": 216,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 32.30000019073486
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 2780854,
+        "js_heap_total_bytes": 7560202,
+        "server_process_working_set_bytes": 16834560,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": true
+    },
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "density_pct": 75,
+      "populated_cells": 1485,
+      "authoring": {
+        "cell_count": 1980,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 49.200000047683716,
+          "p95": 49.40000009536743,
+          "max": 49.40000009536743,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 23.699999809265137,
+            "server_read_ms": 9.562100000000001,
+            "server_parse_ms": 5.4458,
+            "server_apply_ms": 0.0214,
+            "server_serialize_ms": 2.5461,
+            "server_atomic_write_ms": 1.9983000000000002,
+            "response_bytes": 215,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 28.299999952316284
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 48.19999980926514,
+          "p95": 48.299999952316284,
+          "max": 48.299999952316284,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 24.899999856948853,
+            "server_read_ms": 12.0886,
+            "server_parse_ms": 5.0621,
+            "server_apply_ms": 0.0617,
+            "server_serialize_ms": 2.0213,
+            "server_atomic_write_ms": 1.6354,
+            "response_bytes": 192,
+            "client_parse_ms": 0,
+            "client_apply_ms": 1,
+            "first_correct_frame_ms": 26.200000047683716
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 49.299999952316284,
+          "p95": 71.5,
+          "max": 99.29999995231628,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 36.700000047683716,
+            "server_read_ms": 15.889500000000002,
+            "server_parse_ms": 6.527299999999999,
+            "server_apply_ms": 0.0111,
+            "server_serialize_ms": 2.8557,
+            "server_atomic_write_ms": 2.7152000000000003,
+            "response_bytes": 217,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 47.09999990463257
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 2826755,
+        "js_heap_total_bytes": 7822483,
+        "server_process_working_set_bytes": 16969728,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": true
+    },
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "density_pct": 100,
+      "populated_cells": 1980,
+      "authoring": {
+        "cell_count": 1980,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 49.299999952316284,
+          "p95": 184.09999990463257,
+          "max": 184.09999990463257,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 28.40000009536743,
+            "server_read_ms": 11.6092,
+            "server_parse_ms": 6.9148,
+            "server_apply_ms": 0.011,
+            "server_serialize_ms": 3.5743,
+            "server_atomic_write_ms": 2.4098,
+            "response_bytes": 201,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 161
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 47.90000009536743,
+          "p95": 48.299999952316284,
+          "max": 48.299999952316284,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 26.5,
+            "server_read_ms": 10.0725,
+            "server_parse_ms": 6.8418,
+            "server_apply_ms": 0.0421,
+            "server_serialize_ms": 2.2998,
+            "server_atomic_write_ms": 2.4375,
+            "response_bytes": 193,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.8000001907348633,
+            "first_correct_frame_ms": 23.699999809265137
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 62.89999985694885,
+          "p95": 81.40000009536743,
+          "max": 84.40000009536743,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 30.40000009536743,
+            "server_read_ms": 15.2065,
+            "server_parse_ms": 7.2756,
+            "server_apply_ms": 0.0101,
+            "server_serialize_ms": 3.2063,
+            "server_atomic_write_ms": 3.6942,
+            "response_bytes": 217,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 59.5
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3181635,
+        "js_heap_total_bytes": 11759111,
+        "server_process_working_set_bytes": 16809984,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_12k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "density_pct": 0,
+      "populated_cells": 0,
+      "authoring": {
+        "cell_count": 11968,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 32.40000009536743,
+          "p95": 183,
+          "max": 183,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 7.900000095367432,
+            "server_read_ms": 1.387,
+            "server_parse_ms": 0.1369,
+            "server_apply_ms": 0.007500000000000001,
+            "server_serialize_ms": 0.092,
+            "server_atomic_write_ms": 2.5307,
+            "response_bytes": 203,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 175.80000019073486
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 41.09999990463257,
+          "p95": 66.70000004768372,
+          "max": 66.70000004768372,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 15.100000143051147,
+            "server_read_ms": 8.6499,
+            "server_parse_ms": 0.8321,
+            "server_apply_ms": 0.079,
+            "server_serialize_ms": 0.4218,
+            "server_atomic_write_ms": 1.9116,
+            "response_bytes": 193,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.7999999523162842,
+            "first_correct_frame_ms": 54.700000047683716
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 40.299999952316284,
+          "p95": 83,
+          "max": 83.79999995231628,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 16.600000143051147,
+            "server_read_ms": 8.9642,
+            "server_parse_ms": 1.3578,
+            "server_apply_ms": 0.0087,
+            "server_serialize_ms": 0.6602,
+            "server_atomic_write_ms": 2.5527,
+            "response_bytes": 217,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 71.59999990463257
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 2947959,
+        "js_heap_total_bytes": 11488371,
+        "server_process_working_set_bytes": 16953344,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_12k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "density_pct": 25,
+      "populated_cells": 2992,
+      "authoring": {
+        "cell_count": 11968,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 49.200000047683716,
+          "p95": 1190.1999998092651,
+          "max": 1190.1999998092651,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 36.299999952316284,
+            "server_read_ms": 13.1457,
+            "server_parse_ms": 9.747300000000001,
+            "server_apply_ms": 0.0092,
+            "server_serialize_ms": 5.5769,
+            "server_atomic_write_ms": 3.2334,
+            "response_bytes": 227,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 1153.5999999046326
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 48.5,
+          "p95": 48.59999990463257,
+          "max": 48.59999990463257,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 34.10000014305115,
+            "server_read_ms": 13.4583,
+            "server_parse_ms": 10.1993,
+            "server_apply_ms": 0.0679,
+            "server_serialize_ms": 4.1693,
+            "server_atomic_write_ms": 2.3975,
+            "response_bytes": 215,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 1,
+            "first_correct_frame_ms": 16.59999990463257
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 65.40000009536743,
+          "p95": 85.20000004768372,
+          "max": 108.70000004768372,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 35.200000047683716,
+            "server_read_ms": 12.4466,
+            "server_parse_ms": 11.391399999999999,
+            "server_apply_ms": 0.0107,
+            "server_serialize_ms": 5.128299999999999,
+            "server_atomic_write_ms": 3.0103,
+            "response_bytes": 206,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 54.200000047683716
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3057461,
+        "js_heap_total_bytes": 4934485,
+        "server_process_working_set_bytes": 17010688,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_12k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "density_pct": 75,
+      "populated_cells": 8976,
+      "authoring": {
+        "cell_count": 11968,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 98.90000009536743,
+          "p95": 926.5,
+          "max": 926.5,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 90.70000004768372,
+            "server_read_ms": 20.9497,
+            "server_parse_ms": 40.3043,
+            "server_apply_ms": 0.0184,
+            "server_serialize_ms": 15.900899999999998,
+            "server_atomic_write_ms": 4.8727,
+            "response_bytes": 192,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 849.8999998569489
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 81.70000004768372,
+          "p95": 82.10000014305115,
+          "max": 82.10000014305115,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 73.79999995231628,
+            "server_read_ms": 17.6458,
+            "server_parse_ms": 33.38590000000001,
+            "server_apply_ms": 0.1522,
+            "server_serialize_ms": 15.9271,
+            "server_atomic_write_ms": 3.1419,
+            "response_bytes": 206,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.8000001907348633,
+            "first_correct_frame_ms": 20.00000023841858
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 82.69999980926514,
+          "p95": 83,
+          "max": 83,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 65.09999990463257,
+            "server_read_ms": 14.2785,
+            "server_parse_ms": 31.2948,
+            "server_apply_ms": 0.0126,
+            "server_serialize_ms": 11.8126,
+            "server_atomic_write_ms": 2.7284,
+            "response_bytes": 217,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 28.299999952316284
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3518034,
+        "js_heap_total_bytes": 4876518,
+        "server_process_working_set_bytes": 17461248,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_12k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "density_pct": 100,
+      "populated_cells": 11968,
+      "authoring": {
+        "cell_count": 11968,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 99.09999990463257,
+          "p95": 348.90000009536743,
+          "max": 348.90000009536743,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 86.40000009536743,
+            "server_read_ms": 13.007100000000001,
+            "server_parse_ms": 46.1396,
+            "server_apply_ms": 0.0109,
+            "server_serialize_ms": 28.7911,
+            "server_atomic_write_ms": 2.5921,
+            "response_bytes": 204,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 275.80000019073486
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 81.80000019073486,
+          "p95": 98.5,
+          "max": 98.5,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 93.40000009536743,
+            "server_read_ms": 14.6738,
+            "server_parse_ms": 47.1966,
+            "server_apply_ms": 0.085,
+            "server_serialize_ms": 18.374299999999998,
+            "server_atomic_write_ms": 2.7169,
+            "response_bytes": 194,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.7000000476837158,
+            "first_correct_frame_ms": 12.599999904632568
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 82.70000004768372,
+          "p95": 83.09999990463257,
+          "max": 99.39999985694885,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 74.60000014305115,
+            "server_read_ms": 12.1644,
+            "server_parse_ms": 38.512699999999995,
+            "server_apply_ms": 0.012700000000000001,
+            "server_serialize_ms": 16.8073,
+            "server_atomic_write_ms": 3.7647000000000004,
+            "response_bytes": 217,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 16.299999952316284
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3720274,
+        "js_heap_total_bytes": 5334718,
+        "server_process_working_set_bytes": 19070976,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_26k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "density_pct": 0,
+      "populated_cells": 0,
+      "authoring": {
+        "cell_count": 26000,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 32.700000047683716,
+          "p95": 365.60000014305115,
+          "max": 365.60000014305115,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 13.5,
+            "server_read_ms": 8.118200000000002,
+            "server_parse_ms": 0.1118,
+            "server_apply_ms": 0.0063,
+            "server_serialize_ms": 0.062,
+            "server_atomic_write_ms": 2.6032,
+            "response_bytes": 202,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 357.80000019073486
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 31.800000190734863,
+          "p95": 32.10000014305115,
+          "max": 32.10000014305115,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 14.600000143051147,
+            "server_read_ms": 8.424199999999999,
+            "server_parse_ms": 0.63,
+            "server_apply_ms": 0.05,
+            "server_serialize_ms": 0.36479999999999996,
+            "server_atomic_write_ms": 1.8278999999999999,
+            "response_bytes": 218,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.7000000476837158,
+            "first_correct_frame_ms": 25.200000286102295
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 32.700000047683716,
+          "p95": 49.200000047683716,
+          "max": 49.39999985694885,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 16.5,
+            "server_read_ms": 9.3852,
+            "server_parse_ms": 1.0212,
+            "server_apply_ms": 0.0089,
+            "server_serialize_ms": 0.49240000000000006,
+            "server_atomic_write_ms": 2.1575,
+            "response_bytes": 218,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 31.799999952316284
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3033758,
+        "js_heap_total_bytes": 8704050,
+        "server_process_working_set_bytes": 17195008,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_26k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "density_pct": 25,
+      "populated_cells": 6500,
+      "authoring": {
+        "cell_count": 26000,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 49.40000009536743,
+          "p95": 69.79999995231628,
+          "max": 69.79999995231628,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 50.200000047683716,
+            "server_read_ms": 11.440900000000001,
+            "server_parse_ms": 18.4894,
+            "server_apply_ms": 0.0096,
+            "server_serialize_ms": 10.101,
+            "server_atomic_write_ms": 3.6146,
+            "response_bytes": 191,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 19.5
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 48.700000047683716,
+          "p95": 81.79999995231628,
+          "max": 81.79999995231628,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 47.799999952316284,
+            "server_read_ms": 14.3564,
+            "server_parse_ms": 18.792900000000003,
+            "server_apply_ms": 0.055,
+            "server_serialize_ms": 8.2921,
+            "server_atomic_write_ms": 2.3294,
+            "response_bytes": 203,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.7000000476837158,
+            "first_correct_frame_ms": 33.299999952316284
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 49.5,
+          "p95": 83.09999990463257,
+          "max": 83.10000014305115,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 58.799999952316284,
+            "server_read_ms": 14.4009,
+            "server_parse_ms": 23.2466,
+            "server_apply_ms": 0.011300000000000001,
+            "server_serialize_ms": 11.0974,
+            "server_atomic_write_ms": 3.5221,
+            "response_bytes": 217,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 32
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3784838,
+        "js_heap_total_bytes": 12318426,
+        "server_process_working_set_bytes": 18829312,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": true
+    },
+    {
+      "size": "approx_26k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "density_pct": 75,
+      "populated_cells": 19500,
+      "authoring": {
+        "cell_count": 26000,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 116.10000014305115,
+          "p95": 119,
+          "max": 119,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 114.10000014305115,
+            "server_read_ms": 17.3117,
+            "server_parse_ms": 59.1984,
+            "server_apply_ms": 0.0152,
+            "server_serialize_ms": 25.0984,
+            "server_atomic_write_ms": 5.0258,
+            "response_bytes": 206,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 6.5
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 115.30000019073486,
+          "p95": 132,
+          "max": 132,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 117.5,
+            "server_read_ms": 16.880699999999997,
+            "server_parse_ms": 64.4538,
+            "server_apply_ms": 0.0805,
+            "server_serialize_ms": 23.6555,
+            "server_atomic_write_ms": 3.8525,
+            "response_bytes": 208,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.7000000476837158,
+            "first_correct_frame_ms": 13.799999952316284
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 131.89999985694885,
+          "p95": 166.29999995231628,
+          "max": 232.39999985694885,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 157,
+            "server_read_ms": 21.6979,
+            "server_parse_ms": 85.4847,
+            "server_apply_ms": 0.0163,
+            "server_serialize_ms": 31.942199999999996,
+            "server_atomic_write_ms": 3.5650999999999997,
+            "response_bytes": 216,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 17
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3549619,
+        "js_heap_total_bytes": 5701243,
+        "server_process_working_set_bytes": 20779008,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_26k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "density_pct": 100,
+      "populated_cells": 26000,
+      "authoring": {
+        "cell_count": 26000,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 149.59999990463257,
+          "p95": 565.5999999046326,
+          "max": 565.5999999046326,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 172.70000004768372,
+            "server_read_ms": 15.7209,
+            "server_parse_ms": 98.6738,
+            "server_apply_ms": 0.0121,
+            "server_serialize_ms": 36.3806,
+            "server_atomic_write_ms": 5.0166,
+            "response_bytes": 204,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 411.39999985694885
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 148.59999990463257,
+          "p95": 165.5,
+          "max": 165.5,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 161.10000014305115,
+            "server_read_ms": 15.5703,
+            "server_parse_ms": 96.2364,
+            "server_apply_ms": 0.1225,
+            "server_serialize_ms": 35.8328,
+            "server_atomic_write_ms": 2.5387999999999997,
+            "response_bytes": 206,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.8999998569488525,
+            "first_correct_frame_ms": 7.6000001430511475
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 149.5,
+          "p95": 199.5,
+          "max": 249.59999990463257,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 184.40000009536743,
+            "server_read_ms": 13.59,
+            "server_parse_ms": 115.4955,
+            "server_apply_ms": 0.0193,
+            "server_serialize_ms": 41.5912,
+            "server_atomic_write_ms": 4.0593,
+            "response_bytes": 216,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 14.899999856948853
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 4074130,
+        "js_heap_total_bytes": 5308450,
+        "server_process_working_set_bytes": 22134784,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "density_pct": 0,
+      "populated_cells": 0,
+      "authoring": {
+        "cell_count": 49860,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 50.59999990463257,
+          "p95": 515.5999999046326,
+          "max": 515.5999999046326,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 17.59999990463257,
+            "server_read_ms": 10.6952,
+            "server_parse_ms": 0.1368,
+            "server_apply_ms": 0.0086,
+            "server_serialize_ms": 0.0971,
+            "server_atomic_write_ms": 2.6456,
+            "response_bytes": 217,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.5999999046325684,
+            "first_correct_frame_ms": 501.69999980926514
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 50.40000009536743,
+          "p95": 64.5,
+          "max": 64.5,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 15.200000047683716,
+            "server_read_ms": 9.2776,
+            "server_parse_ms": 0.6079,
+            "server_apply_ms": 0.0632,
+            "server_serialize_ms": 0.3819,
+            "server_atomic_write_ms": 1.7776,
+            "response_bytes": 205,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.7999999523162842,
+            "first_correct_frame_ms": 50
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 53.799999952316284,
+          "p95": 69.70000004768372,
+          "max": 98.09999990463257,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 20.5,
+            "server_read_ms": 11.3606,
+            "server_parse_ms": 1.3266,
+            "server_apply_ms": 0.0095,
+            "server_serialize_ms": 0.6557,
+            "server_atomic_write_ms": 2.4917,
+            "response_bytes": 215,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.39999985694885254,
+            "first_correct_frame_ms": 61.59999990463257
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3941482,
+        "js_heap_total_bytes": 9327550,
+        "server_process_working_set_bytes": 17670144,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "density_pct": 25,
+      "populated_cells": 12465,
+      "authoring": {
+        "cell_count": 49860,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 93.59999990463257,
+          "p95": 488.2999999523163,
+          "max": 488.2999999523163,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 81.59999990463257,
+            "server_read_ms": 18.6128,
+            "server_parse_ms": 44.9658,
+            "server_apply_ms": 0.0096,
+            "server_serialize_ms": 15.0728,
+            "server_atomic_write_ms": 3.4676,
+            "response_bytes": 204,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.3000001907348633,
+            "first_correct_frame_ms": 408.10000014305115
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 82.30000019073486,
+          "p95": 98.69999980926514,
+          "max": 98.69999980926514,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 91.40000009536743,
+            "server_read_ms": 17.2674,
+            "server_parse_ms": 55.698100000000004,
+            "server_apply_ms": 0.0851,
+            "server_serialize_ms": 19.8351,
+            "server_atomic_write_ms": 2.4807,
+            "response_bytes": 208,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 1,
+            "first_correct_frame_ms": 10.5
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 82.79999995231628,
+          "p95": 117.30000019073486,
+          "max": 214.70000004768372,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 113.10000014305115,
+            "server_read_ms": 15.656,
+            "server_parse_ms": 60.9809,
+            "server_apply_ms": 0.018099999999999998,
+            "server_serialize_ms": 22.587300000000003,
+            "server_atomic_write_ms": 3.2789,
+            "response_bytes": 218,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.3000001907348633,
+            "first_correct_frame_ms": 16.300000190734863
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 4783800,
+        "js_heap_total_bytes": 5795980,
+        "server_process_working_set_bytes": 20140032,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "density_pct": 75,
+      "populated_cells": 37395,
+      "authoring": {
+        "cell_count": 49860,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 203.09999990463257,
+          "p95": 248.70000004768372,
+          "max": 248.70000004768372,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 241.40000009536743,
+            "server_read_ms": 8.8814,
+            "server_parse_ms": 148.941,
+            "server_apply_ms": 0.016,
+            "server_serialize_ms": 54.2803,
+            "server_atomic_write_ms": 3.2802000000000002,
+            "response_bytes": 214,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.5999999046325684,
+            "first_correct_frame_ms": 37.90000009536743
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 214.90000009536743,
+          "p95": 215.29999995231628,
+          "max": 215.29999995231628,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 207.40000009536743,
+            "server_read_ms": 11.2713,
+            "server_parse_ms": 123.2951,
+            "server_apply_ms": 0.0813,
+            "server_serialize_ms": 48.0684,
+            "server_atomic_write_ms": 3.7837,
+            "response_bytes": 219,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.7000000476837158,
+            "first_correct_frame_ms": 12.5
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 199.5,
+          "p95": 249.29999995231628,
+          "max": 266.19999980926514,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 235.70000004768372,
+            "server_read_ms": 9.483500000000001,
+            "server_parse_ms": 142.1873,
+            "server_apply_ms": 0.0195,
+            "server_serialize_ms": 55.6542,
+            "server_atomic_write_ms": 5.053,
+            "response_bytes": 208,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 18.600000143051147
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 5168658,
+        "js_heap_total_bytes": 6455034,
+        "server_process_working_set_bytes": 24182784,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "density_pct": 100,
+      "populated_cells": 49860,
+      "authoring": {
+        "cell_count": 49860,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 304.2999999523163,
+          "p95": 477.7999999523163,
+          "max": 477.7999999523163,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 315.2000000476837,
+            "server_read_ms": 11.027500000000002,
+            "server_parse_ms": 203.7397,
+            "server_apply_ms": 0.0145,
+            "server_serialize_ms": 60.3553,
+            "server_atomic_write_ms": 10.1329,
+            "response_bytes": 207,
+            "client_parse_ms": 0,
+            "client_apply_ms": 1.1000001430511475,
+            "first_correct_frame_ms": 222.79999995231628
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 265,
+          "p95": 265.2000000476837,
+          "max": 265.2000000476837,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 258.89999985694885,
+            "server_read_ms": 10.1131,
+            "server_parse_ms": 157.34629999999999,
+            "server_apply_ms": 0.1218,
+            "server_serialize_ms": 59.581,
+            "server_atomic_write_ms": 5.0959,
+            "response_bytes": 218,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.8000001907348633,
+            "first_correct_frame_ms": 10.200000047683716
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 266.19999980926514,
+          "p95": 316.09999990463257,
+          "max": 399.60000014305115,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 300,
+            "server_read_ms": 10.4807,
+            "server_parse_ms": 184.1341,
+            "server_apply_ms": 0.0192,
+            "server_serialize_ms": 80.81,
+            "server_atomic_write_ms": 6.1998,
+            "response_bytes": 218,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.3000001907348633,
+            "first_correct_frame_ms": 16.399999856948853
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 6370844,
+        "js_heap_total_bytes": 7233744,
+        "server_process_working_set_bytes": 18317312,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    }
+  ],
+  "baseline_matrix": [
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "density_pct": 0,
+      "populated_cells": 0,
+      "authoring": {
+        "cell_count": 1980,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 215.70000004768372,
+          "p95": 380.2999999523163,
+          "max": 380.2999999523163,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 9.299999952316284,
+            "server_read_ms": 1.9292999999999998,
+            "server_parse_ms": 0.1211,
+            "server_apply_ms": 0.0117,
+            "server_serialize_ms": 0.07289999999999999,
+            "server_atomic_write_ms": 2.5856999999999997,
+            "response_bytes": 734,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 1,
+            "first_correct_frame_ms": 373
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 47.200000047683716,
+          "p95": 225,
+          "max": 225,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 16.59999990463257,
+            "server_read_ms": 8.6668,
+            "server_parse_ms": 0.7147,
+            "server_apply_ms": 0.0691,
+            "server_serialize_ms": 0.3368,
+            "server_atomic_write_ms": 3.0997,
+            "response_bytes": 3316,
+            "client_parse_ms": 0.20000004768371582,
+            "client_apply_ms": 0.8999998569488525,
+            "first_correct_frame_ms": 216
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 41.39999985694885,
+          "p95": 175.80000019073486,
+          "max": 213.5,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 14.5,
+            "server_read_ms": 1.6662000000000001,
+            "server_parse_ms": 1.3026,
+            "server_apply_ms": 0.0086,
+            "server_serialize_ms": 0.6212,
+            "server_atomic_write_ms": 4.8164,
+            "response_bytes": 3578,
+            "client_parse_ms": 0.20000004768371582,
+            "client_apply_ms": 0.9000000953674316,
+            "first_correct_frame_ms": 166.5
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3972360,
+        "js_heap_total_bytes": 10794648
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "density_pct": 25,
+      "populated_cells": 495,
+      "authoring": {
+        "cell_count": 1980,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 178.20000004768372,
+          "p95": 322.60000014305115,
+          "max": 322.60000014305115,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 19.200000047683716,
+            "server_read_ms": 9.5817,
+            "server_parse_ms": 1.2899999999999998,
+            "server_apply_ms": 0.0076,
+            "server_serialize_ms": 1.0003,
+            "server_atomic_write_ms": 2.5306,
+            "response_bytes": 5831,
+            "client_parse_ms": 0.20000004768371582,
+            "client_apply_ms": 0.8999998569488525,
+            "first_correct_frame_ms": 305.80000042915344
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 155.80000019073486,
+          "p95": 210.79999995231628,
+          "max": 210.79999995231628,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 20.299999952316284,
+            "server_read_ms": 10.7531,
+            "server_parse_ms": 2.5215,
+            "server_apply_ms": 0.0663,
+            "server_serialize_ms": 1.3098,
+            "server_atomic_write_ms": 2.2697,
+            "response_bytes": 7651,
+            "client_parse_ms": 0.2999999523162842,
+            "client_apply_ms": 0.7999999523162842,
+            "first_correct_frame_ms": 193
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 45.39999985694885,
+          "p95": 49.700000047683716,
+          "max": 60.89999985694885,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 26,
+            "server_read_ms": 14.2208,
+            "server_parse_ms": 3.1901,
+            "server_apply_ms": 0.0112,
+            "server_serialize_ms": 1.3889,
+            "server_atomic_write_ms": 2.9359,
+            "response_bytes": 7887,
+            "client_parse_ms": 0.3000001907348633,
+            "client_apply_ms": 0.7999999523162842,
+            "first_correct_frame_ms": 27.90000009536743
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 4023935,
+        "js_heap_total_bytes": 15522375
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "density_pct": 75,
+      "populated_cells": 1485,
+      "authoring": {
+        "cell_count": 1980,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 47.5,
+          "p95": 49.59999990463257,
+          "max": 49.59999990463257,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 27.700000047683716,
+            "server_read_ms": 8.969899999999999,
+            "server_parse_ms": 6.4493,
+            "server_apply_ms": 0.0098,
+            "server_serialize_ms": 2.8874999999999997,
+            "server_atomic_write_ms": 2.4034999999999997,
+            "response_bytes": 16066,
+            "client_parse_ms": 0.40000009536743164,
+            "client_apply_ms": 0.7999999523162842,
+            "first_correct_frame_ms": 23.90000009536743
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 48.09999990463257,
+          "p95": 48.299999952316284,
+          "max": 48.299999952316284,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 29.59999990463257,
+            "server_read_ms": 12.0583,
+            "server_parse_ms": 6.497400000000001,
+            "server_apply_ms": 0.0713,
+            "server_serialize_ms": 2.8842999999999996,
+            "server_atomic_write_ms": 2.585,
+            "response_bytes": 16756,
+            "client_parse_ms": 0.5,
+            "client_apply_ms": 0.5,
+            "first_correct_frame_ms": 21.5
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 49.200000047683716,
+          "p95": 49.59999990463257,
+          "max": 49.700000047683716,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 30.399999856948853,
+            "server_read_ms": 11.1647,
+            "server_parse_ms": 6.9184,
+            "server_apply_ms": 0.0115,
+            "server_serialize_ms": 2.9617,
+            "server_atomic_write_ms": 3.0076,
+            "response_bytes": 16831,
+            "client_parse_ms": 0.5,
+            "client_apply_ms": 0.5,
+            "first_correct_frame_ms": 23.90000009536743
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 4090000,
+        "js_heap_total_bytes": 16850980
+      },
+      "headless_budget_observed": true
+    },
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "density_pct": 100,
+      "populated_cells": 1980,
+      "authoring": {
+        "cell_count": 1980,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 40.90000009536743,
+          "p95": 48.89999985694885,
+          "max": 48.89999985694885,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 33.69999980926514,
+            "server_read_ms": 9.656400000000001,
+            "server_parse_ms": 8.2833,
+            "server_apply_ms": 0.0095,
+            "server_serialize_ms": 3.6649,
+            "server_atomic_write_ms": 6.0175,
+            "response_bytes": 21212,
+            "client_parse_ms": 0.5,
+            "client_apply_ms": 0.7999999523162842,
+            "first_correct_frame_ms": 19.00000023841858
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 45.799999952316284,
+          "p95": 48.200000047683716,
+          "max": 48.200000047683716,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 32,
+            "server_read_ms": 10.2406,
+            "server_parse_ms": 8.767199999999999,
+            "server_apply_ms": 0.06430000000000001,
+            "server_serialize_ms": 3.7878,
+            "server_atomic_write_ms": 2.483,
+            "response_bytes": 21193,
+            "client_parse_ms": 0.5,
+            "client_apply_ms": 0.39999985694885254,
+            "first_correct_frame_ms": 17.100000143051147
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 49.299999952316284,
+          "p95": 49.5,
+          "max": 82.59999990463257,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 36.200000047683716,
+            "server_read_ms": 16.1806,
+            "server_parse_ms": 8.7998,
+            "server_apply_ms": 0.0149,
+            "server_serialize_ms": 3.621,
+            "server_atomic_write_ms": 2.8253000000000004,
+            "response_bytes": 21206,
+            "client_parse_ms": 0.5,
+            "client_apply_ms": 0.40000009536743164,
+            "first_correct_frame_ms": 22.600000143051147
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 4101612,
+        "js_heap_total_bytes": 17646132
+      },
+      "headless_budget_observed": true
+    },
+    {
+      "size": "approx_12k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "density_pct": 0,
+      "populated_cells": 0,
+      "authoring": {
+        "cell_count": 11968,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 227.20000004768372,
+          "p95": 406,
+          "max": 406,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 17.299999952316284,
+            "server_read_ms": 10.8325,
+            "server_parse_ms": 0.1682,
+            "server_apply_ms": 0.0095,
+            "server_serialize_ms": 0.0798,
+            "server_atomic_write_ms": 2.1475999999999997,
+            "response_bytes": 725,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 4.599999904632568,
+            "first_correct_frame_ms": 388.10000014305115
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 221.40000009536743,
+          "p95": 231.10000014305115,
+          "max": 231.10000014305115,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 18.300000190734863,
+            "server_read_ms": 9.2312,
+            "server_parse_ms": 1.1093,
+            "server_apply_ms": 0.0756,
+            "server_serialize_ms": 0.6967,
+            "server_atomic_write_ms": 2.7618,
+            "response_bytes": 3584,
+            "client_parse_ms": 0.20000004768371582,
+            "client_apply_ms": 3.9000000953674316,
+            "first_correct_frame_ms": 210.90000009536743
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 203.59999990463257,
+          "p95": 221.79999995231628,
+          "max": 262.2999999523163,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 20.200000047683716,
+            "server_read_ms": 10.613600000000002,
+            "server_parse_ms": 1.6523,
+            "server_apply_ms": 0.0103,
+            "server_serialize_ms": 0.7742,
+            "server_atomic_write_ms": 4.0009,
+            "response_bytes": 4252,
+            "client_parse_ms": 0.20000004768371582,
+            "client_apply_ms": 3.200000047683716,
+            "first_correct_frame_ms": 199.89999985694885
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 12553570,
+        "js_heap_total_bytes": 28030186
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_12k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "density_pct": 25,
+      "populated_cells": 2992,
+      "authoring": {
+        "cell_count": 11968,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 233.59999990463257,
+          "p95": 403.59999990463257,
+          "max": 403.59999990463257,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 41.700000047683716,
+            "server_read_ms": 11.631,
+            "server_parse_ms": 13.129999999999999,
+            "server_apply_ms": 0.0096,
+            "server_serialize_ms": 5.6045,
+            "server_atomic_write_ms": 3.6461,
+            "response_bytes": 32973,
+            "client_parse_ms": 1,
+            "client_apply_ms": 3.6000001430511475,
+            "first_correct_frame_ms": 363.59999990463257
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 239.89999985694885,
+          "p95": 893,
+          "max": 893,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 43.09999990463257,
+            "server_read_ms": 12.1474,
+            "server_parse_ms": 13.4571,
+            "server_apply_ms": 0.0797,
+            "server_serialize_ms": 5.696599999999999,
+            "server_atomic_write_ms": 3.5558,
+            "response_bytes": 35284,
+            "client_parse_ms": 0.9000000953674316,
+            "client_apply_ms": 2.5,
+            "first_correct_frame_ms": 850.5999999046326
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 227.60000014305115,
+          "p95": 660.5,
+          "max": 876.6000001430511,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 64.79999995231628,
+            "server_read_ms": 17.266199999999998,
+            "server_parse_ms": 14.704699999999999,
+            "server_apply_ms": 0.0121,
+            "server_serialize_ms": 6.1992,
+            "server_atomic_write_ms": 4.7814,
+            "response_bytes": 35709,
+            "client_parse_ms": 1.1000001430511475,
+            "client_apply_ms": 3.3999998569488525,
+            "first_correct_frame_ms": 618.2000000476837
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3608147,
+        "js_heap_total_bytes": 43323771
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_12k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "density_pct": 75,
+      "populated_cells": 8976,
+      "authoring": {
+        "cell_count": 11968,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 245.59999990463257,
+          "p95": 378.90000009536743,
+          "max": 378.90000009536743,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 87.40000009536743,
+            "server_read_ms": 13.8935,
+            "server_parse_ms": 37.573299999999996,
+            "server_apply_ms": 0.011,
+            "server_serialize_ms": 15.397900000000002,
+            "server_atomic_write_ms": 3.7517,
+            "response_bytes": 97646,
+            "client_parse_ms": 2.5,
+            "client_apply_ms": 2.5,
+            "first_correct_frame_ms": 304.90000009536743
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 249.79999995231628,
+          "p95": 299.90000009536743,
+          "max": 299.90000009536743,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 91.20000004768372,
+            "server_read_ms": 18.1339,
+            "server_parse_ms": 36.2279,
+            "server_apply_ms": 0.0803,
+            "server_serialize_ms": 14.7912,
+            "server_atomic_write_ms": 3.7843999999999998,
+            "response_bytes": 98367,
+            "client_parse_ms": 2.5,
+            "client_apply_ms": 2.1000001430511475,
+            "first_correct_frame_ms": 209.40000009536743
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 235.40000009536743,
+          "p95": 712.5,
+          "max": 918.7000000476837,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 104.29999995231628,
+            "server_read_ms": 16.0611,
+            "server_parse_ms": 42.490899999999996,
+            "server_apply_ms": 0.013900000000000001,
+            "server_serialize_ms": 16.4616,
+            "server_atomic_write_ms": 4.5214,
+            "response_bytes": 98514,
+            "client_parse_ms": 2.6000001430511475,
+            "client_apply_ms": 2.5,
+            "first_correct_frame_ms": 627
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 13146884,
+        "js_heap_total_bytes": 53786412
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_12k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "density_pct": 100,
+      "populated_cells": 11968,
+      "authoring": {
+        "cell_count": 11968,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 387.40000009536743,
+          "p95": 799.7999999523163,
+          "max": 799.7999999523163,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 149.79999995231628,
+            "server_read_ms": 11.1954,
+            "server_parse_ms": 51.0881,
+            "server_apply_ms": 0.0143,
+            "server_serialize_ms": 21.5262,
+            "server_atomic_write_ms": 47.3147,
+            "response_bytes": 129930,
+            "client_parse_ms": 3,
+            "client_apply_ms": 2.700000047683716,
+            "first_correct_frame_ms": 648.5
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 728.5,
+          "p95": 783.0999999046326,
+          "max": 783.0999999046326,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 116.89999985694885,
+            "server_read_ms": 17.0141,
+            "server_parse_ms": 56.1334,
+            "server_apply_ms": 0.0954,
+            "server_serialize_ms": 22.3689,
+            "server_atomic_write_ms": 4.147900000000001,
+            "response_bytes": 129947,
+            "client_parse_ms": 3,
+            "client_apply_ms": 2,
+            "first_correct_frame_ms": 664.2999999523163
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 207.70000004768372,
+          "p95": 668.5,
+          "max": 808.2000000476837,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 110.69999980926514,
+            "server_read_ms": 13.9796,
+            "server_parse_ms": 50.013099999999994,
+            "server_apply_ms": 0.014,
+            "server_serialize_ms": 19.5716,
+            "server_atomic_write_ms": 4.8916,
+            "response_bytes": 129951,
+            "client_parse_ms": 3.1999998092651367,
+            "client_apply_ms": 1.7000000476837158,
+            "first_correct_frame_ms": 569.7000000476837
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 4290785,
+        "js_heap_total_bytes": 53608881
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_26k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "density_pct": 0,
+      "populated_cells": 0,
+      "authoring": {
+        "cell_count": 26000,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 423.2000000476837,
+          "p95": 703.5,
+          "max": 703.5,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 17.5,
+            "server_read_ms": 11.1802,
+            "server_parse_ms": 0.17340000000000003,
+            "server_apply_ms": 0.01,
+            "server_serialize_ms": 0.07490000000000001,
+            "server_atomic_write_ms": 4.2429,
+            "response_bytes": 730,
+            "client_parse_ms": 0,
+            "client_apply_ms": 5.099999904632568,
+            "first_correct_frame_ms": 692.3999998569489
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 419.80000019073486,
+          "p95": 427.89999985694885,
+          "max": 427.89999985694885,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 19.399999856948853,
+            "server_read_ms": 10.7622,
+            "server_parse_ms": 0.6249,
+            "server_apply_ms": 0.0491,
+            "server_serialize_ms": 0.3589,
+            "server_atomic_write_ms": 3.0999,
+            "response_bytes": 3767,
+            "client_parse_ms": 0.20000004768371582,
+            "client_apply_ms": 5.200000047683716,
+            "first_correct_frame_ms": 403.89999985694885
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 421.7000000476837,
+          "p95": 462,
+          "max": 519.2999999523163,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 20.59999990463257,
+            "server_read_ms": 11.9545,
+            "server_parse_ms": 1.1647,
+            "server_apply_ms": 0.0099,
+            "server_serialize_ms": 0.5949,
+            "server_atomic_write_ms": 4.0169999999999995,
+            "response_bytes": 4427,
+            "client_parse_ms": 0.20000004768371582,
+            "client_apply_ms": 6.700000047683716,
+            "first_correct_frame_ms": 439.7000000476837
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3459701,
+        "js_heap_total_bytes": 72398421
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_26k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "density_pct": 25,
+      "populated_cells": 6500,
+      "authoring": {
+        "cell_count": 26000,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 435.39999985694885,
+          "p95": 699.7000000476837,
+          "max": 699.7000000476837,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 58.5,
+            "server_read_ms": 11.6532,
+            "server_parse_ms": 25.532200000000003,
+            "server_apply_ms": 0.011300000000000001,
+            "server_serialize_ms": 7.4821,
+            "server_atomic_write_ms": 3.2791,
+            "response_bytes": 74506,
+            "client_parse_ms": 1.5999999046325684,
+            "client_apply_ms": 5.699999809265137,
+            "first_correct_frame_ms": 653.7000000476837
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 423.39999985694885,
+          "p95": 429.60000014305115,
+          "max": 429.60000014305115,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 55.60000014305115,
+            "server_read_ms": 14.3097,
+            "server_parse_ms": 19.4026,
+            "server_apply_ms": 0.0804,
+            "server_serialize_ms": 7.9854,
+            "server_atomic_write_ms": 3.7809,
+            "response_bytes": 76841,
+            "client_parse_ms": 1.5,
+            "client_apply_ms": 4.200000047683716,
+            "first_correct_frame_ms": 371.2000002861023
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 424.90000009536743,
+          "p95": 438.2000000476837,
+          "max": 445.2999999523163,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 61.299999952316284,
+            "server_read_ms": 15.816099999999999,
+            "server_parse_ms": 23.2502,
+            "server_apply_ms": 0.012700000000000001,
+            "server_serialize_ms": 9.404900000000001,
+            "server_atomic_write_ms": 3.7766,
+            "response_bytes": 77373,
+            "client_parse_ms": 1.6000001430511475,
+            "client_apply_ms": 5.400000095367432,
+            "first_correct_frame_ms": 377.59999990463257
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 25191728,
+        "js_heap_total_bytes": 73243848
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_26k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "density_pct": 75,
+      "populated_cells": 19500,
+      "authoring": {
+        "cell_count": 26000,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 434.10000014305115,
+          "p95": 711.8999998569489,
+          "max": 711.8999998569489,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 136.29999995231628,
+            "server_read_ms": 17.6321,
+            "server_parse_ms": 61.7715,
+            "server_apply_ms": 0.0124,
+            "server_serialize_ms": 25.418400000000002,
+            "server_atomic_write_ms": 3.8351,
+            "response_bytes": 221767,
+            "client_parse_ms": 4.400000095367432,
+            "client_apply_ms": 4.5,
+            "first_correct_frame_ms": 589.6999998092651
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 431.7000000476837,
+          "p95": 440.7000000476837,
+          "max": 440.7000000476837,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 143.60000014305115,
+            "server_read_ms": 16.8536,
+            "server_parse_ms": 71.0704,
+            "server_apply_ms": 0.08,
+            "server_serialize_ms": 28.4221,
+            "server_atomic_write_ms": 4.2772,
+            "response_bytes": 222493,
+            "client_parse_ms": 4,
+            "client_apply_ms": 3.5,
+            "first_correct_frame_ms": 300.69999980926514
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 433.69999980926514,
+          "p95": 444.2000000476837,
+          "max": 473.90000009536743,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 149.79999995231628,
+            "server_read_ms": 21.235799999999998,
+            "server_parse_ms": 62.9576,
+            "server_apply_ms": 0.015099999999999999,
+            "server_serialize_ms": 26.818,
+            "server_atomic_write_ms": 5.2543,
+            "response_bytes": 222671,
+            "client_parse_ms": 4.799999952316284,
+            "client_apply_ms": 4.400000095367432,
+            "first_correct_frame_ms": 304.10000014305115
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 4433646,
+        "js_heap_total_bytes": 73014074
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_26k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "density_pct": 100,
+      "populated_cells": 26000,
+      "authoring": {
+        "cell_count": 26000,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 445.5,
+          "p95": 696.7000000476837,
+          "max": 696.7000000476837,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 180.20000004768372,
+            "server_read_ms": 18.550400000000003,
+            "server_parse_ms": 89.187,
+            "server_apply_ms": 0.0204,
+            "server_serialize_ms": 33.1922,
+            "server_atomic_write_ms": 4.1861,
+            "response_bytes": 295461,
+            "client_parse_ms": 5.599999904632568,
+            "client_apply_ms": 3.200000047683716,
+            "first_correct_frame_ms": 537.2000000476837
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 437.2000000476837,
+          "p95": 439.10000014305115,
+          "max": 439.10000014305115,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 178.20000004768372,
+            "server_read_ms": 16.2015,
+            "server_parse_ms": 84.5992,
+            "server_apply_ms": 0.1064,
+            "server_serialize_ms": 34.2762,
+            "server_atomic_write_ms": 4.4397,
+            "response_bytes": 295484,
+            "client_parse_ms": 5.5,
+            "client_apply_ms": 3.4000000953674316,
+            "first_correct_frame_ms": 270.59999990463257
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 436.2000000476837,
+          "p95": 448.89999985694885,
+          "max": 495.2999999523163,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 178.90000009536743,
+            "server_read_ms": 15.0551,
+            "server_parse_ms": 87.2107,
+            "server_apply_ms": 0.0188,
+            "server_serialize_ms": 35.5809,
+            "server_atomic_write_ms": 5.2409,
+            "response_bytes": 295488,
+            "client_parse_ms": 5.900000095367432,
+            "client_apply_ms": 3.3999998569488525,
+            "first_correct_frame_ms": 276.2000000476837
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 26811539,
+        "js_heap_total_bytes": 74597523
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "density_pct": 0,
+      "populated_cells": 0,
+      "authoring": {
+        "cell_count": 49860,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 778.2999999523163,
+          "p95": 1458.5999999046326,
+          "max": 1458.5999999046326,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 724,
+            "server_read_ms": 9.8148,
+            "server_parse_ms": 0.1239,
+            "server_apply_ms": 0.0087,
+            "server_serialize_ms": 0.0809,
+            "server_atomic_write_ms": 4.0306,
+            "response_bytes": 719,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 9.200000047683716,
+            "first_correct_frame_ms": 767.8999998569489
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 784.5,
+          "p95": 823.5,
+          "max": 823.5,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 20.100000143051147,
+            "server_read_ms": 13.222299999999999,
+            "server_parse_ms": 0.7514000000000001,
+            "server_apply_ms": 0.0549,
+            "server_serialize_ms": 0.35750000000000004,
+            "server_atomic_write_ms": 3.3002000000000002,
+            "response_bytes": 3791,
+            "client_parse_ms": 0.19999980926513672,
+            "client_apply_ms": 10.299999952316284,
+            "first_correct_frame_ms": 795.3999998569489
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 786,
+          "p95": 821.8000001907349,
+          "max": 863.7000000476837,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 23.200000047683716,
+            "server_read_ms": 14.2363,
+            "server_parse_ms": 1.4979,
+            "server_apply_ms": 0.0106,
+            "server_serialize_ms": 0.7068000000000001,
+            "server_atomic_write_ms": 5.1957,
+            "response_bytes": 4564,
+            "client_parse_ms": 0.20000004768371582,
+            "client_apply_ms": 10.299999952316284,
+            "first_correct_frame_ms": 792.2999999523163
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 6237956,
+        "js_heap_total_bytes": 73220192
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "density_pct": 25,
+      "populated_cells": 12465,
+      "authoring": {
+        "cell_count": 49860,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 810.9000000953674,
+          "p95": 1467.2000000476837,
+          "max": 1467.2000000476837,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 732.4000000953674,
+            "server_read_ms": 14.382000000000001,
+            "server_parse_ms": 37.1724,
+            "server_apply_ms": 0.0109,
+            "server_serialize_ms": 19.7637,
+            "server_atomic_write_ms": 7.4098999999999995,
+            "response_bytes": 146963,
+            "client_parse_ms": 2.799999952316284,
+            "client_apply_ms": 10.700000047683716,
+            "first_correct_frame_ms": 724.0999999046326
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 801.7999999523163,
+          "p95": 804.5,
+          "max": 804.5,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 114.79999995231628,
+            "server_read_ms": 38.535199999999996,
+            "server_parse_ms": 37.790200000000006,
+            "server_apply_ms": 0.0742,
+            "server_serialize_ms": 15.6577,
+            "server_atomic_write_ms": 6.632,
+            "response_bytes": 149171,
+            "client_parse_ms": 3.1999998092651367,
+            "client_apply_ms": 13.099999904632568,
+            "first_correct_frame_ms": 708.7999999523163
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 791.4000000953674,
+          "p95": 812.5999999046326,
+          "max": 854.5,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 95.5,
+            "server_read_ms": 14.7767,
+            "server_parse_ms": 41.884299999999996,
+            "server_apply_ms": 0.0147,
+            "server_serialize_ms": 17.463099999999997,
+            "server_atomic_write_ms": 4.5108,
+            "response_bytes": 149813,
+            "client_parse_ms": 3,
+            "client_apply_ms": 10.400000095367432,
+            "first_correct_frame_ms": 714.2000000476837
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 6872827,
+        "js_heap_total_bytes": 72831643
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "density_pct": 75,
+      "populated_cells": 37395,
+      "authoring": {
+        "cell_count": 49860,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 801.9000000953674,
+          "p95": 1500.8999998569489,
+          "max": 1500.8999998569489,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 749.6999998092651,
+            "server_read_ms": 12.6596,
+            "server_parse_ms": 117.0723,
+            "server_apply_ms": 0.0205,
+            "server_serialize_ms": 46.8617,
+            "server_atomic_write_ms": 7.2709,
+            "response_bytes": 439501,
+            "client_parse_ms": 7.700000047683716,
+            "client_apply_ms": 8.099999904632568,
+            "first_correct_frame_ms": 743.3999998569489
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 813.6000001430511,
+          "p95": 832.6999998092651,
+          "max": 832.6999998092651,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 237,
+            "server_read_ms": 13.004399999999999,
+            "server_parse_ms": 122.94720000000001,
+            "server_apply_ms": 0.1033,
+            "server_serialize_ms": 47.0536,
+            "server_atomic_write_ms": 7.5338,
+            "response_bytes": 440369,
+            "client_parse_ms": 7.1000001430511475,
+            "client_apply_ms": 6.6000001430511475,
+            "first_correct_frame_ms": 589.6999998092651
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 817.1000001430511,
+          "p95": 3174.7999999523163,
+          "max": 3626,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 306.89999985694885,
+            "server_read_ms": 12.355,
+            "server_parse_ms": 161.5556,
+            "server_apply_ms": 0.0207,
+            "server_serialize_ms": 63.14500000000001,
+            "server_atomic_write_ms": 5.165699999999999,
+            "response_bytes": 440569,
+            "client_parse_ms": 10,
+            "client_apply_ms": 9.899999856948853,
+            "first_correct_frame_ms": 2864.100000143051
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 6744468,
+        "js_heap_total_bytes": 75485636
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "density_pct": 100,
+      "populated_cells": 49860,
+      "authoring": {
+        "cell_count": 49860,
+        "final_revision": 111,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 1119.7999999523163,
+          "p95": 1676,
+          "max": 1676,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 851.7000000476837,
+            "server_read_ms": 10.9976,
+            "server_parse_ms": 314.778,
+            "server_apply_ms": 0.0211,
+            "server_serialize_ms": 80.9815,
+            "server_atomic_write_ms": 8.391300000000001,
+            "response_bytes": 585845,
+            "client_parse_ms": 15.700000047683716,
+            "client_apply_ms": 11.200000047683716,
+            "first_correct_frame_ms": 813.0999999046326
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 959.7000000476837,
+          "p95": 1985.5,
+          "max": 1985.5,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 458.90000009536743,
+            "server_read_ms": 10.1444,
+            "server_parse_ms": 258.6802,
+            "server_apply_ms": 0.13090000000000002,
+            "server_serialize_ms": 74.9301,
+            "server_atomic_write_ms": 12.379100000000001,
+            "response_bytes": 585876,
+            "client_parse_ms": 15,
+            "client_apply_ms": 9.599999904632568,
+            "first_correct_frame_ms": 1605.7000000476837
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 929.2999999523163,
+          "p95": 3048,
+          "max": 3403.7000000476837,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 438.69999980926514,
+            "server_read_ms": 12.826799999999999,
+            "server_parse_ms": 231.24939999999998,
+            "server_apply_ms": 0.021500000000000002,
+            "server_serialize_ms": 87.5238,
+            "server_atomic_write_ms": 6.028300000000001,
+            "response_bytes": 585877,
+            "client_parse_ms": 14.799999952316284,
+            "client_apply_ms": 9.200000047683716,
+            "first_correct_frame_ms": 2635.7999999523163
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 15455054,
+        "js_heap_total_bytes": 79378382
+      },
+      "headless_budget_observed": false
+    }
+  ],
+  "after_delta_ack_matrix": [
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "density_pct": 0,
+      "populated_cells": 0,
+      "authoring": {
+        "cell_count": 1980,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 37.299999952316284,
+          "p95": 210.80000019073486,
+          "max": 210.80000019073486,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 11.799999952316284,
+            "server_read_ms": 1.4779,
+            "server_parse_ms": 0.1514,
+            "server_apply_ms": 0.0109,
+            "server_serialize_ms": 0.3549,
+            "server_atomic_write_ms": 6.5111,
+            "response_bytes": 205,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.3000001907348633,
+            "first_correct_frame_ms": 202.400000333786
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 30.5,
+          "p95": 47.200000047683716,
+          "max": 47.200000047683716,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 19.5,
+            "server_read_ms": 11.8249,
+            "server_parse_ms": 0.9430999999999999,
+            "server_apply_ms": 0.0711,
+            "server_serialize_ms": 0.5719,
+            "server_atomic_write_ms": 2.5465,
+            "response_bytes": 204,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 1.5,
+            "first_correct_frame_ms": 26.700000047683716
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 32.59999990463257,
+          "p95": 45.5,
+          "max": 81,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 14.399999856948853,
+            "server_read_ms": 2.0612,
+            "server_parse_ms": 1.1808999999999998,
+            "server_apply_ms": 0.0083,
+            "server_serialize_ms": 0.6151000000000001,
+            "server_atomic_write_ms": 2.878,
+            "response_bytes": 217,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 30.199999809265137
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 2614213,
+        "js_heap_total_bytes": 7820457,
+        "server_process_working_set_bytes": 16527360,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "density_pct": 25,
+      "populated_cells": 495,
+      "authoring": {
+        "cell_count": 1980,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 49.200000047683716,
+          "p95": 49.299999952316284,
+          "max": 49.299999952316284,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 22,
+            "server_read_ms": 11.8825,
+            "server_parse_ms": 1.4686000000000001,
+            "server_apply_ms": 0.0102,
+            "server_serialize_ms": 0.9472,
+            "server_atomic_write_ms": 7.4449,
+            "response_bytes": 205,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 32.5
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 48.299999952316284,
+          "p95": 48.700000047683716,
+          "max": 48.700000047683716,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 20.699999809265137,
+            "server_read_ms": 11.267299999999999,
+            "server_parse_ms": 1.9854,
+            "server_apply_ms": 0.0761,
+            "server_serialize_ms": 1.1354,
+            "server_atomic_write_ms": 2.3072,
+            "response_bytes": 206,
+            "client_parse_ms": 0,
+            "client_apply_ms": 1.1000001430511475,
+            "first_correct_frame_ms": 27.90000009536743
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 49.200000047683716,
+          "p95": 49.40000009536743,
+          "max": 49.59999990463257,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 21.200000047683716,
+            "server_read_ms": 10.437899999999999,
+            "server_parse_ms": 2.6224999999999996,
+            "server_apply_ms": 0.0102,
+            "server_serialize_ms": 1.3417,
+            "server_atomic_write_ms": 2.488,
+            "response_bytes": 216,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 32.30000019073486
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 2780854,
+        "js_heap_total_bytes": 7560202,
+        "server_process_working_set_bytes": 16834560,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": true
+    },
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "density_pct": 75,
+      "populated_cells": 1485,
+      "authoring": {
+        "cell_count": 1980,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 49.200000047683716,
+          "p95": 49.40000009536743,
+          "max": 49.40000009536743,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 23.699999809265137,
+            "server_read_ms": 9.562100000000001,
+            "server_parse_ms": 5.4458,
+            "server_apply_ms": 0.0214,
+            "server_serialize_ms": 2.5461,
+            "server_atomic_write_ms": 1.9983000000000002,
+            "response_bytes": 215,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 28.299999952316284
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 48.19999980926514,
+          "p95": 48.299999952316284,
+          "max": 48.299999952316284,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 24.899999856948853,
+            "server_read_ms": 12.0886,
+            "server_parse_ms": 5.0621,
+            "server_apply_ms": 0.0617,
+            "server_serialize_ms": 2.0213,
+            "server_atomic_write_ms": 1.6354,
+            "response_bytes": 192,
+            "client_parse_ms": 0,
+            "client_apply_ms": 1,
+            "first_correct_frame_ms": 26.200000047683716
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 49.299999952316284,
+          "p95": 71.5,
+          "max": 99.29999995231628,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 36.700000047683716,
+            "server_read_ms": 15.889500000000002,
+            "server_parse_ms": 6.527299999999999,
+            "server_apply_ms": 0.0111,
+            "server_serialize_ms": 2.8557,
+            "server_atomic_write_ms": 2.7152000000000003,
+            "response_bytes": 217,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 47.09999990463257
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 2826755,
+        "js_heap_total_bytes": 7822483,
+        "server_process_working_set_bytes": 16969728,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": true
+    },
+    {
+      "size": "approx_2k",
+      "preset_id": "wide_2000",
+      "catalog_cells": 1980,
+      "density_pct": 100,
+      "populated_cells": 1980,
+      "authoring": {
+        "cell_count": 1980,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 49.299999952316284,
+          "p95": 184.09999990463257,
+          "max": 184.09999990463257,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 28.40000009536743,
+            "server_read_ms": 11.6092,
+            "server_parse_ms": 6.9148,
+            "server_apply_ms": 0.011,
+            "server_serialize_ms": 3.5743,
+            "server_atomic_write_ms": 2.4098,
+            "response_bytes": 201,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 161
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 47.90000009536743,
+          "p95": 48.299999952316284,
+          "max": 48.299999952316284,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 26.5,
+            "server_read_ms": 10.0725,
+            "server_parse_ms": 6.8418,
+            "server_apply_ms": 0.0421,
+            "server_serialize_ms": 2.2998,
+            "server_atomic_write_ms": 2.4375,
+            "response_bytes": 193,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.8000001907348633,
+            "first_correct_frame_ms": 23.699999809265137
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 62.89999985694885,
+          "p95": 81.40000009536743,
+          "max": 84.40000009536743,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 30.40000009536743,
+            "server_read_ms": 15.2065,
+            "server_parse_ms": 7.2756,
+            "server_apply_ms": 0.0101,
+            "server_serialize_ms": 3.2063,
+            "server_atomic_write_ms": 3.6942,
+            "response_bytes": 217,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 59.5
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3181635,
+        "js_heap_total_bytes": 11759111,
+        "server_process_working_set_bytes": 16809984,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_12k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "density_pct": 0,
+      "populated_cells": 0,
+      "authoring": {
+        "cell_count": 11968,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 32.40000009536743,
+          "p95": 183,
+          "max": 183,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 7.900000095367432,
+            "server_read_ms": 1.387,
+            "server_parse_ms": 0.1369,
+            "server_apply_ms": 0.007500000000000001,
+            "server_serialize_ms": 0.092,
+            "server_atomic_write_ms": 2.5307,
+            "response_bytes": 203,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 175.80000019073486
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 41.09999990463257,
+          "p95": 66.70000004768372,
+          "max": 66.70000004768372,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 15.100000143051147,
+            "server_read_ms": 8.6499,
+            "server_parse_ms": 0.8321,
+            "server_apply_ms": 0.079,
+            "server_serialize_ms": 0.4218,
+            "server_atomic_write_ms": 1.9116,
+            "response_bytes": 193,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.7999999523162842,
+            "first_correct_frame_ms": 54.700000047683716
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 40.299999952316284,
+          "p95": 83,
+          "max": 83.79999995231628,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 16.600000143051147,
+            "server_read_ms": 8.9642,
+            "server_parse_ms": 1.3578,
+            "server_apply_ms": 0.0087,
+            "server_serialize_ms": 0.6602,
+            "server_atomic_write_ms": 2.5527,
+            "response_bytes": 217,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 71.59999990463257
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 2947959,
+        "js_heap_total_bytes": 11488371,
+        "server_process_working_set_bytes": 16953344,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_12k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "density_pct": 25,
+      "populated_cells": 2992,
+      "authoring": {
+        "cell_count": 11968,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 49.200000047683716,
+          "p95": 1190.1999998092651,
+          "max": 1190.1999998092651,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 36.299999952316284,
+            "server_read_ms": 13.1457,
+            "server_parse_ms": 9.747300000000001,
+            "server_apply_ms": 0.0092,
+            "server_serialize_ms": 5.5769,
+            "server_atomic_write_ms": 3.2334,
+            "response_bytes": 227,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 1153.5999999046326
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 48.5,
+          "p95": 48.59999990463257,
+          "max": 48.59999990463257,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 34.10000014305115,
+            "server_read_ms": 13.4583,
+            "server_parse_ms": 10.1993,
+            "server_apply_ms": 0.0679,
+            "server_serialize_ms": 4.1693,
+            "server_atomic_write_ms": 2.3975,
+            "response_bytes": 215,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 1,
+            "first_correct_frame_ms": 16.59999990463257
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 65.40000009536743,
+          "p95": 85.20000004768372,
+          "max": 108.70000004768372,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 35.200000047683716,
+            "server_read_ms": 12.4466,
+            "server_parse_ms": 11.391399999999999,
+            "server_apply_ms": 0.0107,
+            "server_serialize_ms": 5.128299999999999,
+            "server_atomic_write_ms": 3.0103,
+            "response_bytes": 206,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 54.200000047683716
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3057461,
+        "js_heap_total_bytes": 4934485,
+        "server_process_working_set_bytes": 17010688,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_12k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "density_pct": 75,
+      "populated_cells": 8976,
+      "authoring": {
+        "cell_count": 11968,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 98.90000009536743,
+          "p95": 926.5,
+          "max": 926.5,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 90.70000004768372,
+            "server_read_ms": 20.9497,
+            "server_parse_ms": 40.3043,
+            "server_apply_ms": 0.0184,
+            "server_serialize_ms": 15.900899999999998,
+            "server_atomic_write_ms": 4.8727,
+            "response_bytes": 192,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 849.8999998569489
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 81.70000004768372,
+          "p95": 82.10000014305115,
+          "max": 82.10000014305115,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 73.79999995231628,
+            "server_read_ms": 17.6458,
+            "server_parse_ms": 33.38590000000001,
+            "server_apply_ms": 0.1522,
+            "server_serialize_ms": 15.9271,
+            "server_atomic_write_ms": 3.1419,
+            "response_bytes": 206,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.8000001907348633,
+            "first_correct_frame_ms": 20.00000023841858
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 82.69999980926514,
+          "p95": 83,
+          "max": 83,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 65.09999990463257,
+            "server_read_ms": 14.2785,
+            "server_parse_ms": 31.2948,
+            "server_apply_ms": 0.0126,
+            "server_serialize_ms": 11.8126,
+            "server_atomic_write_ms": 2.7284,
+            "response_bytes": 217,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 28.299999952316284
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3518034,
+        "js_heap_total_bytes": 4876518,
+        "server_process_working_set_bytes": 17461248,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_12k",
+      "preset_id": "wide_12000",
+      "catalog_cells": 11968,
+      "density_pct": 100,
+      "populated_cells": 11968,
+      "authoring": {
+        "cell_count": 11968,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 99.09999990463257,
+          "p95": 348.90000009536743,
+          "max": 348.90000009536743,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 86.40000009536743,
+            "server_read_ms": 13.007100000000001,
+            "server_parse_ms": 46.1396,
+            "server_apply_ms": 0.0109,
+            "server_serialize_ms": 28.7911,
+            "server_atomic_write_ms": 2.5921,
+            "response_bytes": 204,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 275.80000019073486
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 81.80000019073486,
+          "p95": 98.5,
+          "max": 98.5,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 93.40000009536743,
+            "server_read_ms": 14.6738,
+            "server_parse_ms": 47.1966,
+            "server_apply_ms": 0.085,
+            "server_serialize_ms": 18.374299999999998,
+            "server_atomic_write_ms": 2.7169,
+            "response_bytes": 194,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.7000000476837158,
+            "first_correct_frame_ms": 12.599999904632568
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 82.70000004768372,
+          "p95": 83.09999990463257,
+          "max": 99.39999985694885,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 74.60000014305115,
+            "server_read_ms": 12.1644,
+            "server_parse_ms": 38.512699999999995,
+            "server_apply_ms": 0.012700000000000001,
+            "server_serialize_ms": 16.8073,
+            "server_atomic_write_ms": 3.7647000000000004,
+            "response_bytes": 217,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 16.299999952316284
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3720274,
+        "js_heap_total_bytes": 5334718,
+        "server_process_working_set_bytes": 19070976,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_26k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "density_pct": 0,
+      "populated_cells": 0,
+      "authoring": {
+        "cell_count": 26000,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 32.700000047683716,
+          "p95": 365.60000014305115,
+          "max": 365.60000014305115,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 13.5,
+            "server_read_ms": 8.118200000000002,
+            "server_parse_ms": 0.1118,
+            "server_apply_ms": 0.0063,
+            "server_serialize_ms": 0.062,
+            "server_atomic_write_ms": 2.6032,
+            "response_bytes": 202,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 357.80000019073486
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 31.800000190734863,
+          "p95": 32.10000014305115,
+          "max": 32.10000014305115,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 14.600000143051147,
+            "server_read_ms": 8.424199999999999,
+            "server_parse_ms": 0.63,
+            "server_apply_ms": 0.05,
+            "server_serialize_ms": 0.36479999999999996,
+            "server_atomic_write_ms": 1.8278999999999999,
+            "response_bytes": 218,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.7000000476837158,
+            "first_correct_frame_ms": 25.200000286102295
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 32.700000047683716,
+          "p95": 49.200000047683716,
+          "max": 49.39999985694885,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 16.5,
+            "server_read_ms": 9.3852,
+            "server_parse_ms": 1.0212,
+            "server_apply_ms": 0.0089,
+            "server_serialize_ms": 0.49240000000000006,
+            "server_atomic_write_ms": 2.1575,
+            "response_bytes": 218,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.20000004768371582,
+            "first_correct_frame_ms": 31.799999952316284
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3033758,
+        "js_heap_total_bytes": 8704050,
+        "server_process_working_set_bytes": 17195008,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_26k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "density_pct": 25,
+      "populated_cells": 6500,
+      "authoring": {
+        "cell_count": 26000,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 49.40000009536743,
+          "p95": 69.79999995231628,
+          "max": 69.79999995231628,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 50.200000047683716,
+            "server_read_ms": 11.440900000000001,
+            "server_parse_ms": 18.4894,
+            "server_apply_ms": 0.0096,
+            "server_serialize_ms": 10.101,
+            "server_atomic_write_ms": 3.6146,
+            "response_bytes": 191,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 19.5
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 48.700000047683716,
+          "p95": 81.79999995231628,
+          "max": 81.79999995231628,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 47.799999952316284,
+            "server_read_ms": 14.3564,
+            "server_parse_ms": 18.792900000000003,
+            "server_apply_ms": 0.055,
+            "server_serialize_ms": 8.2921,
+            "server_atomic_write_ms": 2.3294,
+            "response_bytes": 203,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.7000000476837158,
+            "first_correct_frame_ms": 33.299999952316284
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 49.5,
+          "p95": 83.09999990463257,
+          "max": 83.10000014305115,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 58.799999952316284,
+            "server_read_ms": 14.4009,
+            "server_parse_ms": 23.2466,
+            "server_apply_ms": 0.011300000000000001,
+            "server_serialize_ms": 11.0974,
+            "server_atomic_write_ms": 3.5221,
+            "response_bytes": 217,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 32
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3784838,
+        "js_heap_total_bytes": 12318426,
+        "server_process_working_set_bytes": 18829312,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": true
+    },
+    {
+      "size": "approx_26k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "density_pct": 75,
+      "populated_cells": 19500,
+      "authoring": {
+        "cell_count": 26000,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 116.10000014305115,
+          "p95": 119,
+          "max": 119,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 114.10000014305115,
+            "server_read_ms": 17.3117,
+            "server_parse_ms": 59.1984,
+            "server_apply_ms": 0.0152,
+            "server_serialize_ms": 25.0984,
+            "server_atomic_write_ms": 5.0258,
+            "response_bytes": 206,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 6.5
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 115.30000019073486,
+          "p95": 132,
+          "max": 132,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 117.5,
+            "server_read_ms": 16.880699999999997,
+            "server_parse_ms": 64.4538,
+            "server_apply_ms": 0.0805,
+            "server_serialize_ms": 23.6555,
+            "server_atomic_write_ms": 3.8525,
+            "response_bytes": 208,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.7000000476837158,
+            "first_correct_frame_ms": 13.799999952316284
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 131.89999985694885,
+          "p95": 166.29999995231628,
+          "max": 232.39999985694885,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 157,
+            "server_read_ms": 21.6979,
+            "server_parse_ms": 85.4847,
+            "server_apply_ms": 0.0163,
+            "server_serialize_ms": 31.942199999999996,
+            "server_atomic_write_ms": 3.5650999999999997,
+            "response_bytes": 216,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 17
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3549619,
+        "js_heap_total_bytes": 5701243,
+        "server_process_working_set_bytes": 20779008,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_26k",
+      "preset_id": "wide_26000",
+      "catalog_cells": 26000,
+      "density_pct": 100,
+      "populated_cells": 26000,
+      "authoring": {
+        "cell_count": 26000,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 149.59999990463257,
+          "p95": 565.5999999046326,
+          "max": 565.5999999046326,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 172.70000004768372,
+            "server_read_ms": 15.7209,
+            "server_parse_ms": 98.6738,
+            "server_apply_ms": 0.0121,
+            "server_serialize_ms": 36.3806,
+            "server_atomic_write_ms": 5.0166,
+            "response_bytes": 204,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 411.39999985694885
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 148.59999990463257,
+          "p95": 165.5,
+          "max": 165.5,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 161.10000014305115,
+            "server_read_ms": 15.5703,
+            "server_parse_ms": 96.2364,
+            "server_apply_ms": 0.1225,
+            "server_serialize_ms": 35.8328,
+            "server_atomic_write_ms": 2.5387999999999997,
+            "response_bytes": 206,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.8999998569488525,
+            "first_correct_frame_ms": 7.6000001430511475
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 149.5,
+          "p95": 199.5,
+          "max": 249.59999990463257,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 184.40000009536743,
+            "server_read_ms": 13.59,
+            "server_parse_ms": 115.4955,
+            "server_apply_ms": 0.0193,
+            "server_serialize_ms": 41.5912,
+            "server_atomic_write_ms": 4.0593,
+            "response_bytes": 216,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 14.899999856948853
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 4074130,
+        "js_heap_total_bytes": 5308450,
+        "server_process_working_set_bytes": 22134784,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "density_pct": 0,
+      "populated_cells": 0,
+      "authoring": {
+        "cell_count": 49860,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 50.59999990463257,
+          "p95": 515.5999999046326,
+          "max": 515.5999999046326,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 17.59999990463257,
+            "server_read_ms": 10.6952,
+            "server_parse_ms": 0.1368,
+            "server_apply_ms": 0.0086,
+            "server_serialize_ms": 0.0971,
+            "server_atomic_write_ms": 2.6456,
+            "response_bytes": 217,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.5999999046325684,
+            "first_correct_frame_ms": 501.69999980926514
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 50.40000009536743,
+          "p95": 64.5,
+          "max": 64.5,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 15.200000047683716,
+            "server_read_ms": 9.2776,
+            "server_parse_ms": 0.6079,
+            "server_apply_ms": 0.0632,
+            "server_serialize_ms": 0.3819,
+            "server_atomic_write_ms": 1.7776,
+            "response_bytes": 205,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.7999999523162842,
+            "first_correct_frame_ms": 50
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 53.799999952316284,
+          "p95": 69.70000004768372,
+          "max": 98.09999990463257,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 20.5,
+            "server_read_ms": 11.3606,
+            "server_parse_ms": 1.3266,
+            "server_apply_ms": 0.0095,
+            "server_serialize_ms": 0.6557,
+            "server_atomic_write_ms": 2.4917,
+            "response_bytes": 215,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.39999985694885254,
+            "first_correct_frame_ms": 61.59999990463257
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 3941482,
+        "js_heap_total_bytes": 9327550,
+        "server_process_working_set_bytes": 17670144,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "density_pct": 25,
+      "populated_cells": 12465,
+      "authoring": {
+        "cell_count": 49860,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 93.59999990463257,
+          "p95": 488.2999999523163,
+          "max": 488.2999999523163,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 81.59999990463257,
+            "server_read_ms": 18.6128,
+            "server_parse_ms": 44.9658,
+            "server_apply_ms": 0.0096,
+            "server_serialize_ms": 15.0728,
+            "server_atomic_write_ms": 3.4676,
+            "response_bytes": 204,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.3000001907348633,
+            "first_correct_frame_ms": 408.10000014305115
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 82.30000019073486,
+          "p95": 98.69999980926514,
+          "max": 98.69999980926514,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 91.40000009536743,
+            "server_read_ms": 17.2674,
+            "server_parse_ms": 55.698100000000004,
+            "server_apply_ms": 0.0851,
+            "server_serialize_ms": 19.8351,
+            "server_atomic_write_ms": 2.4807,
+            "response_bytes": 208,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 1,
+            "first_correct_frame_ms": 10.5
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 82.79999995231628,
+          "p95": 117.30000019073486,
+          "max": 214.70000004768372,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 113.10000014305115,
+            "server_read_ms": 15.656,
+            "server_parse_ms": 60.9809,
+            "server_apply_ms": 0.018099999999999998,
+            "server_serialize_ms": 22.587300000000003,
+            "server_atomic_write_ms": 3.2789,
+            "response_bytes": 218,
+            "client_parse_ms": 0.09999990463256836,
+            "client_apply_ms": 0.3000001907348633,
+            "first_correct_frame_ms": 16.300000190734863
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 4783800,
+        "js_heap_total_bytes": 5795980,
+        "server_process_working_set_bytes": 20140032,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "density_pct": 75,
+      "populated_cells": 37395,
+      "authoring": {
+        "cell_count": 49860,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 203.09999990463257,
+          "p95": 248.70000004768372,
+          "max": 248.70000004768372,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 241.40000009536743,
+            "server_read_ms": 8.8814,
+            "server_parse_ms": 148.941,
+            "server_apply_ms": 0.016,
+            "server_serialize_ms": 54.2803,
+            "server_atomic_write_ms": 3.2802000000000002,
+            "response_bytes": 214,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.5999999046325684,
+            "first_correct_frame_ms": 37.90000009536743
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 214.90000009536743,
+          "p95": 215.29999995231628,
+          "max": 215.29999995231628,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 207.40000009536743,
+            "server_read_ms": 11.2713,
+            "server_parse_ms": 123.2951,
+            "server_apply_ms": 0.0813,
+            "server_serialize_ms": 48.0684,
+            "server_atomic_write_ms": 3.7837,
+            "response_bytes": 219,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.7000000476837158,
+            "first_correct_frame_ms": 12.5
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 199.5,
+          "p95": 249.29999995231628,
+          "max": 266.19999980926514,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 235.70000004768372,
+            "server_read_ms": 9.483500000000001,
+            "server_parse_ms": 142.1873,
+            "server_apply_ms": 0.0195,
+            "server_serialize_ms": 55.6542,
+            "server_atomic_write_ms": 5.053,
+            "response_bytes": 208,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.2999999523162842,
+            "first_correct_frame_ms": 18.600000143051147
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 5168658,
+        "js_heap_total_bytes": 6455034,
+        "server_process_working_set_bytes": 24182784,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    },
+    {
+      "size": "approx_50k",
+      "preset_id": "wide_50000",
+      "catalog_cells": 49860,
+      "density_pct": 100,
+      "populated_cells": 49860,
+      "authoring": {
+        "cell_count": 49860,
+        "final_revision": 112,
+        "budget_p95_ms": 100,
+        "small": {
+          "n": 5,
+          "p50": 304.2999999523163,
+          "p95": 477.7999999523163,
+          "max": 477.7999999523163,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 315.2000000476837,
+            "server_read_ms": 11.027500000000002,
+            "server_parse_ms": 203.7397,
+            "server_apply_ms": 0.0145,
+            "server_serialize_ms": 60.3553,
+            "server_atomic_write_ms": 10.1329,
+            "response_bytes": 207,
+            "client_parse_ms": 0,
+            "client_apply_ms": 1.1000001430511475,
+            "first_correct_frame_ms": 222.79999995231628
+          }
+        },
+        "medium": {
+          "n": 5,
+          "p50": 265,
+          "p95": 265.2000000476837,
+          "max": 265.2000000476837,
+          "applied_cells_p50": 61,
+          "phases_p95": {
+            "durable_ack_ms": 258.89999985694885,
+            "server_read_ms": 10.1131,
+            "server_parse_ms": 157.34629999999999,
+            "server_apply_ms": 0.1218,
+            "server_serialize_ms": 59.581,
+            "server_atomic_write_ms": 5.0959,
+            "response_bytes": 218,
+            "client_parse_ms": 0,
+            "client_apply_ms": 0.8000001907348633,
+            "first_correct_frame_ms": 10.200000047683716
+          }
+        },
+        "series_100_small": {
+          "n": 100,
+          "p50": 266.19999980926514,
+          "p95": 316.09999990463257,
+          "max": 399.60000014305115,
+          "applied_cells_p50": 1,
+          "phases_p95": {
+            "durable_ack_ms": 300,
+            "server_read_ms": 10.4807,
+            "server_parse_ms": 184.1341,
+            "server_apply_ms": 0.0192,
+            "server_serialize_ms": 80.81,
+            "server_atomic_write_ms": 6.1998,
+            "response_bytes": 218,
+            "client_parse_ms": 0.10000014305114746,
+            "client_apply_ms": 0.3000001907348633,
+            "first_correct_frame_ms": 16.399999856948853
+          }
+        }
+      },
+      "memory": {
+        "js_heap_used_bytes": 6370844,
+        "js_heap_total_bytes": 7233744,
+        "server_process_working_set_bytes": 18317312,
+        "note": "server process Working Set plus Chromium JS heap proxy"
+      },
+      "headless_budget_observed": false
+    }
+  ]
+}

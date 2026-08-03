@@ -252,6 +252,49 @@ const rebuildOffscreenCache = (layer, showGrid, w, h, drawSize, sizePx, gridStro
   return state.offscreenCache;
 };
 
+/** N-039: commit the optimistic dirty region into the existing overscan bitmap. */
+export const commitDirtyMapCache = () => {
+  const canvas = getCanvas();
+  const oc = state.offscreenCache;
+  if (!state.dirtyRect) {
+    if (oc) oc.staticKey = mapStaticKey(state.mapLayer, state.viewHexGrid, canvas.clientWidth, canvas.clientHeight);
+    return true;
+  }
+  if (
+    !oc
+    || oc.cssW !== canvas.clientWidth
+    || oc.cssH !== canvas.clientHeight
+    || Math.abs(oc.zoom - state.camera.zoom) > 1e-12
+    || Math.abs(oc.camCx - state.camera.cx) > 1e-12
+    || Math.abs(oc.camCy - state.camera.cy) > 1e-12
+  ) {
+    invalidateMapCache();
+    return false;
+  }
+  const layer = state.mapLayer;
+  const showGrid = state.viewHexGrid;
+  const { grid } = state.spatial.state;
+  const radiusM = grid.neighbor_center_distance_m / Math.sqrt(3);
+  const sizePx = radiusM * state.camera.zoom;
+  const drawSize = showGrid ? sizePx : sizePx + 0.9;
+  const gridStroke = showGrid
+    ? (layer === "empty" ? "rgba(140, 160, 190, 0.45)" : "rgba(20, 28, 36, 0.40)")
+    : null;
+  const gridWidth = showGrid ? 1.5 : 0;
+  syncHeightGrid();
+  const indices = visibleCells(oc.margin + sizePx, { useDirty: true });
+  const dpr = window.devicePixelRatio || 1;
+  const octx = oc.canvas.getContext("2d");
+  octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  octx.save();
+  octx.translate(oc.margin, oc.margin);
+  paintCellsTo(octx, indices, layer, showGrid, drawSize, sizePx, gridStroke, gridWidth);
+  octx.restore();
+  oc.staticKey = mapStaticKey(layer, showGrid, canvas.clientWidth, canvas.clientHeight);
+  state.dirtyRect = null;
+  return true;
+};
+
 /** Debounced zoom rebuild: keep old cache until swap (no null → black flash). */
 const ZOOM_REBUILD_MS = 120;
 const scheduleZoomCacheRebuild = () => {

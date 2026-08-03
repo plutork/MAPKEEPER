@@ -1,13 +1,15 @@
 import {
-  state, FIELD_FLUSH_BATCH_MAX, applySpatial, markCameraFollowsFit,
+  state, FIELD_FLUSH_BATCH_MAX, applySpatial, applyStrokeAck, markCameraFollowsFit,
 } from "./workspace-state.js";
 import { api, newStrokeId } from "./api.js";
-import { ensureCenterCache, drawSpatial, invalidateMapCache } from "./renderer.js";
+import {
+  ensureCenterCache, drawSpatial, invalidateMapCache, commitDirtyMapCache,
+} from "./renderer.js";
 import { fitCamera } from "./camera.js";
 import { clearAirbrushTimer, refreshBrushMaxFromGrid, syncBrushRadiusUi } from "./relief-tool.js";
 import { strokeChunks } from "./shell-math.js";
 
-export const commitStrokeCells = async (cells) => {
+export const commitStrokeCells = async (cells, { onTiming } = {}) => {
   const baseRevision = state.spatial?.state?.revision ?? 0;
   const strokeId = newStrokeId();
   const chunks = strokeChunks(cells, FIELD_FLUSH_BATCH_MAX);
@@ -19,6 +21,7 @@ export const commitStrokeCells = async (cells) => {
         base_revision: baseRevision,
         cells,
       }),
+      onTiming,
     });
   }
   await api("/api/spatial/stroke/begin", {
@@ -27,6 +30,7 @@ export const commitStrokeCells = async (cells) => {
       stroke_id: strokeId,
       base_revision: baseRevision,
     }),
+    onTiming,
   });
   try {
     for (let i = 0; i < chunks.length; i++) {
@@ -37,11 +41,13 @@ export const commitStrokeCells = async (cells) => {
           chunk_id: String(i),
           cells: chunks[i],
         }),
+        onTiming,
       });
     }
     return await api("/api/spatial/stroke/commit", {
       method: "POST",
       body: JSON.stringify({ stroke_id: strokeId }),
+      onTiming,
     });
   } catch (error) {
     await api("/api/spatial/stroke/abort", {
@@ -98,15 +104,44 @@ export const endPaintStroke = async () => {
     if (spatialStatus) spatialStatus.textContent = "Stroke hit no editable cells.";
     invalidateMapCache();
     drawSpatial();
-    return;
+    return { applied_cells: 0, phases: null };
   }
   if (spatialStatus) spatialStatus.textContent = "Saving stroke…";
   try {
-    const view = await commitStrokeCells(cells);
-    fullApplySpatial(view);
-    const op = stroke.delta > 0 ? "Raise" : "Lower";
+    const network = [];
+    const commitStarted = performance.now();
+    const result = await commitStrokeCells(cells, {
+      onTiming: (timing) => network.push(timing),
+    });
+    const durableAckMs = performance.now() - commitStarted;
+    const applyStarted = performance.now();
+    if (result?.state) {
+      fullApplySpatial(result);
+    } else {
+      applyStrokeAck(result);
+      commitDirtyMapCache();
+      drawSpatial();
+    }
+    const clientApplyMs = performance.now() - applyStarted;
+    const opName = ({
+      raise: "Raise",
+      lower: "Lower",
+      flatten: "Flatten",
+      smooth: "Smooth",
+    })[stroke.op] || (stroke.delta > 0 ? "Raise" : "Lower");
     const modeLabel = stroke.mode === "airbrush" ? `Airbrush ${stroke.rate}/s` : "Stamp";
-    if (spatialStatus) spatialStatus.textContent = `${op} ${modeLabel} r=${stroke.radius} · ${cells.length} cells`;
+    if (spatialStatus) spatialStatus.textContent = `${opName} ${modeLabel} r=${stroke.radius} · ${cells.length} cells`;
+    return {
+      revision: result.revision ?? result.state?.revision,
+      applied_cells: result.applied_cells ?? cells.length,
+      response_kind: result?.state ? "full_view" : "delta_ack",
+      server_timings: result.server_timings ?? null,
+      phases: {
+        durable_ack_ms: durableAckMs,
+        client_apply_ms: clientApplyMs,
+        network,
+      },
+    };
   } catch (error) {
     if (spatialStatus) {
       spatialStatus.textContent = error.status === 409
@@ -114,5 +149,6 @@ export const endPaintStroke = async () => {
         : (error.message || "Stroke save failed");
     }
     await loadSpatial().catch(() => {});
+    return { error: error.message || "Stroke save failed" };
   }
 };

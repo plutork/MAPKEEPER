@@ -1,7 +1,7 @@
 /**
  * N-026 maintainer bench suite — loaded only in explicit bench mode (?bench=1).
  */
-import { state, setMapLayer } from "./workspace-state.js";
+import { state, setMapLayer, setReliefOp } from "./workspace-state.js";
 import { fitCamera } from "./camera.js";
 import {
   flushDrawSpatial, invalidateMapCache, ensureCenterCache, visibleCells,
@@ -9,6 +9,7 @@ import {
 import {
   beginPaintStroke, extendPaintStroke, beginAirbrushEpoch, clearAirbrushTimer,
 } from "./relief-tool.js";
+import { endPaintStroke } from "./spatial-transaction.js";
 
 const percentile = (arr, p) => {
   if (!arr.length) return null;
@@ -33,6 +34,91 @@ const measureFrames = async (n, tick) => {
   };
 };
 
+const summarizeAuthoring = (samples) => {
+  const values = (pick) => samples.map(pick).filter((v) => Number.isFinite(v));
+  const p95 = (pick) => percentile(values(pick), 95);
+  return {
+    n: samples.length,
+    p50: percentile(values((s) => s.total_ms), 50),
+    p95: p95((s) => s.total_ms),
+    max: Math.max(...values((s) => s.total_ms)),
+    applied_cells_p50: percentile(values((s) => s.applied_cells), 50),
+    phases_p95: {
+      durable_ack_ms: p95((s) => s.durable_ack_ms),
+      server_read_ms: p95((s) => s.server_timings?.read_ms),
+      server_parse_ms: p95((s) => s.server_timings?.parse_ms),
+      server_apply_ms: p95((s) => s.server_timings?.apply_ms),
+      server_serialize_ms: p95((s) => s.server_timings?.serialize_ms),
+      server_atomic_write_ms: p95((s) => s.server_timings?.atomic_write_ms),
+      response_bytes: p95((s) => s.network?.response_bytes),
+      client_parse_ms: p95((s) => s.network?.parse_ms),
+      client_apply_ms: p95((s) => s.client_apply_ms),
+      first_correct_frame_ms: p95((s) => s.first_correct_frame_ms),
+    },
+  };
+};
+
+const authoringCell = (index, radius) => {
+  const { width, height } = state.spatial.state.grid;
+  const margin = Math.min(radius + 1, Math.max(0, Math.floor(Math.min(width, height) / 4)));
+  const innerW = Math.max(1, width - 2 * margin);
+  const innerH = Math.max(1, height - 2 * margin);
+  const slot = index % (innerW * innerH);
+  const col = margin + (slot % innerW);
+  const r = margin + Math.floor(slot / innerW);
+  const q = col - ((r - (r & 1)) / 2 | 0);
+  return { q, r };
+};
+
+const runAuthoringStroke = async (index, radius) => {
+  state.activeTool = "relief";
+  state.strokeMode = "stamp";
+  state.brushRadius = radius;
+  setReliefOp("raise");
+  setMapLayer("relief");
+  const { q, r } = authoringCell(index, radius);
+  const beforeRevision = state.spatial.state.revision;
+  beginPaintStroke(q, r);
+  flushDrawSpatial();
+  const centerCache = state.centerCache;
+  const offscreenCache = state.offscreenCache;
+  const mouseupStarted = performance.now();
+  const trace = await endPaintStroke();
+  if (trace?.error) throw new Error(trace.error);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  const totalMs = performance.now() - mouseupStarted;
+  if (state.paintStroke || state.spatial.state.revision <= beforeRevision) {
+    throw new Error("authoring stroke was not ready after durable ACK");
+  }
+  if (
+    trace.response_kind === "delta_ack"
+    && (
+      state.centerCache !== centerCache
+      || state.offscreenCache !== offscreenCache
+      || state.dirtyRect
+    )
+  ) {
+    throw new Error("delta ACK did not preserve and settle CRS caches");
+  }
+  const network = trace.phases?.network?.at(-1) ?? null;
+  return {
+    total_ms: totalMs,
+    applied_cells: trace.applied_cells,
+    response_kind: trace.response_kind,
+    durable_ack_ms: trace.phases?.durable_ack_ms ?? null,
+    client_apply_ms: trace.phases?.client_apply_ms ?? null,
+    first_correct_frame_ms: Math.max(
+      0,
+      totalMs
+        - (trace.phases?.durable_ack_ms ?? 0)
+        - (trace.phases?.client_apply_ms ?? 0),
+    ),
+    server_timings: trace.server_timings,
+    network,
+  };
+};
+
 export const installBenchHooks = () => {
   window.__MK_BENCH__ = {
     lastFrameMs: () => state.lastFrameMs,
@@ -40,6 +126,30 @@ export const installBenchHooks = () => {
     ensureCenters: () => ensureCenterCache(),
     visibleCount: () => visibleCells(64, { useDirty: false }).length,
     cellCount: () => (state.spatial ? state.spatial.state.grid.width * state.spatial.state.grid.height : 0),
+    async runAuthoringSuite() {
+      if (!state.spatial) throw new Error("no active world");
+      // Let open's double-rAF fit finish before asserting cache identity.
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      setMapLayer("relief");
+      invalidateMapCache();
+      flushDrawSpatial();
+      await runAuthoringStroke(900, 0);
+      const small = [];
+      const medium = [];
+      const series100 = [];
+      for (let i = 0; i < 5; i++) small.push(await runAuthoringStroke(i, 0));
+      for (let i = 0; i < 5; i++) medium.push(await runAuthoringStroke(100 + i * 17, 4));
+      for (let i = 0; i < 100; i++) series100.push(await runAuthoringStroke(300 + i, 0));
+      return {
+        cell_count: this.cellCount(),
+        final_revision: state.spatial.state.revision,
+        budget_p95_ms: 100,
+        small: summarizeAuthoring(small),
+        medium: summarizeAuthoring(medium),
+        series_100_small: summarizeAuthoring(series100),
+      };
+    },
     async runSuite() {
       if (!state.spatial) throw new Error("no active world");
       const out = { cells: this.cellCount(), revision: state.spatial.state.revision };

@@ -185,7 +185,11 @@ fn restore_reinstates_bak_and_quarantines_corrupt_primary() {
                 .starts_with("projects.json.corrupt-")
         })
         .collect();
-    assert_eq!(quarantined.len(), 1, "corrupt primary is kept for diagnosis");
+    assert_eq!(
+        quarantined.len(),
+        1,
+        "corrupt primary is kept for diagnosis"
+    );
     assert_eq!(
         fs::read_to_string(quarantined[0].path()).unwrap(),
         "{broken"

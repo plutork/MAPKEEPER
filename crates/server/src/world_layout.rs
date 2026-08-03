@@ -2,11 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
-use mapkeeper_core::world::{
-    self, map_rel_path, WorldMapRef, DEFAULT_FIRST_MAP_ID,
-};
+use mapkeeper_core::world::{self, map_rel_path, WorldMapRef, DEFAULT_FIRST_MAP_ID};
 
-pub const LEGACY_REFUSE_MSG: &str = "legacy_world_format: this folder is an old single-level world; create a new world (N-037)";
+pub const LEGACY_REFUSE_MSG: &str =
+    "legacy_world_format: this folder is an old single-level world; create a new world (N-037)";
 
 pub fn read_world_manifest(world_path: &Path) -> Result<world::WorldManifest, String> {
     let path = world_path.join("mapkeeper.toml");
@@ -64,11 +63,7 @@ pub fn prepare_open(
     if !map_path.join("map.toml").is_file() {
         return Err(format!("missing map.toml at {}", map_path.display()));
     }
-    Ok((
-        manifest.world.id.clone(),
-        map_path,
-        map_ref.id.clone(),
-    ))
+    Ok((manifest.world.id.clone(), map_path, map_ref.id.clone()))
 }
 
 pub fn default_first_map_ref() -> WorldMapRef {

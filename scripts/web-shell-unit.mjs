@@ -30,8 +30,8 @@ globalThis.document = {
 globalThis.cancelAnimationFrame = () => {};
 
 const {
-  state, applySpatial, FIELD_FLUSH_BATCH_MAX, axialKey,
-  setMapLayer, setViewHexGrid, setReliefDirection, setEditOcean,
+  state, applySpatial, applyStrokeAck, FIELD_FLUSH_BATCH_MAX, axialKey,
+  setMapLayer, setViewHexGrid, setReliefDirection, setReliefOp, setEditOcean,
   markCameraAuthorSet, markCameraFollowsFit,
 } = await import("../crates/web/workspace-state.js");
 
@@ -114,6 +114,24 @@ check("applySpatial resets CRS caches", () => {
   assert.equal(axialKey(1, 2), "1,2");
 });
 
+check("applyStrokeAck preserves optimistic CRS state", () => {
+  const centers = { key: "grid", heights: new Int16Array([7]) };
+  const offscreen = { canvas: {} };
+  const dirty = { minX: 0, minY: 0, maxX: 1, maxY: 1 };
+  state.spatial = { state: { revision: 4, field: { cells: { "0,0": 7 } } } };
+  state.centerCache = centers;
+  state.offscreenCache = offscreen;
+  state.dirtyRect = dirty;
+  state.heightRev = 4;
+  applyStrokeAck({ revision: 5, applied_cells: 1 });
+  assert.equal(state.spatial.state.revision, 5);
+  assert.equal(state.heightRev, 5);
+  assert.equal(state.centerCache, centers);
+  assert.equal(state.offscreenCache, offscreen);
+  assert.equal(state.dirtyRect, dirty);
+  assert.equal(state.spatial.state.field.cells["0,0"], 7);
+});
+
 check("workspace-state owns editor view flags", () => {
   setMapLayer("relief");
   setViewHexGrid(false);
@@ -122,7 +140,14 @@ check("workspace-state owns editor view flags", () => {
   assert.equal(state.mapLayer, "relief");
   assert.equal(state.viewHexGrid, false);
   assert.equal(state.reliefDirection, -1);
+  assert.equal(state.reliefOp, "lower");
   assert.equal(state.editOcean, true);
+  setReliefOp("flatten");
+  assert.equal(state.reliefOp, "flatten");
+  state.strokeMode = "airbrush";
+  setReliefOp("smooth");
+  assert.equal(state.reliefOp, "smooth");
+  assert.equal(state.strokeMode, "airbrush");
   setMapLayer("empty");
   setViewHexGrid(true);
   setReliefDirection(1);
@@ -130,6 +155,7 @@ check("workspace-state owns editor view flags", () => {
   assert.equal(state.mapLayer, "empty");
   assert.equal(state.viewHexGrid, true);
   assert.equal(state.reliefDirection, 1);
+  assert.equal(state.reliefOp, "raise");
   assert.equal(state.editOcean, false);
 });
 

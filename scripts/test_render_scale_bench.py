@@ -147,6 +147,58 @@ class ReportSchema(unittest.TestCase):
         self.assertTrue(any("catalog_cells" in e for e in errs))
 
 
+class AuthoringReportSchema(unittest.TestCase):
+    def test_full_mature_matrix_passes(self) -> None:
+        matrix = []
+        for size in ("approx_2k", "approx_12k", "approx_26k", "approx_50k"):
+            for density in (0, 25, 75, 100):
+                sample = {"p95": 50.0, "phases_p95": {"server_read_ms": 1.0}}
+                matrix.append(
+                    {
+                        "size": size,
+                        "density_pct": density,
+                        "authoring": {
+                            "small": sample,
+                            "medium": sample,
+                            "series_100_small": sample,
+                        },
+                        "memory": {"server_process_working_set_bytes": 1},
+                    }
+                )
+        report = {
+            "schema": check.AUTHORING_SCHEMA,
+            "generated_at": "2026-08-03T00:00:00Z",
+            "git_sha": "deadbeef",
+            "harness_revision": check.authoring_harness_revision(),
+            "phase": "after_delta_ack",
+            "evidence_class": "reproducible_headless",
+            "supported_sot": "owner_windows_tauri_release",
+            "release_gate": {"status": "pending", "owner_run_at": None},
+            "contract": {"p95_budget_ms": 100},
+            "matrix": matrix,
+            "baseline_matrix": matrix,
+            "after_delta_ack_matrix": matrix,
+        }
+        self.assertEqual(check.validate_authoring_report(report), [])
+
+    def test_missing_density_fails(self) -> None:
+        report = {
+            "schema": check.AUTHORING_SCHEMA,
+            "generated_at": "x",
+            "git_sha": "x",
+            "harness_revision": check.authoring_harness_revision(),
+            "phase": "after_delta_ack",
+            "evidence_class": "reproducible_headless",
+            "supported_sot": "owner_windows_tauri_release",
+            "release_gate": {"status": "pending"},
+            "contract": {"p95_budget_ms": 100},
+            "matrix": [],
+            "baseline_matrix": [],
+            "after_delta_ack_matrix": [],
+        }
+        self.assertTrue(check.validate_authoring_report(report))
+
+
 class JsLibSmoke(unittest.TestCase):
     def test_node_lib_transport(self) -> None:
         script = """
@@ -158,6 +210,28 @@ const err = assertChangedCellsTruthful({
   label: 'x', changed_cells: 49860, catalog_cells: 49860, transport: 'oneshot', chunks: 1
 });
 if (!err.length) throw new Error('expected catalog misuse error');
+console.log('ok');
+"""
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".mjs", dir=ROOT / "scripts", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(script)
+            path = f.name
+        try:
+            out = subprocess.check_output(
+                ["node", path], cwd=str(ROOT / "scripts"), text=True
+            )
+            self.assertIn("ok", out)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_mature_fixture_is_exact_and_deterministic(self) -> None:
+        script = """
+import { makeMatureReliefCells } from './bench-authoring-performance-lib.mjs';
+const a = makeMatureReliefCells(55, 36, 25, 39);
+const b = makeMatureReliefCells(55, 36, 25, 39);
+if (Object.keys(a).length !== 495) throw new Error('wrong density');
+if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error('not deterministic');
 console.log('ok');
 """
         with tempfile.NamedTemporaryFile(

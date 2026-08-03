@@ -54,8 +54,8 @@ pub fn build_router(config: &ServerConfig) -> Result<Router> {
 
     let active = match &config.world {
         Some(path) => {
-            let (id, map_path, map_id) = world_layout::prepare_open(path, None)
-                .map_err(anyhow::Error::msg)?;
+            let (id, map_path, map_id) =
+                world_layout::prepare_open(path, None).map_err(anyhow::Error::msg)?;
             Some(ActiveWorld {
                 id,
                 path: path.clone(),

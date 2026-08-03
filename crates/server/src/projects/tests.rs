@@ -609,8 +609,7 @@ fn concurrent_forget_and_open() {
     let server = test_server();
     let keep = tmp.path().join("worlds").join("keep");
     assert_eq!(
-        transactional_create(&server, "keep".into(), keep.clone(), alpha_default_preset())
-            .status(),
+        transactional_create(&server, "keep".into(), keep.clone(), alpha_default_preset()).status(),
         StatusCode::OK
     );
     let ghost = tmp.path().join("worlds").join("ghost-missing");
@@ -653,8 +652,8 @@ fn mutate_failure_releases_registry_lock() {
     let _lock = lock_appdata_env();
     let tmp = tempfile::tempdir().unwrap();
     let _guard = AppDataGuard::set(tmp.path());
-    let err = world_io::mutate_projects(|_| -> Result<(), String> { Err("boom".into()) })
-        .unwrap_err();
+    let err =
+        world_io::mutate_projects(|_| -> Result<(), String> { Err("boom".into()) }).unwrap_err();
     assert_eq!(err, "boom");
     world_io::mutate_projects(|file| {
         world_io::upsert_registered(

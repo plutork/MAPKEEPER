@@ -20,7 +20,10 @@ pub use brush::{
 pub use convert::{
     axial_to_world, screen_to_world, world_to_axial, world_to_screen, Axial, Viewport,
 };
-pub use field::{next_relief_value, GridField, RELIEF_MAX, RELIEF_MIN};
+pub use field::{
+    next_relief_absolute, next_relief_value, smooth_relief_average, GridField,
+    AXIAL_NEIGHBOR_OFFSETS, RELIEF_MAX, RELIEF_MIN,
+};
 pub use frame::WorldFrame;
 pub use geometry::{cells_for_stub, GeometryStub};
 pub use grid::HexGrid;

@@ -11,11 +11,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / "docs" / "perf" / "relief-render-scale-report.json"
+AUTHORING_REPORT = ROOT / "docs" / "perf" / "large-map-authoring-report.json"
 WEB = ROOT / "crates" / "web"
 WASM = WEB / "src" / "lib.rs"
 BENCH = ROOT / "scripts" / "bench-render-scale.mjs"
 BENCH_LIB = ROOT / "scripts" / "bench-render-scale-lib.mjs"
 SCHEMA = "mapkeeper.relief-render-scale.v2"
+AUTHORING_SCHEMA = "mapkeeper.continuous-authoring.v1"
 FIELD_FLUSH_BATCH_MAX = 512
 
 
@@ -38,6 +40,19 @@ def harness_revision() -> str:
     h = hashlib.sha256()
     for path in (BENCH, BENCH_LIB):
         h.update(path.read_bytes())
+        h.update(b"\0")
+    return h.hexdigest()[:16]
+
+def authoring_harness_revision() -> str:
+    h = hashlib.sha256()
+    for relative in (
+        "scripts/bench-authoring-performance.mjs",
+        "scripts/bench-authoring-performance-lib.mjs",
+        "crates/web/bench-hooks.js",
+        "crates/web/spatial-transaction.js",
+        "crates/web/api.js",
+    ):
+        h.update((ROOT / relative).read_bytes())
         h.update(b"\0")
     return h.hexdigest()[:16]
 
@@ -170,6 +185,65 @@ def validate_report(data: dict) -> list[str]:
     return errors
 
 
+def validate_authoring_report(data: dict) -> list[str]:
+    errors: list[str] = []
+    if data.get("schema") != AUTHORING_SCHEMA:
+        errors.append(f"authoring report schema must be {AUTHORING_SCHEMA}")
+    for key in (
+        "generated_at",
+        "git_sha",
+        "harness_revision",
+        "phase",
+        "evidence_class",
+        "supported_sot",
+        "release_gate",
+        "contract",
+        "matrix",
+        "baseline_matrix",
+        "after_delta_ack_matrix",
+    ):
+        if data.get(key) is None:
+            errors.append(f"authoring report missing {key}")
+    if data.get("evidence_class") != "reproducible_headless":
+        errors.append("authoring headless evidence must stay report-only")
+    if data.get("supported_sot") != "owner_windows_tauri_release":
+        errors.append("authoring Supported SoT must be owner Windows Tauri release")
+    if data.get("release_gate", {}).get("status") == "passed":
+        if not data.get("release_gate", {}).get("owner_run_at"):
+            errors.append("authoring passed release gate requires owner_run_at")
+    if data.get("contract", {}).get("p95_budget_ms") != 100:
+        errors.append("authoring p95 budget must be 100 ms")
+    expected = {
+        f"{size}:{density}"
+        for size in ("approx_2k", "approx_12k", "approx_26k", "approx_50k")
+        for density in (0, 25, 75, 100)
+    }
+    actual = {
+        f"{row.get('size')}:{row.get('density_pct')}"
+        for row in data.get("matrix") or []
+    }
+    for missing in sorted(expected - actual):
+        errors.append(f"authoring matrix missing {missing}")
+    for row in data.get("matrix") or []:
+        if "server_process_working_set_bytes" not in (row.get("memory") or {}):
+            errors.append(
+                f"{row.get('size')}:{row.get('density_pct')} missing process memory signal"
+            )
+        for name in ("small", "medium", "series_100_small"):
+            sample = (row.get("authoring") or {}).get(name) or {}
+            if sample.get("p95") is None or not sample.get("phases_p95"):
+                errors.append(
+                    f"{row.get('size')}:{row.get('density_pct')} missing {name} timings"
+                )
+    tracked_rev = data.get("harness_revision")
+    if tracked_rev and tracked_rev != authoring_harness_revision():
+        errors.append(
+            "authoring harness_revision mismatch "
+            "(re-run node scripts/bench-authoring-performance.mjs)"
+        )
+    return errors
+
+
 def main() -> int:
     errors: list[str] = []
     if not REPORT.is_file():
@@ -184,6 +258,18 @@ def main() -> int:
             errors.extend(validate_report(data))
             if "crs_signals" not in (data or {}):
                 errors.append("report missing crs_signals")
+
+    if not AUTHORING_REPORT.is_file():
+        errors.append(
+            f"missing tracked report: {AUTHORING_REPORT.relative_to(ROOT)}"
+        )
+    else:
+        try:
+            authoring = json.loads(AUTHORING_REPORT.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            errors.append(f"authoring report JSON invalid: {e}")
+        else:
+            errors.extend(validate_authoring_report(authoring))
 
     shell = _shell_sources()
     wasm = WASM.read_text(encoding="utf-8") if WASM.is_file() else ""

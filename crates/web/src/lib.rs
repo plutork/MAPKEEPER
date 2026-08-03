@@ -3,8 +3,8 @@
 
 use mapkeeper_core::spatial::{
     axial_to_world, disk_from_offsets, disk_offsets, hex_distance, max_brush_radius,
-    next_relief_value, pulse_interval_ms, world_to_axial, Axial, HexGrid, WorldFrame, RELIEF_MAX,
-    RELIEF_MIN,
+    next_relief_absolute, next_relief_value, pulse_interval_ms, smooth_relief_average,
+    world_to_axial, Axial, HexGrid, WorldFrame, RELIEF_MAX, RELIEF_MIN,
 };
 use wasm_bindgen::prelude::*;
 
@@ -167,6 +167,18 @@ pub fn probe_pulse_interval_ms(rate_steps_per_sec: u32) -> u32 {
 #[wasm_bindgen]
 pub fn probe_next_relief(current: i32, delta: i32, edit_ocean: bool) -> Option<i32> {
     next_relief_value(current, delta, edit_ocean)
+}
+
+/// Flatten/Align absolute set; `undefined` means no change (N-038 / N-030).
+#[wasm_bindgen]
+pub fn probe_next_relief_absolute(current: i32, target: i32, edit_ocean: bool) -> Option<i32> {
+    next_relief_absolute(current, target, edit_ocean)
+}
+
+/// Smooth target average of center + neighbours (N-038).
+#[wasm_bindgen]
+pub fn probe_smooth_relief_average(center: i32, neighbors: Vec<i32>) -> i32 {
+    smooth_relief_average(center, &neighbors)
 }
 
 /// Author elevation range `[min, max]` — mirrored thresholds check against it.

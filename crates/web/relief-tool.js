@@ -3,6 +3,7 @@ import {
 } from "./workspace-state.js";
 import {
   probe_max_brush_radius, probe_pulse_interval_ms, probe_next_relief,
+  probe_next_relief_absolute, probe_smooth_relief_average,
 } from "./wasm-api.js";
 import { ensureCenterCache, expandDirtyWorld, drawSpatial, flushDrawSpatial } from "./renderer.js";
 import { diskCellsAt, hexLine } from "./brush-geometry.js";
@@ -10,12 +11,22 @@ import { setHoverReadout } from "./hover-readout.js";
 
 export { diskCellsAt } from "./brush-geometry.js";
 
+/** Matches core AXIAL_NEIGHBOR_OFFSETS (layout offsets, not elevation rules). */
+const AXIAL_NEIGHBOR_OFFSETS = [
+  [1, 0],
+  [1, -1],
+  [0, -1],
+  [-1, 0],
+  [-1, 1],
+  [0, 1],
+];
+
 const gridSize = () => {
   const { width, height } = state.spatial.state.grid;
   return { width, height };
 };
 
-/** Domain owns the gesture rule (N-030); undefined means no change. */
+/** Domain owns Raise/Lower (N-030); undefined means no change. */
 export const nextElevation = (current, delta) => {
   const next = probe_next_relief(current, delta, state.editOcean);
   return next === undefined ? null : next;
@@ -40,12 +51,46 @@ const cellIndexAt = (q, r) => {
   return r * grid.width + col;
 };
 
+const elevationAt = (q, r) => {
+  if (!state.spatial) return 0;
+  const key = axialKey(q, r);
+  if (state.paintStroke?.updates?.has(key)) return state.paintStroke.updates.get(key);
+  return state.spatial.state.field.cells[key] || 0;
+};
+
+const inGrid = (q, r) => {
+  if (!state.spatial) return false;
+  const { width, height } = state.spatial.state.grid;
+  const col = q + ((r - (r & 1)) / 2 | 0);
+  return col >= 0 && r >= 0 && col < width && r < height;
+};
+
+const nextForOp = (q, r, current) => {
+  const op = state.paintStroke.op;
+  if (op === "flatten") {
+    const next = probe_next_relief_absolute(current, state.paintStroke.sample, state.editOcean);
+    return next === undefined ? null : next;
+  }
+  if (op === "smooth") {
+    const neighbors = [];
+    for (const [dq, dr] of AXIAL_NEIGHBOR_OFFSETS) {
+      const nq = q + dq;
+      const nr = r + dr;
+      if (!inGrid(nq, nr)) continue;
+      neighbors.push(elevationAt(nq, nr));
+    }
+    const target = probe_smooth_relief_average(current, neighbors);
+    const next = probe_next_relief_absolute(current, target, state.editOcean);
+    return next === undefined ? null : next;
+  }
+  return nextElevation(current, state.paintStroke.delta);
+};
+
 export const stampDiskAt = (centerQ, centerR) => {
   if (!state.paintStroke || !state.spatial) return;
   const field = state.spatial.state.field;
   const { grid } = state.spatial.state;
   const cache = ensureCenterCache();
-  const delta = state.paintStroke.delta;
   const radius = state.paintStroke.radius;
   const padM = (radius + 1.5) * grid.neighbor_center_distance_m;
   const { width, height } = gridSize();
@@ -56,7 +101,7 @@ export const stampDiskAt = (centerQ, centerR) => {
     const current = state.paintStroke.updates.has(key)
       ? state.paintStroke.updates.get(key)
       : (field.cells[key] || 0);
-    const next = nextElevation(current, delta);
+    const next = nextForOp(cell.q, cell.r, current);
     if (next == null) continue;
     state.paintStroke.updates.set(key, next);
     field.cells[key] = next;
@@ -75,11 +120,6 @@ export const clearAirbrushTimer = () => {
   }
 };
 
-const elevationAt = (q, r) => {
-  if (!state.spatial) return 0;
-  return state.spatial.state.field.cells[axialKey(q, r)] || 0;
-};
-
 const refreshDetailsAtBrush = () => {
   if (!state.paintStroke || !state.paintStroke.onMap) return;
   const { q, r } = state.paintStroke.last;
@@ -96,6 +136,7 @@ export const beginAirbrushEpoch = () => {
 };
 
 export const beginPaintStroke = (q, r) => {
+  const op = state.reliefOp || "raise";
   const mode = state.strokeMode;
   const rate = state.airbrushRate;
   const interval = mode === "airbrush" ? probe_pulse_interval_ms(rate) : 0;
@@ -104,7 +145,9 @@ export const beginPaintStroke = (q, r) => {
   state.paintStroke = {
     mode,
     rate,
+    op,
     delta: state.reliefDirection,
+    sample: elevationAt(q, r),
     radius: state.brushRadius,
     visited: new Set(),
     updates: new Map(),
@@ -146,8 +189,12 @@ export const syncStrokeModeUi = () => {
     strokeStampBtn.setAttribute("aria-pressed", state.strokeMode === "stamp" ? "true" : "false");
   }
   if (strokeAirbrushBtn) {
+    strokeAirbrushBtn.disabled = false;
     strokeAirbrushBtn.classList.toggle("active", state.strokeMode === "airbrush");
-    strokeAirbrushBtn.setAttribute("aria-pressed", state.strokeMode === "airbrush" ? "true" : "false");
+    strokeAirbrushBtn.setAttribute(
+      "aria-pressed",
+      state.strokeMode === "airbrush" ? "true" : "false",
+    );
   }
   if (airbrushRateBlock) {
     airbrushRateBlock.classList.toggle("hidden", state.strokeMode !== "airbrush");
@@ -176,9 +223,13 @@ export const syncBrushRadiusUi = () => {
     brushRadiusNumEl.value = String(state.brushRadius);
   }
   if (brushRadiusMetaEl) {
-    const modeHint = state.strokeMode === "airbrush" ? ` · Airbrush ${state.airbrushRate}/s` : "";
+    const op = state.reliefOp || "raise";
+    const opHint = op !== "raise" && op !== "lower" ? ` · ${op}` : "";
+    const modeHint = state.strokeMode === "airbrush"
+      ? ` · Airbrush ${state.airbrushRate}/s`
+      : "";
     brushRadiusMetaEl.textContent =
-      `r=${state.brushRadius} · ~${diskCountEstimate(state.brushRadius)} cells · max ${state.brushMaxRadius} · [ ] to nudge${modeHint}`;
+      `r=${state.brushRadius} · ~${diskCountEstimate(state.brushRadius)} cells · max ${state.brushMaxRadius} · [ ] to nudge${opHint}${modeHint}`;
   }
   syncStrokeModeUi();
 };

@@ -8,6 +8,8 @@ import init, {
   probe_disk_cells,
   probe_pulse_interval_ms,
   probe_next_relief,
+  probe_next_relief_absolute,
+  probe_smooth_relief_average,
   probe_relief_range,
 } from "./mapkeeper_web.js";
 
@@ -23,5 +25,7 @@ export {
   probe_disk_cells,
   probe_pulse_interval_ms,
   probe_next_relief,
+  probe_next_relief_absolute,
+  probe_smooth_relief_average,
   probe_relief_range,
 };

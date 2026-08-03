@@ -86,6 +86,35 @@ pub fn next_relief_value(current: i32, delta: i32, edit_ocean: bool) -> Option<i
     (next != current).then_some(next)
 }
 
+/// Absolute set for Flatten/Align (N-038): target height with the same ocean
+/// freeze/floor as Raise/Lower. `None` = leave cell untouched.
+pub fn next_relief_absolute(current: i32, target: i32, edit_ocean: bool) -> Option<i32> {
+    if current < 0 && !edit_ocean {
+        return None;
+    }
+    let mut next = target.clamp(RELIEF_MIN, RELIEF_MAX);
+    if !edit_ocean {
+        next = next.max(0);
+    }
+    (next != current).then_some(next)
+}
+
+/// Axial neighbour offsets (cube-consistent; matches [`super::brush::hex_distance`]).
+pub const AXIAL_NEIGHBOR_OFFSETS: [(i32, i32); 6] =
+    [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)];
+
+/// Integer average of center + neighbours for Smooth (N-038). Empty neighbours
+/// → center unchanged average (= center).
+pub fn smooth_relief_average(center: i32, neighbors: &[i32]) -> i32 {
+    let n = 1 + neighbors.len() as i32;
+    let sum = center + neighbors.iter().sum::<i32>();
+    if sum >= 0 {
+        (sum + n / 2) / n
+    } else {
+        (sum - n / 2) / n
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +167,25 @@ mod tests {
         field.normalize_author_field();
         assert_eq!(field.id, "relief");
         assert_eq!(field.get(Axial { q: 0, r: 0 }), 2);
+    }
+
+    #[test]
+    fn flatten_respects_ocean_lock() {
+        assert_eq!(next_relief_absolute(-2, 5, false), None);
+        assert_eq!(next_relief_absolute(3, 5, false), Some(5));
+        assert_eq!(next_relief_absolute(3, -4, false), Some(0));
+        assert_eq!(next_relief_absolute(3, 3, false), None);
+        assert_eq!(next_relief_absolute(-2, -5, true), Some(-5));
+        assert_eq!(
+            next_relief_absolute(0, RELIEF_MAX + 10, false),
+            Some(RELIEF_MAX)
+        );
+    }
+
+    #[test]
+    fn smooth_average_rounds_nearest() {
+        assert_eq!(smooth_relief_average(4, &[2, 2, 2, 2, 2, 2]), 2);
+        assert_eq!(smooth_relief_average(0, &[]), 0);
+        assert_eq!(smooth_relief_average(-3, &[-3, -1]), -2);
     }
 }

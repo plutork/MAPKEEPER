@@ -17,6 +17,8 @@ export const state = {
   mapLayer: "empty",
   viewHexGrid: true,
   reliefDirection: 1,
+  /** raise | lower | flatten | smooth (N-038) */
+  reliefOp: "raise",
   editOcean: false,
   panDrag: null,
   brushRadius: 0,
@@ -50,6 +52,14 @@ export const setViewHexGrid = (on) => {
 
 export const setReliefDirection = (dir) => {
   state.reliefDirection = dir < 0 ? -1 : 1;
+  state.reliefOp = state.reliefDirection < 0 ? "lower" : "raise";
+};
+
+export const setReliefOp = (op) => {
+  const allowed = ["raise", "lower", "flatten", "smooth"];
+  state.reliefOp = allowed.includes(op) ? op : "raise";
+  if (state.reliefOp === "raise") state.reliefDirection = 1;
+  if (state.reliefOp === "lower") state.reliefDirection = -1;
 };
 
 export const setEditOcean = (on) => {
@@ -76,10 +86,9 @@ export const syncEditorViewDom = () => {
     gridBtn.classList.toggle("active", state.viewHexGrid);
     gridBtn.setAttribute("aria-pressed", state.viewHexGrid ? "true" : "false");
   }
-  const raise = document.querySelector('input[name="relief-mode"][value="raise"]');
-  const lower = document.querySelector('input[name="relief-mode"][value="lower"]');
-  if (raise) raise.checked = state.reliefDirection >= 0;
-  if (lower) lower.checked = state.reliefDirection < 0;
+  document.querySelectorAll('input[name="relief-mode"]').forEach((input) => {
+    input.checked = input.value === state.reliefOp;
+  });
   const ocean = document.querySelector("#edit-ocean");
   if (ocean) {
     ocean.classList.toggle("active", state.editOcean);
@@ -97,4 +106,13 @@ export const applySpatial = (view) => {
     cancelAnimationFrame(state.cacheRebuildRaf);
     state.cacheRebuildRaf = 0;
   }
+};
+
+/** N-039: optimistic cells/heights are already current; advance only durable revision. */
+export const applyStrokeAck = (ack) => {
+  if (!state.spatial?.state || !Number.isInteger(ack?.revision)) {
+    throw new Error("invalid stroke ACK");
+  }
+  state.spatial.state.revision = ack.revision;
+  state.heightRev = state.centerCache?.heights ? ack.revision : -1;
 };

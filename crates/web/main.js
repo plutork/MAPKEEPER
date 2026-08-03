@@ -1,5 +1,5 @@
 import {
-  state, setMapLayer, setViewHexGrid, setReliefDirection, setEditOcean,
+  state, setMapLayer, setViewHexGrid, setReliefOp, setEditOcean,
   syncEditorViewDom, radiusStepSize,
   markCameraAuthorSet, markCameraFollowsFit,
 } from "./workspace-state.js";
@@ -283,8 +283,9 @@ document.querySelector("#edit-ocean").addEventListener("click", () => {
 document.querySelectorAll('input[name="relief-mode"]').forEach((input) => {
   input.addEventListener("change", () => {
     if (!input.checked) return;
-    setReliefDirection(input.value === "lower" ? -1 : 1);
+    setReliefOp(input.value);
     syncEditorViewDom();
+    syncBrushRadiusUi();
   });
 });
 

@@ -32,6 +32,7 @@ pub(crate) struct StrokeStaging {
 /// Process-local stroke_id replay guard (not durable; not a revision).
 pub(crate) struct RecentCommittedStroke {
     pub(crate) world_key: String,
+    pub(crate) applied_cells: usize,
     pub(crate) recorded_at: Instant,
 }
 

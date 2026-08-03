@@ -1,11 +1,24 @@
 //! Durable spatial state: load, config sync, atomic write, bak restore (N-025 / N-031).
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use mapkeeper_core::spatial::{default_spatial_state, SpatialState, SPATIAL_STATE_RELATIVE};
 use mapkeeper_core::world::{self, SpatialConfig};
 
 use crate::atomic_io;
+
+#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
+pub(super) struct SpatialIoTimings {
+    pub read_ms: f64,
+    pub parse_ms: f64,
+    pub serialize_ms: f64,
+    pub atomic_write_ms: f64,
+}
+
+fn elapsed_ms(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
+}
 
 pub(super) fn spatial_bak_available(path: &Path) -> bool {
     atomic_io::bak_passes(path, |bytes| {
@@ -18,14 +31,24 @@ pub(super) fn spatial_bak_available(path: &Path) -> bool {
 
 /// Load/init spatial state. Corrupt / interrupted on-disk state is never silently replaced with defaults.
 pub fn ensure_spatial_state(world_path: &Path) -> anyhow::Result<SpatialState> {
+    ensure_spatial_state_timed(world_path).map(|(state, _)| state)
+}
+
+pub(super) fn ensure_spatial_state_timed(
+    world_path: &Path,
+) -> anyhow::Result<(SpatialState, SpatialIoTimings)> {
+    let mut timings = SpatialIoTimings::default();
     let config = ensure_spatial_config(world_path)?;
     let path = spatial_path(world_path);
     let (mut state, legacy_schema) = match atomic_io::classify_durable_open(&path) {
         atomic_io::DurableOpenKind::PrimaryPresent => {
+            let read_started = Instant::now();
             let raw = std::fs::read_to_string(&path)?;
+            timings.read_ms = elapsed_ms(read_started);
+            let parse_started = Instant::now();
             SpatialState::assert_no_screen_keys(&raw).map_err(anyhow::Error::msg)?;
             let legacy = raw.contains("cell_size") || raw.contains("unit_scale");
-            match SpatialState::from_json(&raw) {
+            let parsed = match SpatialState::from_json(&raw) {
                 Ok(state) => (state, legacy),
                 Err(error) => {
                     anyhow::bail!(
@@ -34,7 +57,9 @@ pub fn ensure_spatial_state(world_path: &Path) -> anyhow::Result<SpatialState> {
                         spatial_bak_available(&path)
                     );
                 }
-            }
+            };
+            timings.parse_ms = elapsed_ms(parse_started);
+            parsed
         }
         atomic_io::DurableOpenKind::InterruptedWrite => {
             anyhow::bail!(
@@ -58,9 +83,11 @@ pub fn ensure_spatial_state(world_path: &Path) -> anyhow::Result<SpatialState> {
         if state.revision == 0 {
             state.revision = 1;
         }
-        write_spatial_state(world_path, &state)?;
+        let write_timings = write_spatial_state_timed(world_path, &state)?;
+        timings.serialize_ms += write_timings.serialize_ms;
+        timings.atomic_write_ms += write_timings.atomic_write_ms;
     }
-    Ok(state)
+    Ok((state, timings))
 }
 
 /// Explicit recovery: quarantine corrupt primary, restore from `.bak` (N-025).
@@ -139,12 +166,24 @@ pub(super) fn spatial_path(map_path: &Path) -> PathBuf {
 }
 
 pub(super) fn write_spatial_state(map_path: &Path, state: &SpatialState) -> anyhow::Result<()> {
+    write_spatial_state_timed(map_path, state).map(|_| ())
+}
+
+pub(super) fn write_spatial_state_timed(
+    map_path: &Path,
+    state: &SpatialState,
+) -> anyhow::Result<SpatialIoTimings> {
+    let mut timings = SpatialIoTimings::default();
     let path = spatial_path(map_path);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let serialize_started = Instant::now();
     let raw = state.to_json_pretty()?;
     SpatialState::assert_no_screen_keys(&raw).map_err(anyhow::Error::msg)?;
+    timings.serialize_ms = elapsed_ms(serialize_started);
+    let write_started = Instant::now();
     atomic_io::atomic_replace(&path, raw.as_bytes())?;
-    Ok(())
+    timings.atomic_write_ms = elapsed_ms(write_started);
+    Ok(timings)
 }

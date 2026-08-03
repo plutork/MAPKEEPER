@@ -1,9 +1,9 @@
 //! Integration tests for `spatial` (N-031: tests outside implementation).
 
 use super::*;
+use crate::state::RecentCommittedStroke;
 use axum::body::Body;
 use http_body_util::BodyExt;
-use crate::state::RecentCommittedStroke;
 use tempfile::tempdir;
 use tower::ServiceExt;
 
@@ -86,7 +86,7 @@ fn ensure_requires_map_toml_not_world_spatial() {
 async fn stroke_oneshot_atomic_gesture() {
     let (dir, map_path) = seed_world();
     let app = app_with_world(dir.path(), &map_path);
-    let (status, view) = json_request(
+    let (status, ack) = json_request(
         app,
         "POST",
         "/api/spatial/stroke",
@@ -98,8 +98,11 @@ async fn stroke_oneshot_atomic_gesture() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(view["state"]["field"]["cells"]["0,0"], 4);
-    assert_eq!(view["state"]["revision"], 2);
+    assert_eq!(ack["ok"], true);
+    assert_eq!(ack["revision"], 2);
+    assert_eq!(ack["applied_cells"], 1);
+    assert!(ack["state"].is_null());
+    assert!(ack["server_timings"]["atomic_write_ms"].is_number());
     let raw = std::fs::read_to_string(map_path.join("spatial/state.json")).unwrap();
     assert!(raw.contains("\"0,0\": 4") || raw.contains("\"0,0\":4"));
     assert!(!raw.contains("\"0,0\": 2")); // no partial mid-values
@@ -147,7 +150,7 @@ async fn multi_chunk_commit_is_one_revision() {
     )
     .await;
     assert_eq!(st, StatusCode::OK);
-    let (st, view) = json_request(
+    let (st, ack) = json_request(
         app,
         "POST",
         "/api/spatial/stroke/commit",
@@ -155,9 +158,14 @@ async fn multi_chunk_commit_is_one_revision() {
     )
     .await;
     assert_eq!(st, StatusCode::OK);
-    assert_eq!(view["state"]["revision"], 2);
-    assert_eq!(view["state"]["field"]["cells"]["0,0"], 1);
-    assert_eq!(view["state"]["field"]["cells"]["2,0"], 3);
+    assert_eq!(ack["revision"], 2);
+    assert_eq!(ack["applied_cells"], 3);
+    let committed = SpatialState::from_json(
+        &std::fs::read_to_string(map_path.join("spatial/state.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(committed.field.get(Axial { q: 0, r: 0 }), 1);
+    assert_eq!(committed.field.get(Axial { q: 2, r: 0 }), 3);
 }
 
 #[tokio::test]
@@ -246,7 +254,7 @@ async fn duplicate_chunk_and_duplicate_commit() {
     )
     .await;
     assert_eq!(st, StatusCode::OK);
-    let rev = v1["state"]["revision"].as_u64().unwrap();
+    let rev = v1["revision"].as_u64().unwrap();
     let (st, v2) = json_request(
         app,
         "POST",
@@ -255,15 +263,16 @@ async fn duplicate_chunk_and_duplicate_commit() {
     )
     .await;
     assert_eq!(st, StatusCode::OK);
-    assert_eq!(v2["state"]["revision"], rev);
-    assert_eq!(v2["state"]["field"]["cells"]["0,0"], 5);
+    assert_eq!(v2["revision"], rev);
+    assert_eq!(v2["applied_cells"], 1);
+    assert_eq!(v2["server_timings"]["replayed"], true);
 }
 
 #[tokio::test]
 async fn stale_base_revision_conflicts() {
     let (dir, map_path) = seed_world();
     let app = app_with_world(dir.path(), &map_path);
-    let (st, _) = json_request(
+    let (st, conflict_view) = json_request(
         app,
         "POST",
         "/api/spatial/stroke",
@@ -275,6 +284,8 @@ async fn stale_base_revision_conflicts() {
     )
     .await;
     assert_eq!(st, StatusCode::CONFLICT);
+    assert_eq!(conflict_view["state"]["revision"], 1);
+    assert!(conflict_view["stub_cells"].is_array());
 }
 
 #[tokio::test]
@@ -342,6 +353,7 @@ fn recent_committed_strokes_ttl_purge() {
             "old".into(),
             RecentCommittedStroke {
                 world_key: "w".into(),
+                applied_cells: 1,
                 recorded_at: Instant::now()
                     - crate::state::COMMITTED_STROKE_TTL
                     - std::time::Duration::from_secs(1),
@@ -351,6 +363,7 @@ fn recent_committed_strokes_ttl_purge() {
             "fresh".into(),
             RecentCommittedStroke {
                 world_key: "w".into(),
+                applied_cells: 1,
                 recorded_at: Instant::now(),
             },
         );
@@ -539,9 +552,7 @@ fn invalid_bak_restore_errors() {
     let bak = crate::atomic_io::bak_path(&path);
     std::fs::write(&path, "{truncated").unwrap();
     std::fs::write(&bak, "{also-bad").unwrap();
-    let err = restore_spatial_from_bak(&map_path)
-        .unwrap_err()
-        .to_string();
+    let err = restore_spatial_from_bak(&map_path).unwrap_err().to_string();
     assert!(err.contains("corrupt_spatial"));
     assert!(err.contains("invalid bak") || err.contains("no bak"));
 }

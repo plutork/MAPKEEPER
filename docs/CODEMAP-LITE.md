@@ -27,11 +27,12 @@ Active product-shell routing (ownership index). Product invariants live in
 | Thin shell document | `crates/web/index.html` + `styles.css` + `main.js` |
 | Sole Editor/view state owner | `crates/web/workspace-state.js` |
 | CRS renderer / camera / relief / stroke client | `crates/web/renderer.js` · `camera.js` · `relief-tool.js` · `spatial-transaction.js` (overscan offscreen cache + viewport blit; rebuild outside margin; zoom debounce + seamless cache swap) |
+| Continuous stroke ACK (N-039) | server `spatial.rs` / `spatial/stroke.rs` / `spatial/persist.rs` → delta `{revision, applied_cells, server_timings}`; web `applyStrokeAck` + `commitDirtyMapCache` preserves centers/heights/unaffected raster |
 | View Reset zoom (contain to host) | `#reset-zoom` → `fitCamera`; `shell-math.js` `fitZoomForViewport` |
 | Camera sticky fit on resize (N-029) | `workspace-state.js` `cameraFollowsFit` · `camera.js` `observeCanvasHost` · `shell-math.js` `nextCameraFollowsFit` |
 | Pure brush geometry / hover readout | `crates/web/brush-geometry.js` · `hover-readout.js` |
 | Pure shell math (unit-tested) | `crates/web/shell-math.js` |
-| Relief gesture rule (domain, N-030) | `crates/core/src/spatial/field.rs` `next_relief_value` → `probe_next_relief` |
+| Relief gesture rules (domain, N-030/N-038) | `crates/core/src/spatial/field.rs` `next_relief_value` / `next_relief_absolute` / `smooth_relief_average` → `probe_next_relief*` |
 | Mirrored threshold parity gate (N-030) | `scripts/check_domain_constants.py` |
 | Bench hooks (`?bench=1` only) | `crates/web/bench-hooks.js` |
 | Home worlds → maps L2 + Add map / Create / Delete | `crates/web/worlds.js` · `api.js` · `index.html` |
@@ -42,6 +43,7 @@ Active product-shell routing (ownership index). Product invariants live in
 | Doc drift | `scripts/check_doc_drift.py` |
 | Headless spatial smoke | `scripts/smoke-headless.ps1` |
 | Relief render scale bench | `scripts/bench-render-scale.mjs` + `docs/perf/` |
+| Mature-map authoring bench (N-039) | `scripts/bench-authoring-performance*.mjs` · `crates/web/bench-hooks.js` · `docs/perf/large-map-authoring-report.json` |
 
 `archive/map-v2/` is research material only — not an active routing target.
 See `archive/map-v2/README.md`.
